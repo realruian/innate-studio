@@ -1,6 +1,6 @@
 // 素材：缩略图、上传、选择素材的弹窗、素材库页面。
 
-import { h, toast, openModal, copyText, clear, add, fmtTime, fmtBytes, segmented } from './dom.js';
+import { h, toast, openModal, copyText, clear, add, fmtTime, fmtBytes, segmented, dropdown } from './dom.js';
 import {
   api, ApiError, state, on, KINDS, kindOfType,
   loadAssets, rememberAsset, refreshAsset, loadPersons, loadPersonAssets, assetReadiness,
@@ -320,11 +320,15 @@ export function openAssetPicker({ kind, remaining = 1, usedIds = [], onPick }) {
       return;
     }
     if (!active.some((p) => p.id === personId)) personId = active[0].id;
-    const select = h(
-      'select',
-      { class: 'input', onChange: () => { personId = select.value; renderPersonPane(); } },
-      active.map((p) => h('option', { value: p.id, selected: p.id === personId }, p.name || p.id)),
-    );
+    const select = dropdown({
+      label: '真人档案',
+      value: personId,
+      options: active.map((p) => ({ value: p.id, label: p.name || p.id })),
+      onChange: (id) => {
+        personId = id;
+        renderPersonPane();
+      },
+    });
     const listEl = h('div', null, h('div', { class: 'empty small-empty' }, '正在读取素材…'));
     pane.append(h('label', { class: 'field-label' }, '真人档案'), select, listEl);
     try {
@@ -476,7 +480,7 @@ export function assetCard(asset, { onDelete, onRefresh } = {}) {
     h(
       'div',
       { class: 'asset-info' },
-      h('div', { class: 'asset-name ellipsis', title: asset.name || asset.id }, asset.name || asset.id),
+      h('div', { class: 'asset-name ellipsis', clipTitle: asset.name || asset.id }, asset.name || asset.id),
       h('div', { class: 'muted small' }, `${KINDS[kind].label} · ${fmtTime(asset.created_at ? asset.created_at * 1000 : asset.addedAt)}`),
       models.length
         ? h('div', { class: 'entry-meta' }, `可用模型：${models.join('、')}`)

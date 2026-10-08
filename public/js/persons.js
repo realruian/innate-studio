@@ -246,7 +246,7 @@ export function renderPersons(root) {
         { class: 'row wrap' },
         h('button', { class: 'btn', onClick: () => loadPersons().then(() => select(person.id)) }, '刷新状态'),
         h('button', { class: 'btn', onClick: () => newVerification(person) }, '新的认证链接'),
-        h('button', { class: 'btn btn-primary', disabled: !active, title: active ? '' : '档案认证通过后才能添加素材', onClick: () => openAddPersonAsset(person) }, '添加素材'),
+        h('button', { class: 'btn btn-primary', disabled: !active, onClick: () => openAddPersonAsset(person) }, '添加素材'),
       ),
       !active &&
         h(

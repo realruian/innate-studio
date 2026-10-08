@@ -1,28 +1,42 @@
-// 设置弹窗：保存 / 清除 API Key，测试连接。
+// 设置弹窗：外观、API Key。
 
-import { h, toast, clear, openModal, confirmDialog } from './dom.js';
+import { h, toast, clear, openModal, confirmDialog, segmented, formRow } from './dom.js';
 import { api, state, loadApp, loadModels } from './store.js';
+import { currentTheme, setTheme } from './theme.js';
 
 export function openSettings() {
-  const statusEl = h('div');
-  const input = h('input', { class: 'input mono', type: 'password', placeholder: 'sk-fk-…', autocomplete: 'off', spellcheck: 'false' });
-  const saveBtn = h('button', { class: 'btn btn-primary', onClick: save }, '保存');
+  const themeEl = h('div');
+  const statusEl = h('div', { class: 'form-section' });
+  const input = h('input', { class: 'input mono masked', type: 'text', placeholder: 'sk-fk-…', autocomplete: 'off', 'data-1p-ignore': true, 'data-lpignore': 'true', 'aria-label': 'Flatkey API Key' });
+  const revealBtn = h('button', { class: 'btn', type: 'button', onClick: () => reveal(input.classList.contains('masked')) }, '显示');
+  const saveBtn = h('button', { class: 'btn btn-primary', type: 'button', onClick: save }, '保存');
+  const removeBtn = h('button', { class: 'btn', type: 'button', onClick: remove }, '清除已保存的 Key');
   const testEl = h('div', { class: 'small' });
-  const showBox = h('input', { type: 'checkbox', onChange: (e) => { input.type = e.target.checked ? 'text' : 'password'; } });
-  const removeBtn = h('button', { class: 'btn', onClick: remove }, '清除已保存的 Key');
+
+  // 输入框默认遮住内容；显示出来是为了核对粘贴的到底是不是 Key。
+  function reveal(show) {
+    input.classList.toggle('masked', !show);
+    revealBtn.textContent = show ? '隐藏' : '显示';
+  }
+
+  function drawTheme() {
+    clear(themeEl).append(
+      segmented([{ value: 'light', label: '浅色' }, { value: 'dark', label: '深色' }], currentTheme(), (theme) => {
+        setTheme(theme);
+        drawTheme();
+      }),
+    );
+  }
 
   function drawStatus() {
     const { hasKey, keyHint, keySource, baseUrl } = state.app;
     clear(statusEl).append(
-      h(
-        'div',
-        { class: `notice ${hasKey ? 'notice-ok' : 'notice-warn'}` },
-        h('span', null, hasKey ? `当前使用的 Key：${keyHint}${keySource === 'env' ? '（来自环境变量 FLATKEY_API_KEY）' : ''}` : '还没有设置 API Key，设置后才能生成视频。'),
-      ),
-      h('div', { class: 'small muted' }, `接口地址：${baseUrl}`),
+      formRow('当前 Key', h('span', { class: hasKey ? 'mono' : 'warn-text' }, hasKey ? `${keyHint}${keySource === 'env' ? '（来自环境变量）' : ''}` : '还没有设置')),
+      formRow('接口地址', h('span', { class: 'mono' }, baseUrl)),
     );
     input.disabled = keySource === 'env';
     saveBtn.disabled = keySource === 'env';
+    revealBtn.disabled = keySource === 'env';
     removeBtn.hidden = keySource !== 'file';
   }
 
@@ -47,8 +61,7 @@ export function openSettings() {
     const value = input.value.trim();
     if (!value) return toast('请粘贴你的 API Key', 'error');
     if (/[^\x21-\x7e]/.test(value)) {
-      input.type = 'text';
-      showBox.checked = true;
+      reveal(true);
       return toast('这不像是 API Key：里面有中文或空格，可能是剪贴板里的其他内容。请复制 Flatkey 控制台里以 sk-fk- 开头的那一串。', 'error', 8000);
     }
     if (!value.startsWith('sk-fk-')) {
@@ -59,6 +72,7 @@ export function openSettings() {
     try {
       state.app = await api('PUT', '/api/key', { apiKey: value });
       input.value = '';
+      reveal(false);
       await loadApp();
       drawStatus();
       toast('API Key 已保存', 'success');
@@ -90,10 +104,11 @@ export function openSettings() {
     title: '设置',
     size: 'md',
     content: [
+      h('div', { class: 'section-title' }, '外观'),
+      h('div', { class: 'form-section' }, formRow('主题', themeEl)),
+      h('div', { class: 'section-title' }, 'Flatkey API Key'),
       statusEl,
-      h('label', { class: 'field-label' }, 'Flatkey API Key'),
-      h('div', { class: 'row' }, input, saveBtn),
-      h('label', { class: 'check' }, showBox, '显示我粘贴的内容，方便核对'),
+      h('div', { class: 'row' }, input, revealBtn, saveBtn),
       h(
         'p',
         { class: 'small muted' },
@@ -101,14 +116,10 @@ export function openSettings() {
         h('a', { href: 'https://console.flatkey.ai/keys?lng=zh', target: '_blank', rel: 'noopener' }, 'Flatkey 控制台'),
         ' 里可以创建 Key。',
       ),
-      h(
-        'div',
-        { class: 'row wrap' },
-        h('button', { class: 'btn', onClick: test }, '测试连接'),
-        removeBtn,
-      ),
+      h('div', { class: 'row wrap' }, h('button', { class: 'btn', type: 'button', onClick: test }, '测试连接'), removeBtn),
       testEl,
     ],
   });
+  drawTheme();
   drawStatus();
 }

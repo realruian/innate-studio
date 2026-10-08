@@ -1,24 +1,25 @@
-// 入口：侧边栏、页面切换、启动轮询。
+// 入口：侧边栏（导航和设置）、页面切换、启动轮询。
 
-import { h, icon, clear, add, toast, fmtAgo } from './dom.js';
-import { state, on, loadApp, loadModels, loadAssets, startHistoryLoop, startAssetLoop, isPendingTask } from './store.js';
+import { h, icon, clear, add, toast } from './dom.js';
+import { state, on, loadApp, loadModels, loadAssets, startHistoryLoop, startAssetLoop } from './store.js';
 import { renderComposer, focusComposer } from './composer.js';
-import { renderHistory, openDetail } from './history.js';
+import { renderHistory } from './history.js';
 import { renderLibrary } from './assets.js';
 import { renderPersons, enterPersons } from './persons.js';
 import { openSettings } from './settings.js';
 
+// 「新建创作」是一个动作按钮，不是页签，所以始终是凸起的样子，不参与"当前页"高亮。
 const VIEWS = [
-  { id: 'create', label: '新建创作', icon: 'plus' },
+  { id: 'create', label: '新建创作', icon: 'plus', action: true },
   { id: 'library', label: '素材库', icon: 'folder' },
   { id: 'persons', label: '真人档案', icon: 'user' },
 ];
-const RECENT_LIMIT = 40;
+const BRAND_MARK =
+  '<svg viewBox="0 0 20 20" width="20" height="20"><rect width="20" height="20" rx="6" fill="currentColor"/><path d="M8 6.3v7.4l6-3.7z" fill="var(--bg-side)"/></svg>';
 
 const app = document.getElementById('app');
 const nav = h('nav', { class: 'nav' });
-const recent = h('div', { class: 'side-list' });
-const keyButton = h('button', { class: 'key-status', type: 'button', onClick: openSettings });
+const settingsButton = h('button', { class: 'nav-item', type: 'button', onClick: openSettings });
 const views = {
   create: h('div', { class: 'view view-create' }),
   library: h('div', { class: 'view', hidden: true }),
@@ -48,7 +49,12 @@ function drawNav() {
     VIEWS.map((v) =>
       h(
         'button',
-        { class: `nav-item ${state.view === v.id ? 'active' : ''}`, type: 'button', 'aria-current': state.view === v.id ? 'page' : null, onClick: () => show(v.id) },
+        {
+          class: `nav-item ${v.action ? 'nav-new' : ''} ${!v.action && state.view === v.id ? 'active' : ''}`,
+          type: 'button',
+          'aria-current': !v.action && state.view === v.id ? 'page' : null,
+          onClick: () => show(v.id),
+        },
         icon(v.icon),
         h('span', null, v.label),
       ),
@@ -56,58 +62,25 @@ function drawNav() {
   );
 }
 
-// 侧栏的「最近生成」：标题是提示词，右侧是进行状态或完成时间。
-function drawRecent() {
-  clear(recent);
-  const items = state.history.slice(0, RECENT_LIMIT);
-  if (!items.length) {
-    recent.append(h('div', { class: 'side-empty' }, state.historyLoaded ? '还没有生成记录' : '正在读取…'));
-    return;
-  }
-  add(
-    recent,
-    items.map((item) => {
-      let meta = h('span', { class: 'side-row-meta' }, fmtAgo(item.completedAt || item.createdAt));
-      if (isPendingTask(item)) meta = h('span', { class: 'spinner', title: '生成中' });
-      else if (item.status === 'failed') meta = h('span', { class: 'dot dot-err', title: '生成失败' });
-      return h(
-        'button',
-        { class: 'side-row', type: 'button', title: item.prompt || '', onClick: () => openDetail(item.id) },
-        h('span', { class: 'side-row-text' }, item.prompt || '（没有提示词）'),
-        meta,
-      );
-    }),
-  );
-}
-
-function drawKey() {
-  const { hasKey, keyHint } = state.app;
-  clear(keyButton).append(
-    icon('gear'),
-    h('span', { class: 'key-label' }, '设置'),
-    h('span', { class: 'key-value' }, hasKey ? keyHint : '未设置 Key'),
-    h('span', { class: `dot ${hasKey ? 'dot-ok' : 'dot-warn'}` }),
-  );
+// 设置入口只在缺少 API Key 时带一个提醒点；Key 的具体内容放在设置里看。
+function drawSettingsButton() {
+  add(clear(settingsButton), icon('gear'), h('span', null, '设置'), !state.app.hasKey && h('span', { class: 'dot dot-warn nav-dot', title: '还没有设置 API Key' }));
 }
 
 app.append(
   h(
     'aside',
     { class: 'sidebar' },
-    h('div', { class: 'brand' }, 'Seedance Studio'),
+    h('div', { class: 'brand' }, h('span', { class: 'brand-mark', 'aria-hidden': 'true', html: BRAND_MARK }), 'Seedance Studio'),
     nav,
-    h('div', { class: 'side-title' }, '最近生成'),
-    recent,
-    h('div', { class: 'sidebar-foot' }, keyButton),
+    h('div', { class: 'sidebar-foot' }, settingsButton),
   ),
   h('main', { class: 'main' }, views.create, views.library, views.persons),
 );
 
-on('app', drawKey);
-on('history', drawRecent);
+on('app', drawSettingsButton);
 drawNav();
-drawKey();
-drawRecent();
+drawSettingsButton();
 
 async function start() {
   try {
@@ -131,8 +104,5 @@ on('app', () => {
   if (hadKey === false && state.app.hasKey) loadModels().catch(() => {});
   hadKey = state.app.hasKey;
 });
-
-// 每分钟刷新一次侧栏里的相对时间。
-setInterval(drawRecent, 60000);
 
 start();

@@ -3,14 +3,19 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="dark">
+  <meta name="color-scheme" content="dark light">
+  <script>
+    // 在样式生效前就定好主题，避免打开时先闪一下深色。
+    try { document.documentElement.dataset.theme = localStorage.getItem('seedance-studio.theme') === 'light' ? 'light' : 'dark'; } catch { document.documentElement.dataset.theme = 'dark'; }
+  </script>
   <title>Seedance Studio</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23ededed'/%3E%3Cpath d='M13 10.5v11l9-5.5z' fill='%230f0f0f'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="/styles.css">
 </head>
-<body>
+<body spellcheck="false">
   <div id="app"></div>
   <div id="modal-root"></div>
+  <div id="layer-root"></div>
   <div id="toast-root" aria-live="polite"></div>
   <script type="module" src="/js/main.js"></script>
 </body>

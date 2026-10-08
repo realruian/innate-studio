@@ -1,9 +1,10 @@
 // 创作记录：任务进度、播放、下载、复用参数、详情。
 
-import { h, toast, clear, openModal, confirmDialog, copyText, fmtTime, fmtDuration, fmtBytes, segmented } from './dom.js';
+import { h, toast, clear, openModal, confirmDialog, copyText, fmtTime, fmtDuration, fmtBytes, segmented, disclosure } from './dom.js';
 import { api, state, on, loadHistory, isPendingTask } from './store.js';
 import { thumbEl } from './assets.js';
 import { setForm } from './composer.js';
+import { videoPlayer } from './player.js';
 
 const MODE_LABELS = { text: '文生视频', frames: '首尾帧', reference: '参考生成' };
 const STATUS_LABELS = { queued: '排队中', in_progress: '生成中', completed: '已完成', failed: '失败' };
@@ -72,12 +73,12 @@ async function refresh(item) {
 
 function downloadLink(item, children, cls) {
   const href = item.savedLocally ? `${item.videoUrl}?download=1` : item.videoUrl;
-  return h('a', { class: cls, href, download: item.savedLocally ? '' : null, target: item.savedLocally ? null : '_blank', rel: 'noopener', title: '下载视频' }, children);
+  return h('a', { class: cls, href, download: item.savedLocally ? '' : null, target: item.savedLocally ? null : '_blank', rel: 'noopener' }, children);
 }
 
 function mediaBox(item, large = false) {
   if (item.status === 'completed' && item.videoUrl) {
-    return h('video', { class: 'card-video', src: item.videoUrl, controls: true, preload: 'metadata', playsinline: true, loop: true, autoplay: large });
+    return videoPlayer({ src: item.videoUrl, autoplay: large, clickToPlay: large, label: item.prompt || '生成的视频' });
   }
   if (item.status === 'failed') {
     return h(
@@ -101,40 +102,47 @@ function mediaBox(item, large = false) {
   );
 }
 
-function buildCard(item) {
+function cardBody(item) {
   const refs = refsOf(item);
   const done = item.status === 'completed' && item.videoUrl;
   return h(
-    'article',
-    { class: `card status-${item.status}` },
-    h('div', { class: 'card-media' }, mediaBox(item)),
+    'div',
+    { class: 'card-body' },
+    h('p', { class: 'card-prompt', clipTitle: item.prompt }, item.prompt || h('span', { class: 'muted' }, '（没有提示词）')),
+    h('div', { class: 'entry-meta' }, paramChips(item).join(' · ')),
+    refs.length ? h('div', { class: 'card-refs' }, refs.slice(0, 8).map((r) => h('span', { class: 'mini-thumb', title: r.name }, thumbEl(r.thumb, r.kind)))) : null,
     h(
       'div',
-      { class: 'card-body' },
-      h('p', { class: 'card-prompt', title: item.prompt }, item.prompt || h('span', { class: 'muted' }, '（没有提示词）')),
-      h('div', { class: 'entry-meta' }, paramChips(item).join(' · ')),
-      refs.length ? h('div', { class: 'card-refs' }, refs.slice(0, 8).map((r) => h('span', { class: 'mini-thumb', title: r.name }, thumbEl(r.thumb, r.kind)))) : null,
+      { class: 'card-foot' },
+      h('span', { class: 'small muted' }, fmtTime(item.createdAt)),
       h(
         'div',
-        { class: 'card-foot' },
-        h('span', { class: 'small muted' }, fmtTime(item.createdAt)),
-        h(
-          'div',
-          { class: 'card-actions' },
-          done && downloadLink(item, '下载', 'entry-action-btn'),
-          isPendingTask(item) && h('button', { class: 'entry-action-btn', type: 'button', title: '立即查询状态', onClick: () => refresh(item) }, '刷新'),
-          h('button', { class: 'entry-action-btn', type: 'button', title: '把这次的参数填回创作面板', onClick: () => reuse(item) }, '复用'),
-          h('button', { class: 'entry-action-btn', type: 'button', onClick: () => openDetail(item.id) }, '详情'),
-          h('button', { class: 'entry-action-btn danger', type: 'button', onClick: () => removeItem(item) }, '删除'),
-        ),
+        { class: 'card-actions' },
+        done && downloadLink(item, '下载', 'entry-action-btn'),
+        isPendingTask(item) && h('button', { class: 'entry-action-btn', type: 'button', title: '立即查询状态', onClick: () => refresh(item) }, '刷新'),
+        h('button', { class: 'entry-action-btn', type: 'button', title: '把这次的参数填回创作面板', onClick: () => reuse(item) }, '复用'),
+        h('button', { class: 'entry-action-btn', type: 'button', onClick: () => openDetail(item.id) }, '详情'),
+        h('button', { class: 'entry-action-btn danger', type: 'button', onClick: () => removeItem(item) }, '删除'),
       ),
     ),
+  );
+}
+
+function buildCard(item) {
+  return h(
+    'article',
+    { class: `card status-${item.status}` },
+    // 点画面打开详情；控制条上的按钮各管各的，不算在内。
+    h('div', { class: 'card-media', onClick: (e) => !e.target.closest('.player-bar') && openDetail(item.id) }, mediaBox(item)),
+    cardBody(item),
   );
 }
 
 export function openDetail(id) {
   const item = state.history.find((i) => i.id === id);
   if (!item) return;
+  // 详情里的视频会自动播放，先停掉列表里正在放的，免得两个声音叠在一起。
+  for (const video of document.querySelectorAll('.card video')) video.pause();
   const p = item.payload || {};
   const refs = refsOf(item);
   const rows = [
@@ -183,7 +191,7 @@ export function openDetail(id) {
           h('button', { class: 'btn', onClick: () => reuse(item) }, '复用参数'),
           !item.savedLocally && item.status === 'completed' && h('button', { class: 'btn', onClick: () => refresh(item).then(() => toast('已重新尝试保存', 'info')) }, '重新保存到本机'),
         ),
-        h('details', { class: 'preview' }, h('summary', null, '查看发送的请求'), h('pre', { class: 'code' }, JSON.stringify(p, null, 2))),
+        disclosure('查看发送的请求', h('pre', { class: 'code' }, JSON.stringify(p, null, 2))),
       ),
     ),
   });
@@ -203,7 +211,10 @@ function describeSuperResolution(sr) {
     .join(' · ');
 }
 
-const cardSignature = (i) => JSON.stringify([i.status, i.progress, i.videoUrl, i.error?.message, i.pollError]);
+// 画面和文字分开判断要不要重画。视频存到本机后地址会变，这时只更新下面的文字和下载链接，
+// 不动画面：重建画面会打断正在播放的视频。
+const mediaSignature = (i) => JSON.stringify([i.status, i.progress, Boolean(i.videoUrl), i.error?.message, i.pollError]);
+const bodySignature = (i) => JSON.stringify([i.videoUrl, i.savedLocally]);
 
 export function renderHistory(root) {
   const grid = h('div', { class: 'card-grid' });
@@ -272,21 +283,18 @@ export function renderHistory(root) {
     }
     grid.querySelector('.empty')?.remove();
     let previous = null;
-    let entered = 0;
     for (const item of list) {
-      const signature = cardSignature(item);
+      const media = mediaSignature(item);
+      const body = bodySignature(item);
       let entry = cards.get(item.id);
-      if (!entry || entry.signature !== signature) {
+      if (!entry || entry.media !== media) {
         const el = buildCard(item);
-        if (entry) {
-          entry.el.replaceWith(el);
-        } else {
-          el.classList.add('entering');
-          el.style.animationDelay = `${Math.min(entered * 50, 400)}ms`;
-          entered += 1;
-        }
-        entry = { el, signature };
+        if (entry) entry.el.replaceWith(el);
+        entry = { el, media, body };
         cards.set(item.id, entry);
+      } else if (entry.body !== body) {
+        entry.el.querySelector('.card-body').replaceWith(cardBody(item));
+        entry.body = body;
       }
       const expectedNext = previous ? previous.nextSibling : grid.firstChild;
       if (expectedNext !== entry.el) grid.insertBefore(entry.el, expectedNext);
