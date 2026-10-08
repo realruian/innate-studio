@@ -177,7 +177,7 @@ if (pinned) {
   else if (playing.paused || playing.time <= 0) problems.push(`点了播放但视频没有动：${JSON.stringify(playing)}`);
   else if (playing.fill <= 0 || playing.label.startsWith('0:00 / 0:00')) problems.push(`播放时进度和时间没有更新：${JSON.stringify(playing)}`);
 
-  // 视频存到本机后，记录里的视频地址会变。这时只该更新下载链接，不能打断正在播放的画面。
+  // 视频存到本机后，记录里的视频地址会变。这时不能打断正在播放的画面。
   const kept = await pg.evaluate(async (sel) => {
     // 取页面自己的状态模块。Aside 的脚本环境不允许直接写动态导入，所以拼出来再调用。
     const load = new Function('url', 'return imp' + 'ort(url)');
@@ -189,12 +189,9 @@ if (pinned) {
     item.videoUrl = `${original}?v=2`;
     emit('history');
     const sameVideo = document.querySelector(`${sel} video`) === video && !video.paused;
-    const link = document.querySelector(`${sel} a.entry-action-btn`)?.getAttribute('href') || '';
     item.videoUrl = original;
     emit('history');
-    if (!sameVideo) return '视频地址更新时，正在播放的画面被打断了';
-    if (!link.includes('?v=2')) return `视频地址更新后，下载链接没有跟着变：${link}`;
-    return 'ok';
+    return sameVideo ? 'ok' : '视频地址更新时，正在播放的画面被打断了';
   }, P);
   if (kept !== 'ok') problems.push(kept);
 
@@ -205,6 +202,51 @@ if (pinned) {
   await sleep(200);
   if (!(await pg.evaluate((sel) => document.querySelector(`${sel} video`)?.paused, P))) problems.push('点了暂停但还在播放');
   await shot('01b-player');
+
+  // 2b. 卡片：下面只有两行字；控制条和「更多」只在鼠标移到画面上时出现；操作都在「更多」的菜单里
+  const cardLook = () =>
+    pg.evaluate((sel) => {
+      const card = document.querySelector(sel);
+      return {
+        bar: getComputedStyle(card.querySelector('.player-bar')).opacity,
+        more: getComputedStyle(card.querySelector('.card-more')).opacity,
+        lines: card.querySelector('.card-body').children.length,
+        buttonsBelow: card.querySelectorAll('.card-body button, .card-body a').length,
+        promptLines: Math.round(card.querySelector('.card-prompt').getBoundingClientRect().height / parseFloat(getComputedStyle(card.querySelector('.card-prompt')).lineHeight)),
+      };
+    }, P);
+  await pg.locator('.brand').hover();
+  await sleep(350);
+  const away = await cardLook();
+  if (away.bar !== '0' || away.more !== '0') problems.push(`鼠标不在卡片上时，控制条和「更多」应该隐藏：${JSON.stringify(away)}`);
+  if (away.lines !== 2 || away.promptLines !== 1 || away.buttonsBelow) problems.push(`卡片下方应该只有两行字、没有按钮：${JSON.stringify(away)}`);
+  await pg.locator(`${P} .card-media`).hover();
+  await sleep(350);
+  const over = await cardLook();
+  if (over.bar !== '1' || over.more !== '1') problems.push(`鼠标移到画面上时，控制条和「更多」应该出现：${JSON.stringify(over)}`);
+  await pg.locator(`${P} .card-more`).click();
+  await sleep(300);
+  const cardMenu = await pg.evaluate((sel) => {
+    const menu = document.querySelector('.menu');
+    const button = document.querySelector(`${sel} .card-more`);
+    return menu && { items: [...menu.querySelectorAll('.menu-item')].map((e) => e.textContent.trim()).join('|'), aligned: Math.abs(menu.getBoundingClientRect().right - button.getBoundingClientRect().right) <= 1, buttonShown: getComputedStyle(button).opacity };
+  }, P);
+  if (!cardMenu) problems.push('点卡片的「更多」没有打开菜单');
+  else {
+    if (cardMenu.items !== '下载|复用|详情|删除') problems.push(`已完成卡片的菜单项不对：${cardMenu.items}`);
+    if (!cardMenu.aligned) problems.push('「更多」的菜单没有和按钮右对齐');
+  }
+  if (await count('.modal')) problems.push('点「更多」不应该打开详情');
+  await audit('卡片的更多菜单');
+  await shot('01c-card-menu');
+  await pg.locator('.brand').hover();
+  await sleep(350);
+  if (cardMenu && (await pg.evaluate((sel) => getComputedStyle(document.querySelector(`${sel} .card-more`)).opacity, P)) !== '1') problems.push('菜单开着的时候，鼠标移开后「更多」按钮不应该消失');
+  await must('从菜单进详情', clickText('.menu .menu-item', '详情'));
+  await sleep(500);
+  if ((await text('.modal h2')).join('') !== '生成详情') problems.push('菜单里的「详情」没有打开详情');
+  await escape();
+  await sleep(200);
 } else {
   problems.push('创作记录里没有已完成的视频，播放器没有测到');
 }
@@ -363,6 +405,11 @@ const stillPlaying = await pg.evaluate(() => [...document.querySelectorAll('.car
 if (stillPlaying) problems.push('打开详情后，列表里的视频还在播放');
 await escape();
 await sleep(200);
+await must('打开生成中卡片的更多', click('.view-create .card:first-child .card-more', 0));
+await sleep(300);
+if ((await text('.menu .menu-item')).join('|') !== '刷新|复用|详情|删除') problems.push(`生成中卡片的菜单项不对：${(await text('.menu .menu-item')).join('|')}`);
+await escape();
+await sleep(200);
 await must('点生成中卡片的画面', click('.card .card-state.is-pending', 0));
 await sleep(400);
 if ((await text('.modal h2')).join('') !== '生成详情') problems.push('点生成中的卡片没有打开详情');
@@ -381,8 +428,11 @@ await shot('07-detail');
 await escape();
 await sleep(200);
 if (await count('.modal')) problems.push('Esc 没有关掉详情弹窗');
-await must('点删除', click('.card .entry-action-btn.danger', (await count('.card')) - 1));
+await must('打开最后一张卡片的更多', click('.view-create .card .card-more', (await count('.view-create .card')) - 1));
 await sleep(300);
+await must('点菜单里的删除', clickText('.menu .menu-item', '删除'));
+await sleep(300);
+if (!(await text('.modal h2')).join('').includes('删除这条记录')) problems.push('菜单里的「删除」没有弹出确认');
 await audit('删除确认');
 await shot('08-confirm');
 await must('取消删除', clickText('.modal .btn', '取消'));

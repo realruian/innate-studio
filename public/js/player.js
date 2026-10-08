@@ -1,5 +1,5 @@
 // 视频播放器。不用浏览器自带的播放控件（它的样式和菜单由浏览器决定，和界面不是一套）。
-// 控制条：播放/暂停、时间、进度、静音、全屏。下载在卡片的操作里，不放进播放器。
+// 控制条：播放/暂停、时间、进度、静音、全屏，鼠标移到画面上才出现。下载在卡片的「更多」里，不放进播放器。
 // clickToPlay 为 false 时点画面不播放：创作记录的卡片里，点画面是打开详情，播放只走播放键。
 
 import { h, icon } from './dom.js';
@@ -20,7 +20,7 @@ export function videoPlayer({ src, autoplay = false, label = '视频', clickToPl
   const track = h('div', { class: 'player-track', role: 'slider', tabindex: '0', 'aria-label': '播放进度', 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': '0' }, rail);
   const root = h(
     'div',
-    { class: 'player paused', role: 'group', 'aria-label': label },
+    { class: 'player', role: 'group', 'aria-label': label },
     video,
     h('div', { class: 'player-bar' }, playButton, time, track, muteButton, fullButton),
   );
@@ -65,14 +65,12 @@ export function videoPlayer({ src, autoplay = false, label = '视频', clickToPl
     if (root.isConnected && !video.paused) frame = requestAnimationFrame(follow);
   };
   video.addEventListener('play', () => {
-    root.classList.remove('paused');
     playButton.replaceChildren(icon('pause', 16));
     playButton.setAttribute('aria-label', '暂停');
     cancelAnimationFrame(frame);
     follow();
   });
   video.addEventListener('pause', () => {
-    root.classList.add('paused');
     playButton.replaceChildren(icon('play', 16));
     playButton.setAttribute('aria-label', '播放');
     cancelAnimationFrame(frame);

@@ -1,7 +1,7 @@
 // 生成记录：任务进度、播放、下载、复用参数、详情。
 // 有两处用到：创作页输入框下面的「最近生成」（只列最新几条），和单独的「创作记录」页（全部，带筛选和搜索）。
 
-import { h, toast, clear, openModal, confirmDialog, copyText, fmtTime, fmtDuration, fmtBytes, segmented } from './dom.js';
+import { h, icon, toast, clear, openModal, openMenu, confirmDialog, copyText, fmtTime, fmtDuration, fmtBytes, segmented } from './dom.js';
 import { api, state, on, loadHistory, isPendingTask, goTo } from './store.js';
 import { thumbEl } from './assets.js';
 import { setForm } from './composer.js';
@@ -27,11 +27,10 @@ function refsOf(item) {
   return [];
 }
 
-function paramChips(item) {
+// 卡片下方那行小字：只留最能区分两条记录的三项，其余参数在详情里。
+function cardSummary(item) {
   const p = item.payload || {};
-  const chips = [MODE_LABELS[modeOf(item)], item.model, p.resolution, p.ratio === 'adaptive' ? '自适应' : p.ratio, p.duration === -1 ? '时长自动' : p.duration && `${p.duration} 秒`];
-  if (p.super_resolution_config) chips.push('超分');
-  return chips.filter(Boolean);
+  return [MODE_LABELS[modeOf(item)], p.resolution, p.duration === -1 ? '时长自动' : p.duration && `${p.duration} 秒`].filter(Boolean).join(' · ');
 }
 
 async function removeItem(item) {
@@ -76,6 +75,38 @@ function downloadLink(item, children, cls) {
   return h('a', { class: cls, href, download: item.savedLocally ? '' : null, target: item.savedLocally ? null : '_blank', rel: 'noopener' }, children);
 }
 
+function download(item) {
+  const link = downloadLink(item);
+  document.body.append(link);
+  link.click();
+  link.remove();
+}
+
+// 卡片右上角的「更多」。菜单内容按点开那一刻的状态来定：生成中的可以刷新，已完成的可以下载。
+function openCardMenu(button, id) {
+  const item = state.history.find((i) => i.id === id);
+  if (!item) return;
+  const actions = {
+    download: () => download(item),
+    refresh: () => refresh(item),
+    reuse: () => reuse(item),
+    detail: () => openDetail(item.id),
+    remove: () => removeItem(item),
+  };
+  openMenu(button, {
+    label: '更多操作',
+    align: 'end',
+    items: [
+      item.status === 'completed' && item.videoUrl && { value: 'download', label: '下载' },
+      isPendingTask(item) && { value: 'refresh', label: '刷新' },
+      { value: 'reuse', label: '复用' },
+      { value: 'detail', label: '详情' },
+      { value: 'remove', label: '删除', danger: true },
+    ].filter(Boolean),
+    onSelect: (value) => actions[value](),
+  });
+}
+
 function mediaBox(item, large = false) {
   if (item.status === 'completed' && item.videoUrl) {
     return videoPlayer({ src: item.videoUrl, autoplay: large, clickToPlay: large, label: item.prompt || '生成的视频' });
@@ -102,40 +133,24 @@ function mediaBox(item, large = false) {
   );
 }
 
-function cardBody(item) {
-  const refs = refsOf(item);
-  const done = item.status === 'completed' && item.videoUrl;
-  return h(
-    'div',
-    { class: 'card-body' },
-    h('p', { class: 'card-prompt', clipTitle: item.prompt }, item.prompt || h('span', { class: 'muted' }, '（没有提示词）')),
-    h('div', { class: 'entry-meta' }, paramChips(item).join(' · ')),
-    refs.length ? h('div', { class: 'card-refs' }, refs.slice(0, 8).map((r) => h('span', { class: 'mini-thumb', title: r.name }, thumbEl(r.thumb, r.kind)))) : null,
-    h(
-      'div',
-      { class: 'card-foot' },
-      h('span', { class: 'small muted' }, fmtTime(item.createdAt)),
-      h(
-        'div',
-        { class: 'card-actions' },
-        done && downloadLink(item, '下载', 'entry-action-btn'),
-        isPendingTask(item) && h('button', { class: 'entry-action-btn', type: 'button', title: '立即查询状态', onClick: () => refresh(item) }, '刷新'),
-        h('button', { class: 'entry-action-btn', type: 'button', title: '把这次的参数填回创作面板', onClick: () => reuse(item) }, '复用'),
-        h('button', { class: 'entry-action-btn', type: 'button', onClick: () => openDetail(item.id) }, '详情'),
-        h('button', { class: 'entry-action-btn danger', type: 'button', onClick: () => removeItem(item) }, '删除'),
-      ),
-    ),
-  );
-}
-
+// 一张卡片：画面，下面两行字（提示词；模式、分辨率、时长和时间）。
+// 操作都收在画面右上角的「更多」里，鼠标移上去才出现；点画面打开详情。
 function buildCard(item) {
-  return h(
+  const mediaEl = mediaBox(item);
+  const more = h('button', { class: 'card-more', type: 'button', title: '更多', 'aria-label': '更多操作', 'aria-haspopup': 'menu', 'aria-expanded': 'false', onClick: () => openCardMenu(more, item.id) }, icon('more', 16));
+  const el = h(
     'article',
     { class: `card status-${item.status}` },
-    // 点画面打开详情；控制条上的按钮各管各的，不算在内。
-    h('div', { class: 'card-media', onClick: (e) => !e.target.closest('.player-bar') && openDetail(item.id) }, mediaBox(item)),
-    cardBody(item),
+    // 控制条和「更多」上的点击各管各的，不算在"点画面打开详情"里。
+    h('div', { class: 'card-media', onClick: (e) => !e.target.closest('.player-bar, .card-more') && openDetail(item.id) }, mediaEl, more),
+    h(
+      'div',
+      { class: 'card-body' },
+      h('p', { class: 'card-prompt', clipTitle: item.prompt }, item.prompt || h('span', { class: 'muted' }, '（没有提示词）')),
+      h('div', { class: 'card-meta' }, h('span', { class: 'ellipsis' }, cardSummary(item)), h('span', null, fmtTime(item.createdAt))),
+    ),
   );
+  return { el, mediaEl };
 }
 
 export function openDetail(id) {
@@ -180,7 +195,7 @@ export function openDetail(id) {
         h('div', { class: 'field-label' }, '提示词'),
         h('p', { class: 'detail-prompt' }, item.prompt || '（没有提示词）'),
         refs.length
-          ? [h('div', { class: 'field-label' }, '参考素材'), h('div', { class: 'card-refs' }, refs.map((r) => h('span', { class: 'mini-thumb lg', title: r.name }, thumbEl(r.thumb, r.kind))))]
+          ? [h('div', { class: 'field-label' }, '参考素材'), h('div', { class: 'card-refs' }, refs.map((r) => h('span', { class: 'mini-thumb', title: r.name }, thumbEl(r.thumb, r.kind))))]
           : null,
         h('dl', { class: 'kv' }, rows.map(([k, v]) => [h('dt', null, k), h('dd', null, v)])),
         h(
@@ -220,12 +235,10 @@ function describeSuperResolution(sr) {
     .join(' · ');
 }
 
-// 画面和文字分开判断要不要重画。视频存到本机后地址会变，这时只更新下面的文字和下载链接，
-// 不动画面：重建画面会打断正在播放的视频。
+// 画面要不要重画，看这几项有没有变。视频存到本机后地址会变，但画面不用重画：重画会打断正在播放的视频。
 const mediaSignature = (i) => JSON.stringify([i.status, i.progress, Boolean(i.videoUrl), i.error?.message, i.pollError]);
-const bodySignature = (i) => JSON.stringify([i.videoUrl, i.savedLocally]);
 
-// 把一组记录画成卡片网格。只重画有变化的卡片，正在播放的视频不会被打断。
+// 把一组记录画成卡片网格。只重画有变化的部分，正在播放的视频不会被打断。
 function cardGrid(emptyState) {
   const grid = h('div', { class: 'card-grid' });
   const cards = new Map();
@@ -247,16 +260,17 @@ function cardGrid(emptyState) {
     let previous = null;
     for (const item of list) {
       const media = mediaSignature(item);
-      const body = bodySignature(item);
       let entry = cards.get(item.id);
-      if (!entry || entry.media !== media) {
-        const el = buildCard(item);
-        if (entry) entry.el.replaceWith(el);
-        entry = { el, media, body };
+      if (!entry) {
+        entry = { ...buildCard(item), media };
         cards.set(item.id, entry);
-      } else if (entry.body !== body) {
-        entry.el.querySelector('.card-body').replaceWith(cardBody(item));
-        entry.body = body;
+      } else if (entry.media !== media) {
+        // 卡片本身留着，只换画面那一块：右上角打开着的菜单不会因为进度更新而被关掉。
+        const next = mediaBox(item);
+        entry.mediaEl.replaceWith(next);
+        entry.mediaEl = next;
+        entry.el.className = `card status-${item.status}`;
+        entry.media = media;
       }
       const expectedNext = previous ? previous.nextSibling : grid.firstChild;
       if (expectedNext !== entry.el) grid.insertBefore(entry.el, expectedNext);

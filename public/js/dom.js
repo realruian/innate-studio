@@ -57,6 +57,7 @@ const ICONS = {
   cube: '<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/>',
   clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
   history: '<path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1L3.5 8.5"/><path d="M3.5 4v4.5H8"/><path d="M12 7.5V12l3 2"/>',
+  more: '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
   check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
   x: '<path d="M6 6l12 12M18 6L6 18"/>',
   play: '<path d="M8 5.5v13l11-6.5z" fill="currentColor" stroke="none"/>',
@@ -134,7 +135,7 @@ document.addEventListener('scroll', hideTip, true);
 const layers = [];
 let lastLayerEscape = -1;
 
-export function openPopover(anchor, content, { className = '', label, onClose } = {}) {
+export function openPopover(anchor, content, { className = '', label, onClose, align = 'start' } = {}) {
   const opened = layers.find((l) => l.anchor === anchor);
   if (opened) {
     opened.close();
@@ -158,7 +159,9 @@ export function openPopover(anchor, content, { className = '', label, onClose } 
     const height = el.offsetHeight;
     const below = window.innerHeight - a.bottom - gap - margin;
     const above = a.top - gap - margin;
-    const left = Math.max(margin, Math.min(a.left, window.innerWidth - width - margin));
+    // align 为 end 时浮层的右边和按钮的右边对齐，用在贴着右边缘的按钮上。
+    const wanted = align === 'end' ? a.right - width : a.left;
+    const left = Math.max(margin, Math.min(wanted, window.innerWidth - width - margin));
     let top;
     if (height <= below || below >= above) {
       top = a.bottom + gap;
@@ -226,15 +229,18 @@ document.addEventListener(
 );
 
 // 下拉菜单。items: [{ value, label, note, disabled, selected, title }]
-export function openMenu(anchor, { label, items, onSelect, onClose }) {
+// 两种用法：选一个值（每项带 selected，当前项打勾，顶部显示标题），
+// 或者一组动作（各项都不带 selected，不显示标题和打勾的位置）。
+export function openMenu(anchor, { label, items, onSelect, onClose, align }) {
+  const picking = items.some((item) => 'selected' in item);
   const buttons = items.map((item) =>
     h(
       'button',
       {
         type: 'button',
-        class: `menu-item ${item.selected ? 'selected' : ''}`,
-        role: 'option',
-        'aria-selected': String(Boolean(item.selected)),
+        class: `menu-item ${item.selected ? 'selected' : ''} ${item.danger ? 'danger' : ''}`,
+        role: picking ? 'option' : 'menuitem',
+        'aria-selected': picking ? String(Boolean(item.selected)) : null,
         disabled: item.disabled,
         title: item.title,
         onClick: () => {
@@ -244,17 +250,18 @@ export function openMenu(anchor, { label, items, onSelect, onClose }) {
       },
       h('span', { class: 'menu-item-label' }, item.label),
       item.note && h('span', { class: 'menu-item-note' }, item.note),
-      h('span', { class: 'menu-item-check' }, item.selected && icon('check', 14)),
+      picking && h('span', { class: 'menu-item-check' }, item.selected && icon('check', 14)),
     ),
   );
 
-  const layer = openPopover(anchor, [label && h('div', { class: 'menu-title' }, label), h('div', { class: 'menu-list', role: 'listbox', 'aria-label': label }, buttons)], {
+  const layer = openPopover(anchor, [picking && label && h('div', { class: 'menu-title' }, label), h('div', { class: 'menu-list', role: picking ? 'listbox' : 'menu', 'aria-label': label }, buttons)], {
     className: 'menu',
     label,
     onClose,
+    align,
   });
   if (!layer) return null;
-  layer.el.style.minWidth = `${Math.max(168, Math.round(anchor.getBoundingClientRect().width))}px`;
+  layer.el.style.minWidth = `${Math.max(picking ? 168 : 128, Math.round(anchor.getBoundingClientRect().width))}px`;
   layer.place();
 
   const enabled = buttons.filter((b) => !b.disabled);

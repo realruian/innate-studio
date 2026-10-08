@@ -192,7 +192,7 @@ function drawMedia() {
         class: 'ref-tile ref-add',
         type: 'button',
         'aria-label': '添加参考素材',
-        'aria-haspopup': 'listbox',
+        'aria-haspopup': 'menu',
         'aria-expanded': 'false',
         onClick: () =>
           openMenu(addButton, {
