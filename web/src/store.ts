@@ -1,29 +1,35 @@
 // 全局状态、本地服务调用、轮询。
+// 状态是一个普通对象，改完后用 emit() 说一声是哪一块变了；组件用 useStore() 订阅自己关心的那几块。
+
+import { useSyncExternalStore } from 'react';
+import type { AppInfo, Asset, CreateType, HistoryItem, Kind, Person, RefStatus, ViewId, Voice } from './types.ts';
 
 export class ApiError extends Error {
-  constructor(status, code, message) {
+  status: number;
+  code: string;
+  constructor(status: number, code: string, message: string) {
     super(message);
     this.status = status;
     this.code = code;
   }
 }
 
-export async function api(method, url, body, headers = {}) {
-  const init = { method, headers: { ...headers } };
+export async function api<T = any>(method: string, url: string, body?: unknown, headers: Record<string, string> = {}): Promise<T> {
+  const init: RequestInit & { headers: Record<string, string> } = { method, headers: { ...headers } };
   if (body instanceof FormData) {
     init.body = body;
   } else if (body !== undefined) {
     init.headers['Content-Type'] = 'application/json';
     init.body = JSON.stringify(body);
   }
-  let res;
+  let res: Response;
   try {
     res = await fetch(url, init);
   } catch {
     throw new ApiError(0, 'network', '连不上本地服务，请确认终端里的 node server.js 还在运行。');
   }
   const text = await res.text();
-  let data = null;
+  let data: any = null;
   try {
     data = text ? JSON.parse(text) : null;
   } catch {
@@ -33,50 +39,71 @@ export async function api(method, url, body, headers = {}) {
   return data;
 }
 
-export const KINDS = {
+export const KINDS: Record<Kind, { label: string; type: string; accept: string; max: number; maxBytes: number }> = {
   image: { label: '图片', type: 'Image', accept: 'image/*', max: 9, maxBytes: 30 * 1024 * 1024 },
   video: { label: '视频', type: 'Video', accept: 'video/*', max: 3, maxBytes: 50 * 1024 * 1024 },
   audio: { label: '音频', type: 'Audio', accept: 'audio/*', max: 3, maxBytes: 15 * 1024 * 1024 },
 };
 
-export const kindOfType = (type) => ({ image: 'image', video: 'video', audio: 'audio' })[String(type || '').toLowerCase()] || 'image';
+export const kindOfType = (type?: string): Kind => (({ image: 'image', video: 'video', audio: 'audio' }) as Record<string, Kind>)[String(type || '').toLowerCase()] || 'image';
 
 export const state = {
-  view: 'create',
+  // 读到 Key 的状态之后才画创作页。
+  booted: false,
+  view: 'create' as ViewId,
   // 创作页当前选的是哪种内容（视频、图片、语音、音效、配乐）。下面的「最近生成」跟着它走。
-  createType: 'video',
-  app: { hasKey: false, keyHint: '', keySource: '', baseUrl: '' },
-  models: ['seedance-2.0', 'seedance-2.0-fast'],
+  createType: 'video' as CreateType,
+  // 记录页的类型筛选。放在这里是因为创作页的「查看全部」要带着类型过去。
+  recordsType: 'all' as CreateType | 'all',
+  app: { hasKey: false, keyHint: '', keySource: '', baseUrl: '' } as AppInfo,
+  models: ['seedance-2.0', 'seedance-2.0-fast'] as string[],
   modelsInfo: { source: 'default', error: '', note: '' },
   // 视频之外账号还能用什么。known 为 false 表示还没读到模型列表，这时不拦任何一种创作。
-  catalog: { known: false, image: [], polish: [], audio: { speech: false, sfx: false, music: false } },
-  voices: null,
-  history: [],
+  catalog: { known: false, image: [] as string[], polish: [] as string[], audio: { speech: false, sfx: false, music: false } },
+  voices: null as Voice[] | null,
+  history: [] as HistoryItem[],
   historyLoaded: false,
-  assets: [],
-  persons: null,
+  assets: [] as Asset[],
+  persons: null as Person[] | null,
   personsError: '',
-  personAssets: {},
-  watchedPersons: new Set(),
+  personAssets: {} as Record<string, Asset[]>,
+  watchedPersons: new Set<string>(),
   watchedPersonView: '',
 };
 
-const listeners = {};
+export type StoreEvent = 'boot' | 'view' | 'app' | 'models' | 'history' | 'assets' | 'persons' | 'createType' | 'recordsType' | 'composer';
 
-export function on(event, fn) {
+const listeners: Partial<Record<StoreEvent, Set<() => void>>> = {};
+const versions: Partial<Record<StoreEvent, number>> = {};
+
+export function on(event: StoreEvent, fn: () => void) {
   (listeners[event] ||= new Set()).add(fn);
+  return () => {
+    listeners[event]?.delete(fn);
+  };
 }
 
-export function emit(event) {
+export function emit(event: StoreEvent) {
+  versions[event] = (versions[event] || 0) + 1;
   listeners[event]?.forEach((fn) => fn());
 }
 
-// 页面切换由 main.js 实现。其他模块通过 goTo 请求切换，比如在创作记录页点「复用」要回到创作页。
-let navigator = () => {};
-export const setNavigator = (fn) => {
-  navigator = fn;
-};
-export const goTo = (view) => navigator(view);
+// 订阅状态里的几块；其中任何一块 emit 了，组件就重画。返回值每次变化都不同，可以拿来当 effect 的依赖。
+export function useStore(...events: StoreEvent[]) {
+  return useSyncExternalStore(
+    (notify) => {
+      const offs = events.map((event) => on(event, notify));
+      return () => offs.forEach((off) => off());
+    },
+    () => events.map((event) => versions[event] || 0).join(','),
+  );
+}
+
+// 切换页面。重复去同一页也算一次：点「新建创作」要回到顶部并把光标放回输入框。
+export function goTo(view: ViewId) {
+  state.view = view;
+  emit('view');
+}
 
 export async function loadApp() {
   state.app = await api('GET', '/api/state');
@@ -109,7 +136,7 @@ export function polishModel() {
   return state.catalog.polish.includes(saved) ? saved : state.catalog.polish[0] || '';
 }
 
-export function setPolishModel(model) {
+export function setPolishModel(model: string) {
   try {
     localStorage.setItem(POLISH_KEY, model);
   } catch {
@@ -120,7 +147,7 @@ export function setPolishModel(model) {
 let historySignature = '';
 
 export async function loadHistory() {
-  const data = await api('GET', '/api/history');
+  const data = await api<{ items: HistoryItem[] }>('GET', '/api/history');
   const signature = JSON.stringify(data.items.map((i) => [i.id, i.status, i.progress, i.mediaUrl, i.pollError, i.downloadError, i.error?.message]));
   state.history = data.items;
   if (signature !== historySignature || !state.historyLoaded) {
@@ -130,11 +157,11 @@ export async function loadHistory() {
   }
 }
 
-export const isPendingTask = (item) => item.status === 'queued' || item.status === 'in_progress';
+export const isPendingTask = (item: HistoryItem) => item.status === 'queued' || item.status === 'in_progress';
 // 等太久、本地服务已停止自动查询的任务。它在 Flatkey 那边不一定失败了，可以手动再查一次。
-export const isTimedOutTask = (item) => item.status === 'failed' && item.error?.code === 'poll_timeout';
+export const isTimedOutTask = (item: HistoryItem) => item.status === 'failed' && item.error?.code === 'poll_timeout';
 
-let historyTimer = null;
+let historyTimer: ReturnType<typeof setTimeout> | undefined;
 
 export function startHistoryLoop() {
   clearTimeout(historyTimer);
@@ -155,20 +182,20 @@ export async function loadAssets() {
   emit('assets');
 }
 
-function putAsset(asset) {
+function putAsset(asset: Asset) {
   const index = state.assets.findIndex((a) => a.id === asset.id);
   if (asset.kind !== 'virtual') return;
   if (index === -1) state.assets.unshift(asset);
   else state.assets[index] = asset;
 }
 
-export function rememberAsset(asset) {
+export function rememberAsset(asset: Asset) {
   putAsset(asset);
   emit('assets');
 }
 
-export async function refreshAsset(id) {
-  const asset = await api('GET', `/api/assets/${id}`);
+export async function refreshAsset(id: string) {
+  const asset = await api<Asset>('GET', `/api/assets/${id}`);
   putAsset(asset);
   emit('assets');
   return asset;
@@ -180,18 +207,18 @@ export async function loadPersons() {
     state.personsError = '';
   } catch (err) {
     state.persons = [];
-    state.personsError = err.message;
+    state.personsError = (err as Error).message;
   }
   emit('persons');
 }
 
-export async function loadPersonAssets(personId) {
+export async function loadPersonAssets(personId: string) {
   state.personAssets[personId] = (await api('GET', `/api/real-persons/${personId}/assets?limit=50`)).items;
   emit('assets');
   return state.personAssets[personId];
 }
 
-export function findAsset(id) {
+export function findAsset(id?: string) {
   const virtual = state.assets.find((a) => a.id === id);
   if (virtual) return virtual;
   for (const list of Object.values(state.personAssets)) {
@@ -202,7 +229,7 @@ export function findAsset(id) {
 }
 
 // 素材能不能用于某个模型。虚拟素材看 available_models，真人素材只看 status。
-export function assetReadiness(asset, model) {
+export function assetReadiness(asset: Asset | null, model?: string): Required<RefStatus> {
   if (!asset) return { ready: false, tone: 'pending', label: '查询中' };
   const status = asset.status || '';
   if (status === 'Failed') return { ready: false, tone: 'error', label: '处理失败' };
@@ -218,7 +245,7 @@ const SETTLED = new Set(['Active', 'Failed', 'Expired', 'Deleted']);
 
 export function startAssetLoop() {
   const run = async () => {
-    const jobs = state.assets.filter((a) => !SETTLED.has(a.status || '')).map((a) => refreshAsset(a.id).catch(() => {}));
+    const jobs: Promise<unknown>[] = state.assets.filter((a) => !SETTLED.has(a.status || '')).map((a) => refreshAsset(a.id).catch(() => {}));
     const persons = new Set(state.watchedPersons);
     if (state.watchedPersonView) persons.add(state.watchedPersonView);
     for (const personId of persons) {

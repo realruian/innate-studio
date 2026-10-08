@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-const css = fs.readFileSync(new URL('../public/styles.css', import.meta.url), 'utf8');
+const css = fs.readFileSync(new URL('../web/src/styles.css', import.meta.url), 'utf8');
 const split = css.indexOf('*, *::before, *::after');
 const tokens = css.slice(0, split);
 const rules = css.slice(split);

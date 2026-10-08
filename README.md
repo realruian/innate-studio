@@ -4,8 +4,8 @@
 
 ## 第一次使用
 
-1. **安装 Node.js**（18 或更高）。到 <https://nodejs.org> 下载 LTS 版本，一路下一步装好。除此之外不用安装任何东西。
-2. **双击启动**。Mac 双击 `start-mac.command`，Windows 双击 `start-windows.bat`。会弹出一个黑色窗口，并自动在浏览器里打开页面。
+1. **安装 Node.js**（22.18 或更高）。到 <https://nodejs.org> 下载 LTS 版本，一路下一步装好。
+2. **双击启动**。Mac 双击 `start-mac.command`，Windows 双击 `start-windows.bat`。会弹出一个黑色窗口，并自动在浏览器里打开页面。第一次启动要联网下载页面用到的依赖，大约一分钟。
 3. **填 API Key**。第一次打开会弹出「设置」，把自己的 Flatkey API Key 粘贴进去保存。Key 在 [Flatkey 控制台](https://console.flatkey.ai/keys?lng=zh)创建。
 
 之后每次要用，双击启动文件就行。**那个黑色窗口开着，服务就在运行；关掉它，页面就打不开了。**
@@ -14,13 +14,19 @@ Mac 第一次双击可能被系统拦住，提示"无法验证开发者"。这�
 
 ### 用命令行启动
 
-不想用启动文件的话，在终端里进入这个文件夹，运行：
+不想用启动文件的话，在终端里进入这个文件夹。第一次先安装依赖：
 
 ```bash
-node server.js
+npm install
 ```
 
-然后在浏览器打开 <http://127.0.0.1:5178>。换端口：`PORT=5180 node server.js`。
+之后每次启动：
+
+```bash
+npm start
+```
+
+它会先把页面构建一遍，再启动服务。然后在浏览器打开 <http://127.0.0.1:5178>。换端口：`PORT=5180 npm start`。
 
 ### 把这个项目发给别人
 
@@ -68,17 +74,17 @@ mkdir -p dist && git archive --format=zip --prefix=seedance-studio/ -o dist/seed
 | `data/audio/` | 生成的语音、音效、配乐 |
 | `data/uploads/` | 从电脑里选来当输入的文件（Grok 的首帧、要配乐的视频）。删除记录不会删掉它们，用不着了可以手动清理 |
 
-也可以不把 Key 存进文件，改用环境变量：`FLATKEY_API_KEY=sk-fk-... node server.js`。
+也可以不把 Key 存进文件，改用环境变量：`FLATKEY_API_KEY=sk-fk-... npm start`。
 
 ### 连接 Flatkey 时断时续
 
 Node 默认不走系统代理。如果你的电脑要靠代理才能稳定访问外网，页面上会时不时出现「连接 Flatkey 失败」。这时让服务读取终端里的代理设置（`HTTPS_PROXY`）：
 
 ```bash
-NODE_USE_ENV_PROXY=1 node server.js
+NODE_USE_ENV_PROXY=1 npm start
 ```
 
-这个开关在 Node 22.23 上验证过，太旧的版本不认。
+这个开关在 Node 22.23 上验证过。
 
 ## 测试
 
@@ -86,16 +92,22 @@ NODE_USE_ENV_PROXY=1 node server.js
 npm test
 ```
 
-用模拟的 Flatkey 接口跑一遍主要流程（视频、图片、语音、音效、配乐、润色、素材、真人档案），不花钱，也不会用到真实的 Key 和 `data/`。
+先做类型检查，再用模拟的 Flatkey 接口跑一遍主要流程（视频、图片、语音、音效、配乐、润色、素材、真人档案），不花钱，也不会用到真实的 Key 和 `data/`。
 
 调界面时可以用 `npm run dev:mock` 另起一份接模拟接口的应用（<http://127.0.0.1:5179>）。
+
+写界面代码时用 `npm run dev`：页面在 <http://127.0.0.1:5173>，改了代码立刻生效，接口转给 5178 上的本地服务（要先把它启动起来；想接模拟接口就用 `PORT=5179 npm run dev`）。
 
 改完界面要做整体走查（深色、浅色各一遍），命令和检查项见 `DESIGN.md` 第 11 节。
 
 ## 结构
 
 - `server.js`：本地服务。托管页面、保管 Key、转发 Flatkey 请求、轮询任务、保存生成结果。只监听 `127.0.0.1`，并拒绝其他网站发来的跨站请求。
-- `public/`：页面。原生 JavaScript 模块，没有构建步骤。
+- `web/`：页面。React 加 TypeScript，用 Vite 构建到 `web/dist/`，由 `server.js` 托管。
+  - `web/src/ui/`：基础控件、浮层和弹窗、图标。
+  - `web/src/composer/`：创作输入框。`state.ts` 是状态和动作，`Composer.tsx` 是界面。
+  - `web/src/store.ts`：全局状态、接口调用、轮询。
+  - 其余一页一个文件：`history.tsx`（创作记录）、`assets.tsx`（素材库）、`persons.tsx`（真人档案）、`settings.tsx`（设置）。
 - `test/`：模拟接口和自动化测试。
 - `DESIGN.md`：界面的视觉规范（对标 Antigravity 与 Codex 的深色工作台），改界面前先看它。
 

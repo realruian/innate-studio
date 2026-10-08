@@ -2,7 +2,7 @@
 
 // Seedance Studio 本地服务：托管页面、保管 API Key、转发 Flatkey 请求、轮询任务并保存历史。
 // 能生成的有四类：视频（Seedance、Grok）、图片、音频（语音、音效、配乐），外加提示词润色。
-// 零依赖，需要 Node 18 以上。
+// 服务本身不依赖第三方包。页面是 web/ 里的 React 源码，用 npm run build 构建到 web/dist 之后由这里托管。
 
 import http from 'node:http';
 import fs from 'node:fs';
@@ -22,7 +22,7 @@ const DATA_DIR = path.resolve(process.env.SEEDANCE_DATA_DIR || path.join(__dirna
 const MEDIA_DIRS = { video: 'videos', image: 'images', audio: 'audio' };
 const mediaDir = (name) => path.join(DATA_DIR, name);
 const resultDir = (item) => mediaDir(MEDIA_DIRS[item.kind] || MEDIA_DIRS.video);
-const PUBLIC_DIR = path.join(__dirname, 'public');
+const PUBLIC_DIR = path.join(__dirname, 'web', 'dist');
 
 const MAX_UPLOAD_BYTES = 64 * 1024 * 1024;
 const MAX_JSON_BYTES = 6 * 1024 * 1024;
@@ -1085,6 +1085,7 @@ server.on('error', (err) => {
 server.listen(PORT, HOST, () => {
   console.log(`Seedance Studio 已启动：http://${HOST}:${PORT}`);
   console.log(`数据目录：${DATA_DIR}`);
+  if (!fs.existsSync(path.join(PUBLIC_DIR, 'index.html'))) console.log('还没有构建页面，打开会是空的。先运行 npm run build（npm start 会自动构建）。');
   if (!apiKey()) console.log('还没有设置 API Key，打开页面后在「设置」里填写。');
   setInterval(tick, 2000);
   tick();

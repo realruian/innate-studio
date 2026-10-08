@@ -15,8 +15,8 @@ if ! command -v node >/dev/null 2>&1; then
   exit 1
 fi
 
-if ! node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 18 ? 0 : 1)'; then
-  echo "Node.js 版本太旧（现在是 $(node -v)），需要 18 或更高。"
+if ! node -e 'const [major, minor] = process.versions.node.split(".").map(Number); process.exit(major > 22 || (major === 22 && minor >= 18) ? 0 : 1)'; then
+  echo "Node.js 版本太旧（现在是 $(node -v)），需要 22.18 或更高。"
   echo "请到 https://nodejs.org 下载安装新的 LTS 版本。"
   pause
   exit 1
@@ -27,6 +27,16 @@ if curl -s -o /dev/null --max-time 2 "$URL"; then
   echo "Seedance Studio 已经在运行，正在打开页面：$URL"
   open "$URL"
   exit 0
+fi
+
+# 页面用到的依赖只在第一次启动时下载。
+if [ ! -d node_modules ]; then
+  echo "第一次启动，正在下载页面用到的依赖（需要联网，大约一分钟）…"
+  if ! npm install; then
+    echo "依赖没有装上，请检查网络后再双击这个文件。"
+    pause
+    exit 1
+  fi
 fi
 
 echo "正在启动 Seedance Studio…（要停止服务，关掉这个窗口即可）"
@@ -41,7 +51,8 @@ echo "正在启动 Seedance Studio…（要停止服务，关掉这个窗口即�
   done
 ) &
 
-PORT="$PORT" node server.js
+# npm start 会先把页面构建一遍，再启动服务。
+PORT="$PORT" npm start
 echo
 echo "服务已停止。"
 pause

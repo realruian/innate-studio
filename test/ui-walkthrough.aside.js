@@ -1,7 +1,7 @@
 // 整体走查：把每个页面、弹窗、浮层都打开一遍，逐个状态做一致性检查并截图。
 // 改了任何界面代码之后都要跑，深色、浅色各一遍。
 //
-// 前提：npm run dev:mock 已在运行（http://127.0.0.1:5179，接的是模拟接口）。
+// 前提：npm run dev:mock 已在运行（http://127.0.0.1:5179，接的是模拟接口）。它启动时会构建页面，改了界面要重新运行。
 // 用法：aside repl "$(sed 's/__THEME__/light/' test/ui-walkthrough.aside.js)"
 //
 // 每个状态都检查：
@@ -188,9 +188,8 @@ if (pinned) {
 
   // 视频存到本机后，记录里的视频地址会变。这时不能打断正在播放的画面。
   const kept = await pg.evaluate(async (sel) => {
-    // 取页面自己的状态模块。Aside 的脚本环境不允许直接写动态导入，所以拼出来再调用。
-    const load = new Function('url', 'return imp' + 'ort(url)');
-    const { state, emit } = await load('/js/store.js');
+    // 页面把自己的状态挂在 window.__studio 上，供这里模拟接口的变化。
+    const { state, emit } = window.__studio;
     const video = document.querySelector(`${sel} video`);
     const item = video && state.history.find((i) => i.videoUrl === video.getAttribute('src'));
     if (!item) return '找不到这张卡片对应的记录';

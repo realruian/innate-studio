@@ -2,7 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildRequest, refsInUse, buildImageRequest, buildSpeechRequest, buildSfxRequest, buildMusicRequest } from '../public/js/request.js';
+import { buildRequest, refsInUse, buildImageRequest, buildSpeechRequest, buildSfxRequest, buildMusicRequest } from '../web/src/request.ts';
 
 const baseForm = (patch = {}) => ({
   mode: 'text',

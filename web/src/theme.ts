@@ -2,9 +2,9 @@
 
 const THEME_KEY = 'seedance-studio.theme';
 
-export const currentTheme = () => (document.documentElement.dataset.theme === 'light' ? 'light' : 'dark');
+export const currentTheme = (): 'light' | 'dark' => (document.documentElement.dataset.theme === 'light' ? 'light' : 'dark');
 
-export function setTheme(theme) {
+export function setTheme(theme: string) {
   document.documentElement.dataset.theme = theme === 'light' ? 'light' : 'dark';
   try {
     localStorage.setItem(THEME_KEY, currentTheme());

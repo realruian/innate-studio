@@ -1,27 +1,29 @@
 // 把创作表单转成发给本地服务的请求。纯函数，不碰页面和网络，可以单独测试。
 // 视频有两种请求格式：Seedance 用 content 数组，Grok 用 prompt 字符串。图片、语音、音效、配乐各有一个小函数。
 
-export const RES_RANK = { '480p': 0, '720p': 1, '1080p': 2, '2k': 3, '4k': 4 };
+import type { VideoForm, ImageForm, SpeechForm, SfxForm, MusicForm, Ref, RefStatus, BuiltRequest } from './types.ts';
 
-const MEDIA_FIELD = { image: 'image_url', video: 'video_url', audio: 'audio_url' };
+export const RES_RANK: Record<string, number> = { '480p': 0, '720p': 1, '1080p': 2, '2k': 3, '4k': 4 };
 
-export const videoFamily = (model) => (/^grok-imagine-video/i.test(model || '') ? 'grok' : 'seedance');
+const MEDIA_FIELD: Record<string, string> = { image: 'image_url', video: 'video_url', audio: 'audio_url' };
+
+export const videoFamily = (model?: string) => (/^grok-imagine-video/i.test(model || '') ? 'grok' : 'seedance');
 
 // 当前模式下实际会用到的参考素材。
-export function refsInUse(form) {
-  if (form.mode === 'frames') return [form.frames.first, form.frames.last].filter(Boolean);
+export function refsInUse(form: VideoForm): Ref[] {
+  if (form.mode === 'frames') return [form.frames.first, form.frames.last].filter((r): r is Ref => Boolean(r));
   if (form.mode === 'reference') return [...form.refs.image, ...form.refs.video, ...form.refs.audio];
   return [];
 }
 
 // 返回 { payload, problems }。problems 非空时不能提交。
 // refStatus(ref) 由调用方提供，返回 { ready, tone }，表示素材能否用于当前模型。
-export function buildRequest(form, refStatus = () => ({ ready: true, tone: 'ok' })) {
+export function buildRequest(form: VideoForm, refStatus: (ref: Ref) => RefStatus = () => ({ ready: true, tone: 'ok' })): BuiltRequest {
   if (videoFamily(form.model) === 'grok') return buildGrokRequest(form);
-  const problems = [];
-  const content = [];
+  const problems: string[] = [];
+  const content: Record<string, unknown>[] = [];
   const text = form.prompt.trim();
-  const media = (ref, role) => ({ type: MEDIA_FIELD[ref.kind], [MEDIA_FIELD[ref.kind]]: { url: ref.url }, role });
+  const media = (ref: Ref, role: string) => ({ type: MEDIA_FIELD[ref.kind], [MEDIA_FIELD[ref.kind]]: { url: ref.url }, role });
 
   if (text) content.push({ type: 'text', text });
 
@@ -46,7 +48,7 @@ export function buildRequest(form, refStatus = () => ({ ready: true, tone: 'ok' 
   else if (statuses.some((s) => s.tone === 'error')) problems.push('有素材不可用，请移除后再生成');
   else if (statuses.some((s) => !s.ready)) problems.push(`有素材还在处理中，可用于 ${form.model} 后才能生成`);
 
-  const payload = {
+  const payload: Record<string, unknown> = {
     model: form.model,
     content,
     resolution: form.resolution,
@@ -65,7 +67,7 @@ export function buildRequest(form, refStatus = () => ({ ready: true, tone: 'ok' 
   if (form.inputType !== 'auto') payload.input_type = form.inputType;
 
   if (form.sr.enabled) {
-    const sr = {};
+    const sr: Record<string, unknown> = {};
     if (form.sr.by === 'resolution') {
       sr.resolution = form.sr.resolution;
       if (RES_RANK[form.sr.resolution] <= RES_RANK[form.resolution]) problems.push('超分的目标分辨率必须高于原始分辨率');
@@ -89,10 +91,10 @@ export function buildRequest(form, refStatus = () => ({ ready: true, tone: 'ok' 
 }
 
 // Grok 视频：只有文生视频和图生视频（给一张首帧）。首帧可以是公网链接，也可以是本机文件，本机文件由本地服务换成内嵌数据再发出去。
-function buildGrokRequest(form) {
-  const problems = [];
+function buildGrokRequest(form: VideoForm): BuiltRequest {
+  const problems: string[] = [];
   const text = form.prompt.trim();
-  const payload = { model: form.model, prompt: text, duration: Number(form.duration), resolution: form.resolution };
+  const payload: Record<string, unknown> = { model: form.model, prompt: text, duration: Number(form.duration), resolution: form.resolution };
   if (!text) problems.push('请填写提示词');
   if (form.mode === 'reference') problems.push('这个模型不支持参考生成，请改用文生视频或图生视频');
 
@@ -108,7 +110,7 @@ function buildGrokRequest(form) {
   return { payload, problems };
 }
 
-export function buildImageRequest(form) {
+export function buildImageRequest(form: ImageForm): BuiltRequest {
   const prompt = form.prompt.trim();
   return {
     payload: { model: form.model, prompt, n: Number(form.count) || 1, aspect_ratio: form.ratio },
@@ -116,26 +118,26 @@ export function buildImageRequest(form) {
   };
 }
 
-export function buildSpeechRequest(form) {
+export function buildSpeechRequest(form: SpeechForm): BuiltRequest {
   const text = form.prompt.trim();
-  const problems = [];
+  const problems: string[] = [];
   if (!text) problems.push('请填写要朗读的文字');
   else if (!form.voiceId) problems.push('请选择音色');
   return { body: { text, voiceId: form.voiceId, voiceName: form.voiceName }, problems };
 }
 
-export function buildSfxRequest(form) {
+export function buildSfxRequest(form: SfxForm): BuiltRequest {
   const text = form.prompt.trim();
-  const body = { text, influence: Number(form.influence) };
+  const body: Record<string, unknown> = { text, influence: Number(form.influence) };
   // 时长选"自动"时不传，由模型决定。
   if (form.duration !== 'auto') body.duration = Number(form.duration);
   return { body, problems: text ? [] : ['请描述想要的声音'] };
 }
 
-export function buildMusicRequest(form) {
+export function buildMusicRequest(form: MusicForm): BuiltRequest {
   const video = form.video;
-  const problems = [];
+  const problems: string[] = [];
   if (!video) problems.push('请选择要配乐的视频');
-  else if (!(video.duration > 0)) problems.push('没有读到这段视频的时长，请重新选择');
+  else if (!((video.duration ?? 0) > 0)) problems.push('没有读到这段视频的时长，请重新选择');
   return { body: { video: video?.url, duration: video?.duration }, problems };
 }

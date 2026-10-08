@@ -5,12 +5,27 @@
   "description": "通过 Flatkey 生成视频、图片和音频的本地网页应用",
   "license": "MIT",
   "scripts": {
-    "start": "node server.js",
-    "test": "node --test test/*.test.js",
-    "dev:mock": "node test/run-with-mock.js"
+    "start": "vite build && node server.js",
+    "build": "vite build",
+    "dev": "vite",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "tsc -p tsconfig.json && node --test test/*.test.js",
+    "dev:mock": "vite build && node test/run-with-mock.js"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=22.18"
   },
-  "type": "module"
+  "type": "module",
+  "dependencies": {
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.4",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4"
+  }
 }

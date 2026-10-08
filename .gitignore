@@ -6,3 +6,7 @@ test/.tmp/
 
 # 打包出来发给别人的压缩包
 dist/
+
+# 依赖和页面的构建结果
+node_modules/
+web/dist/
