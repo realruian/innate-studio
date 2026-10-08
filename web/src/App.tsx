@@ -14,14 +14,13 @@ import { openSettings } from './settings.tsx';
 import type { ViewId } from './types.ts';
 
 // 四项是同一层的页签。「创作」是首页，在首页再点一次会回到顶部并把光标放回输入框。
-const VIEWS: { id: ViewId; label: string; icon: IconName }[] = [
-  { id: 'create', label: '创作', icon: 'sparkle' },
+// Sparkle 在库里画得比别的图标小一圈（只占画布中间六成），所以放大到 22 显示，线条相应调细，看上去和其他几项一样大、一样粗。
+const VIEWS: { id: ViewId; label: string; icon: IconName; size?: number; stroke?: number }[] = [
+  { id: 'create', label: '创作', icon: 'sparkle', size: 22, stroke: 1.1 },
   { id: 'records', label: '创作记录', icon: 'history' },
   { id: 'library', label: '素材库', icon: 'folder' },
   { id: 'persons', label: '真人档案', icon: 'user' },
 ];
-const BRAND_MARK =
-  '<svg viewBox="0 0 20 20" width="20" height="20"><rect width="20" height="20" rx="6" fill="currentColor"/><path d="M8 6.3v7.4l6-3.7z" fill="var(--bg-side)"/></svg>';
 const NO_KEY = '还没有设置 API Key';
 
 export function App() {
@@ -47,15 +46,15 @@ export function App() {
     <>
       <aside className="sidebar">
         <div className="brand">
-          <span className="brand-mark" aria-hidden="true" dangerouslySetInnerHTML={{ __html: BRAND_MARK }} />
-          Seedance Studio
+          <span className="brand-mark" aria-hidden="true" />
+          <span className="brand-word" role="img" aria-label="INNATE" />
         </div>
         <nav className="nav">
           {VIEWS.map((v) => {
             const current = view === v.id;
             return (
               <button key={v.id} className={`nav-item ${current ? 'active' : ''}`} type="button" aria-current={current ? 'page' : undefined} onClick={() => goTo(v.id)}>
-                <Icon name={v.icon} />
+                <Icon name={v.icon} size={v.size} stroke={v.stroke} />
                 <span>{v.label}</span>
               </button>
             );

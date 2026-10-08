@@ -108,8 +108,8 @@ await shot('01-create');
 
 // 1b. 关键位置的颜色要等于从 Antigravity 截图取到的值；输入框底部要有灰色托边
 const REFERENCE = {
-  light: { 主区底色: 'rgb(249, 249, 249)', 侧栏底色: 'rgb(243, 243, 243)', 输入框底色: 'rgb(252, 252, 252)', 输入框边线: 'rgb(233, 233, 233)', 托边: 'rgb(233, 233, 233)', 新建按钮: 'rgb(252, 252, 252)', 分隔线: 'rgb(230, 230, 230)' },
-  dark: { 主区底色: 'rgb(16, 16, 16)', 侧栏底色: 'rgb(22, 22, 22)', 输入框底色: 'rgb(28, 28, 28)', 输入框边线: 'rgb(37, 37, 37)', 托边: 'rgb(37, 37, 37)', 新建按钮: 'rgb(50, 50, 50)', 分隔线: 'rgb(26, 26, 26)' },
+  light: { 主区底色: 'rgb(249, 249, 249)', 侧栏底色: 'rgb(243, 243, 243)', 输入框底色: 'rgb(252, 252, 252)', 输入框边线: 'rgb(233, 233, 233)', 托边: 'rgb(233, 233, 233)', 分隔线: 'rgb(230, 230, 230)' },
+  dark: { 主区底色: 'rgb(16, 16, 16)', 侧栏底色: 'rgb(22, 22, 22)', 输入框底色: 'rgb(28, 28, 28)', 输入框边线: 'rgb(37, 37, 37)', 托边: 'rgb(37, 37, 37)', 分隔线: 'rgb(26, 26, 26)' },
 }[THEME];
 const colours = await pg.evaluate(() => {
   const css = (selector) => getComputedStyle(document.querySelector(selector));
@@ -128,7 +128,6 @@ const colours = await pg.evaluate(() => {
     托边: (card.boxShadow.match(/rgba?\([^)]+\)/) || ['没有托边'])[0],
     托边高度: card.boxShadow.replace(/rgba?\([^)]+\)/, '').trim(),
     托边占位: card.marginBottom,
-    新建按钮: css('.nav-new').backgroundColor,
     分隔线: over(css('.main').borderLeftColor, css('body').backgroundColor),
   };
 });
@@ -451,7 +450,7 @@ if (await count('.modal')) problems.push('点控制条上的按钮不应该打�
 await must('取消静音', click(`${P} .player-btn`, 1));
 await must('再点已完成卡片的画面', click(`${P} video`, 0));
 await sleep(600);
-// 详情的结构：左边是画面和操作，右边的信息分成几组，组与组之间的间距明显大于组内
+// 详情的结构：左边是画面，中间是上一条、下一条，右边上面是分组的信息、下面是操作；组与组之间的间距明显大于组内
 const detail = await pg.evaluate(() => {
   const modal = document.querySelector('.modal');
   const sections = [...modal.querySelectorAll('.detail-side .detail-section')];
@@ -460,8 +459,11 @@ const detail = await pg.evaluate(() => {
   const within = sections.map((s) => Math.round(parseFloat(getComputedStyle(s).rowGap)));
   return {
     titles: sections.map((s) => s.querySelector('h3').textContent).join('|'),
-    actions: [...modal.querySelectorAll('.detail-main .detail-actions .btn')].map((b) => b.textContent.trim()).join('|'),
-    buttonsInSide: [...modal.querySelectorAll('.detail-side .btn')].length,
+    actions: [...modal.querySelectorAll('.detail-side .detail-actions .btn')].map((b) => b.textContent.trim()).join('|'),
+    buttonsOutside: [...modal.querySelectorAll('.detail .btn')].filter((b) => !b.closest('.detail-side .detail-actions')).length,
+    actionsAtBottom: Math.round(modal.querySelector('.detail-side').getBoundingClientRect().bottom - modal.querySelector('.detail-actions').getBoundingClientRect().bottom) === 0,
+    size: [modal.offsetWidth, modal.offsetHeight].join('×'),
+    nav: [...modal.querySelectorAll('.detail-nav-btn')].map((b) => b.getAttribute('aria-label')).join('|'),
     copy: Boolean([...modal.querySelectorAll('.detail-section-head button')].find((b) => b.textContent.trim() === '复制')),
     params: modal.querySelectorAll('.param-grid .param').length,
     facts: [...modal.querySelectorAll('.kv dt')].map((d) => d.textContent).join('|'),
@@ -472,7 +474,21 @@ const detail = await pg.evaluate(() => {
 });
 // 「参考素材」这一组只有用了素材的记录才有。
 if (!['提示词|参考素材|生成参数|任务信息', '提示词|生成参数|任务信息'].includes(detail.titles)) problems.push(`详情右侧的分组不对：${detail.titles}`);
-if (detail.actions !== '下载视频|复用参数|延长|修改|配乐' || detail.buttonsInSide) problems.push(`详情的操作应该在画面下方：${detail.actions}，右侧按钮 ${detail.buttonsInSide} 个`);
+if (detail.actions !== '下载视频|复用参数|延长|修改|配乐' || detail.buttonsOutside || !detail.actionsAtBottom) problems.push(`详情的操作应该都在右栏最下面：${detail.actions}，别处的按钮 ${detail.buttonsOutside} 个`);
+if (detail.nav !== '上一条|下一条') problems.push(`详情里应该有上一条、下一条：${detail.nav}`);
+// 上一条、下一条：换了内容，弹窗的大小不变；方向键也能换
+const detailStep = async (how) => {
+  if (how === 'key') await pg.keyboard.press('ArrowUp');
+  else await must('点下一条', click('.detail-nav-btn:not(.is-prev)'));
+  await sleep(400);
+  return pg.evaluate(() => ({ id: document.querySelector('.modal .kv .mono').textContent, size: [document.querySelector('.modal').offsetWidth, document.querySelector('.modal').offsetHeight].join('×') }));
+};
+const detailFirst = await pg.evaluate(() => document.querySelector('.modal .kv .mono').textContent);
+const detailNext = await detailStep('click');
+if (detailNext.id === detailFirst) problems.push('点「下一条」后详情没有换内容');
+if (detailNext.size !== detail.size) problems.push(`换到下一条后弹窗的大小变了：${detail.size} → ${detailNext.size}`);
+const detailBack = await detailStep('key');
+if (detailBack.id !== detailFirst) problems.push('按上方向键没有回到上一条');
 if (!detail.copy) problems.push('提示词这一组的标题旁边应该有「复制」');
 if (detail.params < 4 || !detail.facts.startsWith('状态|任务 ID')) problems.push(`详情里的参数或任务信息不全：${detail.params} 项，${detail.facts}`);
 if (detail.between.some((gap) => gap < 24) || detail.within.some((gap) => gap * 2 > Math.min(...detail.between))) problems.push(`详情分组的间距不对：组间 ${detail.between.join('/')}，组内 ${detail.within.join('/')}`);

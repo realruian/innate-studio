@@ -387,7 +387,7 @@ interface Modal {
   title: string;
   subtitle?: string;
   content: ReactNode;
-  size: 'sm' | 'md' | 'lg';
+  size: 'sm' | 'md' | 'lg' | 'detail';
   // 遮罩的节点。关闭时在它上面播出场动效。
   el: HTMLElement | null;
   // 已经在关了，只是出场动效还没播完。

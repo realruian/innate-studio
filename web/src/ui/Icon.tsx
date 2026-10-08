@@ -3,10 +3,11 @@ import { ICONS, type IconName } from './icons.ts';
 export type { IconName };
 
 // shown 只在 IconSwap 里用：标出叠在一起的几个图标里当前显示的那个。
-export function Icon({ name, size = 16, shown }: { name: IconName; size?: number; shown?: boolean }) {
+// stroke 是线条粗细，和 Hugeicons 自己的 strokeWidth 是一个意思，默认 1.5。
+export function Icon({ name, size = 16, stroke = 1.5, shown }: { name: IconName; size?: number; stroke?: number; shown?: boolean }) {
   return (
     <span className="icon" aria-hidden="true" data-shown={shown ? '' : undefined}>
-      <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" dangerouslySetInnerHTML={{ __html: ICONS[name] }} />
+      <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth={stroke} strokeLinecap="round" strokeLinejoin="round" dangerouslySetInnerHTML={{ __html: ICONS[name] }} />
     </span>
   );
 }

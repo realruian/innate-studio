@@ -151,7 +151,7 @@ function download(item: HistoryItem) {
 
 // 卡片右上角的「更多」。菜单内容按点开那一刻的状态来定：生成中的可以刷新，查询超时的可以再查一次，已完成的可以下载。
 // 已完成的视频可以拿去配乐，已完成的图片可以拿去生成视频。
-function openCardMenu(button: HTMLElement, id: string) {
+function openCardMenu(button: HTMLElement, id: string, scope: Scope) {
   const item = state.history.find((i) => i.id === id);
   if (!item) return;
   const actions: Record<string, () => void> = {
@@ -163,7 +163,7 @@ function openCardMenu(button: HTMLElement, id: string) {
     extend: () => rework(item, 'extend'),
     edit: () => rework(item, 'edit'),
     animate: () => animate(item),
-    detail: () => openDetail(item.id),
+    detail: () => openDetail(item.id, scope),
     remove: () => removeItem(item),
   };
   openMenu(button, {
@@ -277,7 +277,7 @@ const CardMedia = memo(
 // 一张卡片只有画面。提示词、参数、时间都在详情里，点画面打开；
 // 操作收在画面右上角的「更多」里，鼠标移上去才出现。
 // index 是它在列表里排第几：一批卡片一起出现时，靠后的晚一点进场。新提交的任务排在最前，单独进场。
-function Card({ item, index }: { item: HistoryItem; index: number }) {
+function Card({ item, index, scope }: { item: HistoryItem; index: number; scope: Scope }) {
   const ref = useRef<HTMLElement>(null);
   useLayoutEffect(() => {
     enter(ref.current, { y: 8, duration: 260, delay: Math.min(index, 8) * 35 });
@@ -285,9 +285,9 @@ function Card({ item, index }: { item: HistoryItem; index: number }) {
   return (
     <article ref={ref} className={`card status-${item.status}`} aria-label={nameOf(item)}>
       {/* 控制条和「更多」上的点击各管各的，不算在"点画面打开详情"里。 */}
-      <div className="card-media" onClick={(e) => !(e.target as Element).closest('.player-bar, .audio-controls, .card-more') && openDetail(item.id)}>
+      <div className="card-media" onClick={(e) => !(e.target as Element).closest('.player-bar, .audio-controls, .card-more') && openDetail(item.id, scope)}>
         <CardMedia item={item} signature={mediaSignature(item)} />
-        <button className="card-more" type="button" {...tip('更多')} aria-label="更多操作" aria-haspopup="menu" aria-expanded="false" onClick={(e) => openCardMenu(e.currentTarget, item.id)}>
+        <button className="card-more" type="button" {...tip('更多')} aria-label="更多操作" aria-haspopup="menu" aria-expanded="false" onClick={(e) => openCardMenu(e.currentTarget, item.id, scope)}>
           <Icon name="more" size={16} />
         </button>
       </div>
@@ -296,8 +296,13 @@ function Card({ item, index }: { item: HistoryItem; index: number }) {
 }
 
 // 把一组记录画成卡片网格。卡片按记录的 id 对应，进度更新时正在播放的视频不会被打断。
-function CardGrid({ list, empty }: { list: HistoryItem[]; empty: ReactNode }) {
-  return <div className="card-grid">{list.length ? list.map((item, index) => <Card key={item.id} item={item} index={index} />) : empty}</div>;
+// 详情里的上一条、下一条就在这一组里走，所以把这一组当前的样子交给卡片。
+// all 是只画出前几条时的完整一组：创作页只列最近几条，但在详情里可以一直往后翻。
+function CardGrid({ list, all = list, empty }: { list: HistoryItem[]; all?: HistoryItem[]; empty: ReactNode }) {
+  const latest = useRef(all);
+  latest.current = all;
+  const scope = useRef<Scope>(() => latest.current).current;
+  return <div className="card-grid">{list.length ? list.map((item, index) => <Card key={item.id} item={item} index={index} scope={scope} />) : empty}</div>;
 }
 
 // ---------- 详情 ----------
@@ -356,7 +361,56 @@ function Section({ title, action, children }: { title: string; action?: ReactNod
   );
 }
 
-function Detail({ item, close }: { item: HistoryItem; close: () => void }) {
+// 详情里上一条、下一条走的那一组记录：从哪个列表点开的，就在哪个列表里走。
+type Scope = () => HistoryItem[];
+
+// 详情弹窗里的内容。弹窗开着的时候可以直接换到上一条、下一条，不用关掉再点另一张。
+function DetailView({ id, scope, close }: { id: string; scope: Scope; close: () => void }) {
+  useStore('history');
+  const [current, setCurrent] = useState(id);
+  const list = scope();
+  const index = list.findIndex((i) => i.id === current);
+  const item = list[index] || state.history.find((i) => i.id === current);
+  const step = (by: number) => {
+    const next = list[index + by];
+    if (index < 0 || !next) return;
+    stopPlaying();
+    setCurrent(next.id);
+  };
+  // 上下方向键也能换。正在输入框里、或者上面还盖着别的弹窗和菜单时不管。
+  const stepRef = useRef(step);
+  stepRef.current = step;
+  const root = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.key !== 'ArrowUp' && e.key !== 'ArrowDown') || e.metaKey || e.ctrlKey || e.altKey) return;
+      if ((e.target as Element).closest?.('input, textarea, [contenteditable], [role=menu]')) return;
+      const modals = document.querySelectorAll('.modal');
+      if (modals[modals.length - 1] !== root.current?.closest('.modal') || document.querySelector('.menu')) return;
+      e.preventDefault();
+      stepRef.current(e.key === 'ArrowUp' ? -1 : 1);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
+  // 这条记录被删掉了，详情也就没有可看的了。
+  useEffect(() => {
+    if (!item) close();
+  }, [item]);
+  if (!item) return null;
+  const nav = (by: number, label: string) => (
+    <button className={`detail-nav-btn ${by < 0 ? 'is-prev' : ''}`} type="button" aria-label={label} disabled={index < 0 || !list[index + by]} onClick={() => step(by)} {...tip(label)}>
+      <Icon name="chevron" size={18} />
+    </button>
+  );
+  return (
+    <div ref={root} className="detail">
+      <Detail key={item.id} item={item} close={close} nav={<div className="detail-nav">{nav(-1, '上一条')}{nav(1, '下一条')}</div>} />
+    </div>
+  );
+}
+
+function Detail({ item, close, nav }: { item: HistoryItem; close: () => void; nav: ReactNode }) {
   const refs = refsOf(item);
   const kindLabel = KIND_LABELS[item.kind];
   const params = paramsOf(item).filter(present);
@@ -392,85 +446,90 @@ function Detail({ item, close }: { item: HistoryItem; close: () => void }) {
     </button>
   );
 
-  return (
-    <div className="detail">
-      {/* 左边：结果，以及能对它做的事。 */}
-      <div className="detail-main">
-        <div className={`detail-media ${item.kind === 'audio' && done(item) ? 'is-audio' : ''}`}>
-          <MediaBox item={item} large />
-        </div>
-        <div className="detail-actions">
-          {done(item) && (
-            <a className="btn btn-primary" rel="noopener" {...downloadProps(item)}>
-              下载{kindLabel}
-            </a>
-          )}
-          {leaveTo('复用参数', reuse)}
-          {canRework(item) && leaveTo(VIDEO_TASKS.extend.label, (it) => rework(it, 'extend'))}
-          {canRework(item) && leaveTo(VIDEO_TASKS.edit.label, (it) => rework(it, 'edit'))}
-          {done(item) && item.kind === 'video' && state.catalog.audio.music && leaveTo('配乐', score)}
-          {done(item) && item.kind === 'image' && leaveTo('生成视频', animate)}
-          {isTimedOutTask(item) && leaveTo('再查一次', recheck)}
-          {!item.savedLocally && item.status === 'completed' && !item.direct && (
-            <button className="btn" onClick={() => refresh(item).then(() => toast('已重新尝试保存', 'info'))}>
-              重新保存到本机
-            </button>
-          )}
-        </div>
-      </div>
-      {/* 右边：只放信息，分成几组。配乐没有提示词，就没有第一组。 */}
-      <div className="detail-side">
-        {item.tool !== 'music' && (
-          <Section
-            title={item.tool === 'speech' ? '朗读的文字' : '提示词'}
-            action={
-              item.prompt && (
-                <button className="entry-action-btn" type="button" onClick={() => copyText(item.prompt!, '已复制')}>
-                  复制
-                </button>
-              )
-            }
-          >
-            <p className="detail-prompt">{item.prompt || '（没有提示词）'}</p>
-          </Section>
-        )}
-        {refs.length > 0 && (
-          <Section title="参考素材">
-            <div className="card-refs">
-              {refs.map((r) => (
-                <span key={r.uid} className="mini-thumb" {...tip(r.name)} aria-label={r.name}>
-                  <Thumb thumb={r.thumb} kind={r.kind} />
-                </span>
-              ))}
-            </div>
-          </Section>
-        )}
-        <Section title="生成参数">
-          <dl className="param-grid">
-            {params.map(([name, value, wide]) => (
-              <div key={name} className={wide ? 'param wide' : 'param'}>
-                <dt>{name}</dt>
-                <dd>{value}</dd>
-              </div>
-            ))}
-          </dl>
-        </Section>
-        <Section title="任务信息">
-          <dl className="kv">
-            {facts.flatMap(([name, value]) => [<dt key={`${name}-name`}>{name}</dt>, <dd key={`${name}-value`}>{value}</dd>])}
-          </dl>
-        </Section>
-      </div>
+  // 能对这条结果做的事，放在右边最下面。
+  const actions = (
+    <div className="detail-actions">
+      {done(item) && (
+        <a className="btn btn-primary" rel="noopener" {...downloadProps(item)}>
+          下载{kindLabel}
+        </a>
+      )}
+      {leaveTo('复用参数', reuse)}
+      {canRework(item) && leaveTo(VIDEO_TASKS.extend.label, (it) => rework(it, 'extend'))}
+      {canRework(item) && leaveTo(VIDEO_TASKS.edit.label, (it) => rework(it, 'edit'))}
+      {done(item) && item.kind === 'video' && state.catalog.audio.music && leaveTo('配乐', score)}
+      {done(item) && item.kind === 'image' && leaveTo('生成视频', animate)}
+      {isTimedOutTask(item) && leaveTo('再查一次', recheck)}
+      {!item.savedLocally && item.status === 'completed' && !item.direct && (
+        <button className="btn" onClick={() => refresh(item).then(() => toast('已重新尝试保存', 'info'))}>
+          重新保存到本机
+        </button>
+      )}
     </div>
+  );
+
+  return (
+    <>
+      {/* 左边：结果。画框的大小是固定的，画面在里面完整显示。 */}
+      <div className={`detail-media ${item.kind === 'audio' && done(item) ? 'is-audio' : ''}`}>
+        <MediaBox item={item} large />
+      </div>
+      {nav}
+      {/* 右边：上面是信息，分成几组，放不下就在这一栏里滚动；下面是能对它做的事。配乐没有提示词，就没有第一组。 */}
+      <div className="detail-side">
+        <div className="detail-info">
+          {item.tool !== 'music' && (
+            <Section
+              title={item.tool === 'speech' ? '朗读的文字' : '提示词'}
+              action={
+                item.prompt && (
+                  <button className="entry-action-btn" type="button" onClick={() => copyText(item.prompt!, '已复制')}>
+                    复制
+                  </button>
+                )
+              }
+            >
+              <p className="detail-prompt">{item.prompt || '（没有提示词）'}</p>
+            </Section>
+          )}
+          {refs.length > 0 && (
+            <Section title="参考素材">
+              <div className="card-refs">
+                {refs.map((r) => (
+                  <span key={r.uid} className="mini-thumb" {...tip(r.name)} aria-label={r.name}>
+                    <Thumb thumb={r.thumb} kind={r.kind} />
+                  </span>
+                ))}
+              </div>
+            </Section>
+          )}
+          <Section title="生成参数">
+            <dl className="param-grid">
+              {params.map(([name, value, wide]) => (
+                <div key={name} className={wide ? 'param wide' : 'param'}>
+                  <dt>{name}</dt>
+                  <dd>{value}</dd>
+                </div>
+              ))}
+            </dl>
+          </Section>
+          <Section title="任务信息">
+            <dl className="kv">
+              {facts.flatMap(([name, value]) => [<dt key={`${name}-name`}>{name}</dt>, <dd key={`${name}-value`}>{value}</dd>])}
+            </dl>
+          </Section>
+        </div>
+        {actions}
+      </div>
+    </>
   );
 }
 
-export function openDetail(id: string) {
-  const item = state.history.find((i) => i.id === id);
-  if (!item) return;
+export function openDetail(id: string, scope: Scope = () => state.history) {
+  if (!state.history.some((i) => i.id === id)) return;
   // 详情盖住了列表，先停掉列表里正在放的。详情是图片、或者自动播放被浏览器拦下时，没有新的播放来顶掉它。
   stopPlaying();
-  const modal = openModal({ title: '生成详情', size: 'lg', content: <Detail item={item} close={() => modal.close()} /> });
+  const modal = openModal({ title: '生成详情', size: 'detail', content: <DetailView id={id} scope={scope} close={() => modal.close()} /> });
 }
 
 // ---------- 两处列表 ----------
@@ -504,6 +563,7 @@ export function Recent() {
       </header>
       <CardGrid
         list={list.slice(0, RECENT_COUNT)}
+        all={list}
         empty={
           <div className="empty">
             <div className="empty-title">{state.historyLoaded ? `还没有生成过${TYPE_LABELS[type]}` : '正在读取记录…'}</div>

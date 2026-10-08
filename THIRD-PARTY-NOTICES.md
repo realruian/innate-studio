@@ -2,7 +2,7 @@
 
 ## Hugeicons 免费图标
 
-界面里的图标取自 [Hugeicons](https://hugeicons.com) 的免费图标（Stroke Rounded 风格，`@hugeicons/core-free-icons` 4.3.5），路径数据在 `web/src/ui/icons.ts` 的 `ICONS` 里。播放、暂停和喇叭的轮廓填成了实心，其余没有改动。侧栏「创作」的四角星（`sparkle`）是自己画的，不是 Hugeicons 的图标。
+界面里的图标取自 [Hugeicons](https://hugeicons.com) 的免费图标（Stroke Rounded 风格，`@hugeicons/core-free-icons` 4.3.5），路径数据在 `web/src/ui/icons.ts` 的 `ICONS` 里。播放、暂停和喇叭的轮廓填成了实心，其余没有改动。
 
 这里只用了免费图标。Hugeicons Pro 的图标不能随源码公开分发，不要加进这个仓库。
 

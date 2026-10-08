@@ -59,7 +59,7 @@ function RefTile({ item, label, onRemove }: { item: Ref; label?: string; onRemov
       {label && <span className="ref-index">{label}</span>}
       {!s.ready && <span className={`ref-state ${s.tone === 'error' ? 'is-error' : ''}`}>{s.label}</span>}
       <button className="ref-remove" type="button" aria-label="移除" onClick={onRemove}>
-        ×
+        <Icon name="x" size={10} stroke={2} />
       </button>
     </div>
   );
@@ -73,7 +73,7 @@ function Slot({ item, label, onAdd, onRemove }: { item: Ref | null; label: strin
         <RefTile item={item} onRemove={onRemove} />
       ) : (
         <button className="ref-tile ref-add" type="button" aria-label={`添加${label}`} onClick={onAdd}>
-          +
+          <Icon name="plus" size={18} />
         </button>
       )}
       <span className="small muted">{label}</span>
@@ -111,7 +111,7 @@ function MediaBlock() {
         {!isGrok() && (
           <>
             <button className="frames-swap" type="button" aria-label="互换首帧和尾帧" disabled={!form.frames.first && !form.frames.last} onClick={swapFrames} {...tip('互换首帧和尾帧')}>
-              ⇄
+              <Icon name="swap" />
             </button>
             {frame('last', '尾帧（可选）')}
           </>
@@ -144,7 +144,7 @@ function MediaBlock() {
         )}
         {!full && (
           <button className="ref-tile ref-add" type="button" aria-label="添加参考素材" aria-haspopup="menu" aria-expanded="false" onClick={(e) => addRef(e.currentTarget)}>
-            +
+            <Icon name="plus" size={18} />
           </button>
         )}
       </div>

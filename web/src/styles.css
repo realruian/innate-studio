@@ -173,7 +173,11 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 .sidebar { display: flex; flex-direction: column; min-height: 0; padding: var(--sp-12) var(--sp-8) var(--sp-8); background: var(--bg-side); }
 .brand { display: flex; align-items: center; gap: var(--sp-8); padding: var(--sp-4) var(--sp-12) var(--sp-16); font-size: var(--text-body); font-weight: var(--fw-semibold); }
-.brand-mark { display: inline-flex; color: var(--text); }
+/* 品牌图有两版：深色主题用白底图标配白字，浅色主题用黑底图标配黑字。字标只存了形状，颜色在这里填。 */
+.brand-mark { flex: none; width: 24px; height: 24px; background: url('./brand/mark-on-dark.png') center / contain no-repeat; }
+.brand-word { flex: none; width: 72px; height: 14px; background: #fff; mask: url('./brand/wordmark.png') center / contain no-repeat; }
+:root[data-theme='light'] .brand-mark { background-image: url('./brand/mark-on-light.png'); }
+:root[data-theme='light'] .brand-word { background: #181818; }
 .nav { display: flex; flex-direction: column; gap: var(--sp-2); }
 .nav-item {
   display: flex;
@@ -192,6 +196,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
   cursor: pointer;
   transition: background-color 120ms var(--ease), color 120ms var(--ease);
 }
+/* 图标占位固定 16，个别放大显示的图标向四周溢出，文字仍然对齐 */
+.nav-item .icon { align-items: center; justify-content: center; width: 16px; height: 16px; }
+.nav-item .icon svg { flex: none; }
 .nav-item:hover { background: var(--hover); color: var(--text); }
 .nav-item.active { background: var(--nav-active); color: var(--text); }
 .nav-dot { margin-left: auto; }
@@ -453,7 +460,6 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 .entry-meta { font-size: var(--text-caption); color: var(--text-3); word-break: break-word; }
 .card-refs { display: flex; flex-wrap: wrap; gap: var(--sp-4); }
 .mini-thumb { display: block; width: 56px; height: 56px; overflow: hidden; border: 1px solid var(--border); border-radius: var(--r-sm); }
-.detail-actions { display: flex; flex-wrap: wrap; gap: var(--sp-8); }
 
 .empty { grid-column: 1 / -1; display: flex; flex-direction: column; align-items: center; gap: var(--sp-4); padding: var(--sp-48) var(--sp-16); color: var(--text-3); font-size: var(--text-ui); text-align: center; }
 .empty-title { color: var(--text-2); font-size: var(--text-body); }
@@ -531,18 +537,31 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 .person-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-12); }
 
 /* 详情 */
-.detail { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(280px, 1fr); gap: var(--sp-24); }
-.detail-main { display: flex; flex-direction: column; gap: var(--sp-16); min-width: 0; }
-.detail-media { display: grid; align-self: start; overflow: hidden; min-height: 300px; max-height: 70vh; border-radius: var(--r-md); background: var(--surface-2); }
-.detail-media .player { max-height: 70vh; }
+/* 弹窗的大小是固定的，不跟着画面的比例变：横的、竖的、音频点开都是同一个尺寸，上一条下一条换着看时不会跳。 */
+.modal-detail { max-width: 1120px; height: min(720px, calc(100vh - 48px)); }
+.modal-detail .modal-body { flex: 1; min-height: 0; overflow: hidden; }
+.detail { display: grid; grid-template-columns: minmax(0, 1fr) var(--h-md) 340px; gap: var(--sp-12); flex: 1; min-height: 0; }
+.detail-media { display: grid; min-width: 0; min-height: 0; overflow: hidden; border-radius: var(--r-md); background: var(--surface-2); }
 .detail-media .card-state { background: var(--surface-2); }
-.detail-media .media-image { max-height: 70vh; }
-/* 音频没有画面，详情里不需要撑出一块大画框 */
-.detail-media.is-audio { align-self: stretch; min-height: 0; }
+/* 音频没有画面，控制条放在画框中间 */
+.detail-media.is-audio { align-content: center; }
+.detail-media.is-audio .audio-player { height: auto; }
 .detail-media .audio-player { background: var(--surface-2); }
 .detail-media .audio-rail { background: var(--border-strong); }
+/* 上一条、下一条：夹在画面和信息之间，竖着居中 */
+.detail-nav { display: flex; flex-direction: column; justify-content: center; gap: var(--sp-8); }
+.detail-nav-btn { display: grid; place-items: center; width: var(--h-md); height: var(--h-md); padding: 0; border: 0; border-radius: var(--r-sm); background: none; color: var(--text-2); cursor: pointer; transition: background-color 120ms var(--ease), color 120ms var(--ease), scale 120ms var(--ease); }
+.detail-nav-btn:hover:not(:disabled) { background: var(--hover); color: var(--text); }
+.detail-nav-btn:active:not(:disabled) { scale: 0.92; }
+.detail-nav-btn:disabled { color: var(--text-off); cursor: default; }
+.detail-nav-btn.is-prev .icon { rotate: 180deg; }
+/* 右栏：信息在上，放不下就在栏内滚动；操作固定在最下面 */
+.detail-side { display: flex; flex-direction: column; gap: var(--sp-16); min-width: 0; min-height: 0; }
+.detail-info { display: flex; flex-direction: column; gap: var(--sp-24); flex: 1; min-height: 0; overflow-y: auto; }
+.detail-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-8); flex: none; }
+.detail-actions .btn { justify-content: center; }
+.detail-actions .btn-primary { grid-column: 1 / -1; }
 /* 右侧信息分组：组内 8，组与组之间 24，靠间距和小标题区分，不画分隔线 */
-.detail-side { display: flex; flex-direction: column; gap: var(--sp-24); min-width: 0; }
 .detail-section { display: flex; flex-direction: column; gap: var(--sp-8); min-width: 0; }
 .detail-section-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-8); min-height: 20px; }
 /* 标题行里的小按钮不把这一行撑高 */
@@ -574,7 +593,16 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
   .view-create { padding: 0 var(--sp-16) var(--sp-48); }
   .composer { padding-top: var(--sp-32); }
   .page { padding: var(--sp-24) var(--sp-16) var(--sp-48); }
-  .detail, .person-layout { grid-template-columns: 1fr; }
+  .person-layout { grid-template-columns: 1fr; }
+  /* 窄屏放不下左右两栏：画面、切换、信息从上到下排，整个弹窗一起滚动 */
+  .modal-detail { height: auto; }
+  .modal-detail .modal-body { overflow-y: auto; }
+  .detail { grid-template-columns: 1fr; }
+  .detail-media { min-height: 220px; max-height: 50vh; }
+  .detail-nav { flex-direction: row; }
+  .detail-nav-btn .icon { rotate: -90deg; }
+  .detail-nav-btn.is-prev .icon { rotate: 90deg; }
+  .detail-info { overflow: visible; }
   .more-popover, .frame-popover, .voice-popover { width: calc(100vw - 16px); }
 }
 
