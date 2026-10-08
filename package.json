@@ -1,0 +1,12 @@
+{
+  "name": "seedance-studio",
+  "version": "1.0.0",
+  "private": true,
+  "description": "通过 Flatkey 调用 Seedance 生成视频的本地网页应用",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
