@@ -328,7 +328,7 @@ await shot('04-more');
 await must('选短剧', clickText('.menu .menu-item', '短剧'));
 await sleep(250);
 if (!(await count('.more-popover'))) problems.push('在更多面板里选完菜单后，面板被一起关掉了');
-if (await pg.evaluate(() => document.querySelector('.more-dot').hidden)) problems.push('改了设置但「更多」上没有提示点');
+if (await count('.more-dot')) problems.push('「更多」上不应该再有提示点');
 await outsideClick();
 await sleep(200);
 if (await count('.more-popover')) problems.push('点外面没有关掉更多面板');
@@ -432,6 +432,31 @@ if (await count('.modal')) problems.push('点控制条上的按钮不应该打�
 await must('取消静音', click(`${P} .player-btn`, 1));
 await must('再点已完成卡片的画面', click(`${P} video`, 0));
 await sleep(600);
+// 详情的结构：左边是画面和操作，右边的信息分成几组，组与组之间的间距明显大于组内
+const detail = await pg.evaluate(() => {
+  const modal = document.querySelector('.modal');
+  const sections = [...modal.querySelectorAll('.detail-side .detail-section')];
+  const tops = sections.map((s) => s.getBoundingClientRect());
+  const between = tops.slice(1).map((r, i) => Math.round(r.top - tops[i].bottom));
+  const within = sections.map((s) => Math.round(parseFloat(getComputedStyle(s).rowGap)));
+  return {
+    titles: sections.map((s) => s.querySelector('h3').textContent).join('|'),
+    actions: [...modal.querySelectorAll('.detail-main .detail-actions .btn')].map((b) => b.textContent.trim()).join('|'),
+    buttonsInSide: [...modal.querySelectorAll('.detail-side .btn')].length,
+    copy: Boolean([...modal.querySelectorAll('.detail-section-head button')].find((b) => b.textContent.trim() === '复制')),
+    params: modal.querySelectorAll('.param-grid .param').length,
+    facts: [...modal.querySelectorAll('.kv dt')].map((d) => d.textContent).join('|'),
+    between,
+    within,
+    sideFits: modal.querySelector('.detail-side').scrollWidth <= modal.querySelector('.detail-side').clientWidth + 1,
+  };
+});
+if (detail.titles !== '提示词|参考素材|生成参数|任务信息') problems.push(`详情右侧的分组不对：${detail.titles}`);
+if (detail.actions !== '下载视频|复用参数' || detail.buttonsInSide) problems.push(`详情的操作应该在画面下方：${detail.actions}，右侧按钮 ${detail.buttonsInSide} 个`);
+if (!detail.copy) problems.push('提示词这一组的标题旁边应该有「复制」');
+if (detail.params < 5 || !detail.facts.startsWith('状态|任务 ID')) problems.push(`详情里的参数或任务信息不全：${detail.params} 项，${detail.facts}`);
+if (detail.between.some((gap) => gap < 24) || detail.within.some((gap) => gap * 2 > Math.min(...detail.between))) problems.push(`详情分组的间距不对：组间 ${detail.between.join('/')}，组内 ${detail.within.join('/')}`);
+if (!detail.sideFits) problems.push('详情右侧的内容横向溢出了');
 // 界面上不展示发给接口的原始请求：那是给开发者看的，不是产品内容
 if (await pg.evaluate(() => /请求|"model"|"content"/.test(document.querySelector('.modal').textContent) || Boolean(document.querySelector('.modal pre')))) problems.push('详情里不应该出现请求内容');
 await audit('详情弹窗');

@@ -115,7 +115,6 @@ export function buildRequest(f = form) {
 }
 
 // 「更多」里有没有偏离默认值的设置，用来在入口上给一个提示点。
-const moreActive = () => !form.generateAudio || form.watermark || String(form.seed).trim() !== '' || form.webSearch || form.inputType !== 'auto' || form.sr.enabled;
 
 // 超分的目标必须高于原始分辨率；不满足时自动换到更高的最近一档，免得用户被一条看不见的校验卡住。
 function fitSrTarget() {
@@ -365,7 +364,6 @@ function drawMore() {
 
 // 发送键：不能提交时变淡，鼠标停上去或点一下都会说明原因。
 function drawSend() {
-  els.moreDot.hidden = !moreActive();
   const root = clear(els.send);
   if (!state.app.hasKey) {
     root.append(h('button', { class: 'btn btn-primary btn-sm', type: 'button', onClick: openSettings }, '设置 API Key'));
@@ -472,7 +470,6 @@ export function renderComposer(root) {
     send: h('div', { class: 'composer-send' }),
     frame: h('div', { class: 'popover-body' }),
     more: h('div', { class: 'popover-body' }),
-    moreDot: h('span', { class: 'more-dot', hidden: true }),
   };
   els.prompt = h('textarea', {
     class: 'prompt',
@@ -495,7 +492,7 @@ export function renderComposer(root) {
     },
   });
   els.frameButton = panelButton('frame', '画面', els.frame, 'frame-popover');
-  els.moreButton = panelButton('more', '更多设置', els.more, 'more-popover', [icon('sliders'), h('span', null, '更多'), els.moreDot]);
+  els.moreButton = panelButton('more', '更多设置', els.more, 'more-popover', [icon('sliders'), h('span', null, '更多')]);
 
   root.append(
     h(

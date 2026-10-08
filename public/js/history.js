@@ -149,9 +149,10 @@ export function openDetail(id) {
   for (const video of document.querySelectorAll('.card video')) video.pause();
   const p = item.payload || {};
   const refs = refsOf(item);
-  const rows = [
-    ['状态', STATUS_LABELS[item.status] || item.status],
-    ['任务 ID', h('span', { class: 'mono copyable', title: '点击复制', onClick: () => copyText(item.id, '已复制任务 ID') }, item.id)],
+  const present = ([, value]) => value != null && value !== '' && value !== false;
+
+  // 生成参数：一格一项，名称在上、取值在下。第三个值为 true 的独占一行。
+  const params = [
     ['模式', MODE_LABELS[modeOf(item)]],
     ['模型', item.model],
     ['分辨率', p.resolution],
@@ -162,14 +163,21 @@ export function openDetail(id) {
     ['随机种子', p.seed],
     ['联网搜索', p.web_search ? '开' : null],
     ['输入模式', p.input_type],
-    ['画质超分', describeSuperResolution(p.super_resolution_config)],
+    ['画质超分', describeSuperResolution(p.super_resolution_config), true],
+  ].filter(present);
+
+  // 任务信息：一行一项。
+  const facts = [
+    ['状态', STATUS_LABELS[item.status] || item.status],
+    ['失败原因', item.error ? `${item.error.message}${item.error.code ? `（${item.error.code}）` : ''}` : null],
+    ['任务 ID', h('span', { class: 'mono copyable', title: '点击复制', onClick: () => copyText(item.id, '已复制任务 ID') }, item.id)],
     ['提交时间', fmtTime(item.createdAt)],
     ['生成耗时', item.completedAt && item.createdAt ? fmtDuration(item.completedAt - item.createdAt) : null],
     ['Token 用量', item.usage?.total_tokens != null ? String(item.usage.total_tokens) : null],
     ['视频文件', item.status !== 'completed' ? null : item.savedLocally ? `已保存到本机${item.fileSize ? `（${fmtBytes(item.fileSize)}）` : ''}` : item.downloadError ? `还没存到本机：${item.downloadError}` : '正在保存到本机…'],
-    ['失败原因', item.error ? `${item.error.message}${item.error.code ? `（${item.error.code}）` : ''}` : null],
-  ].filter(([, value]) => value != null && value !== '' && value !== false);
+  ].filter(present);
 
+  const section = (title, content, action) => h('section', { class: 'detail-section' }, h('header', { class: 'detail-section-head' }, h('h3', null, title), action), content);
   const done = item.status === 'completed' && item.videoUrl;
   const modal = openModal({
     title: '生成详情',
@@ -177,21 +185,15 @@ export function openDetail(id) {
     content: h(
       'div',
       { class: 'detail' },
-      h('div', { class: 'detail-media' }, mediaBox(item, true)),
+      // 左边：结果，以及能对它做的事。
       h(
         'div',
-        { class: 'detail-side' },
-        h('div', { class: 'field-label' }, '提示词'),
-        h('p', { class: 'detail-prompt' }, item.prompt || '（没有提示词）'),
-        refs.length
-          ? [h('div', { class: 'field-label' }, '参考素材'), h('div', { class: 'card-refs' }, refs.map((r) => h('span', { class: 'mini-thumb', title: r.name }, thumbEl(r.thumb, r.kind))))]
-          : null,
-        h('dl', { class: 'kv' }, rows.map(([k, v]) => [h('dt', null, k), h('dd', null, v)])),
+        { class: 'detail-main' },
+        h('div', { class: 'detail-media' }, mediaBox(item, true)),
         h(
           'div',
           { class: 'detail-actions' },
           done && downloadLink(item, '下载视频', 'btn btn-primary'),
-          h('button', { class: 'btn', onClick: () => copyText(item.prompt || '', '已复制提示词') }, '复制提示词'),
           h(
             'button',
             {
@@ -205,6 +207,19 @@ export function openDetail(id) {
           ),
           !item.savedLocally && item.status === 'completed' && h('button', { class: 'btn', onClick: () => refresh(item).then(() => toast('已重新尝试保存', 'info')) }, '重新保存到本机'),
         ),
+      ),
+      // 右边：只放信息，分成几组。
+      h(
+        'div',
+        { class: 'detail-side' },
+        section(
+          '提示词',
+          h('p', { class: 'detail-prompt' }, item.prompt || '（没有提示词）'),
+          item.prompt && h('button', { class: 'entry-action-btn', type: 'button', onClick: () => copyText(item.prompt, '已复制提示词') }, '复制'),
+        ),
+        refs.length ? section('参考素材', h('div', { class: 'card-refs' }, refs.map((r) => h('span', { class: 'mini-thumb', title: r.name }, thumbEl(r.thumb, r.kind))))) : null,
+        section('生成参数', h('dl', { class: 'param-grid' }, params.map(([k, v, wide]) => h('div', { class: wide ? 'param wide' : 'param' }, h('dt', null, k), h('dd', null, v))))),
+        section('任务信息', h('dl', { class: 'kv' }, facts.map(([k, v]) => [h('dt', null, k), h('dd', null, v)]))),
       ),
     ),
   });
