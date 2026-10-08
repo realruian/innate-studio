@@ -4,6 +4,7 @@
 import { useEffect, useLayoutEffect, useRef, type ReactNode } from 'react';
 import { state, useStore, KINDS, polishModel } from '../store.ts';
 import { RES_RANK } from '../request.ts';
+import { modelNote } from '../../../shared/models.ts';
 import { Icon, type IconName } from '../ui/Icon.tsx';
 import { Segmented, Toggle, Dropdown, FormRow, tip, clipTip } from '../ui/controls.tsx';
 import { openPopover, openMenu } from '../ui/layers.tsx';
@@ -12,8 +13,8 @@ import { Thumb, openAssetPicker } from '../assets.tsx';
 import { openSettings } from '../settings.tsx';
 import type { Kind, Ref, VideoForm } from '../types.ts';
 import {
-  composer, TYPES, RESOLUTIONS, RATIOS, DURATIONS, GROK_DURATIONS, SR_RESOLUTIONS,
-  typeOf, draftPrompt, isGrok, resolutionsFor, ratiosFor, usedAssetIds, refStatus, currentRequest,
+  composer, TYPES, RESOLUTIONS, RATIOS, SR_RESOLUTIONS,
+  typeOf, draftPrompt, isGrok, capabilities, usedAssetIds, refStatus, currentRequest,
   update, updateSr, updateStudio, setType, typePrompt, polish, undoPolish, submit, registerPrompt,
   voiceName, voiceNote, togglePreview, setVoiceFilter, pickVoice, stopPreview,
 } from './state.ts';
@@ -32,7 +33,6 @@ const MODES: { value: VideoForm['mode']; label: string; icon: IconName; note: st
 ];
 // Grok 只有文生视频和图生视频。
 const GROK_MODES: typeof MODES = [MODES[0], { value: 'frames', label: '图生视频', icon: 'frames', note: '给一张首帧' }];
-const MODEL_NOTES: Record<string, string> = { 'seedance-2.0': '专业模型', 'seedance-2.0-fast': '快速模型' };
 const INPUT_TYPES = [
   { value: 'auto', label: '自动判断', note: '推荐' },
   { value: 'reference', label: 'reference', note: '参考' },
@@ -193,7 +193,7 @@ function VideoToolbar() {
   const mode = modes.find((m) => m.value === form.mode) || modes[0];
   const ratio = RATIOS.find((r) => r.value === form.ratio) || RATIOS[0];
   const models = state.models.includes(form.model) ? state.models : [form.model, ...state.models];
-  const durations = isGrok() ? GROK_DURATIONS : DURATIONS;
+  const { durations, autoDuration } = capabilities();
   return (
     <>
       <Dropdown
@@ -206,7 +206,7 @@ function VideoToolbar() {
         options={modes.map((m) => ({ value: m.value, label: m.label, note: m.note }))}
         onChange={(value) => update({ mode: value as VideoForm['mode'] })}
       />
-      <Dropdown key="model" variant="tool" control="model" icon="cube" label="模型" value={form.model} options={models.map((m) => ({ value: m, label: m, note: MODEL_NOTES[m] }))} onChange={(model) => update({ model })} />
+      <Dropdown key="model" variant="tool" control="model" icon="cube" label="模型" value={form.model} options={models.map((m) => ({ value: m, label: m, note: modelNote(m) || undefined }))} onChange={(model) => update({ model })} />
       <PanelButton key="frame" name="frame" label="画面" ariaLabel={`画面：${ratio.label}，${form.resolution}`} className="frame-popover" panel={() => <FramePanel />}>
         <span className="ratio-box">
           <RatioShape value={form.ratio} />
@@ -220,7 +220,7 @@ function VideoToolbar() {
         icon="clock"
         label="时长"
         value={form.durationAuto ? 'auto' : String(form.duration)}
-        options={[...durations.map((d) => ({ value: String(d), label: `${d} 秒` })), ...(isGrok() ? [] : [{ value: 'auto', label: '由模型决定', display: '时长自动' }])]}
+        options={[...durations.map((d) => ({ value: String(d), label: `${d} 秒` })), ...(autoDuration ? [{ value: 'auto', label: '由模型决定', display: '时长自动' }] : [])]}
         onChange={(value) => update(value === 'auto' ? { durationAuto: true } : { durationAuto: false, duration: Number(value) })}
       />
       {/* 「更多」里全是 Seedance 的设置，Grok 一项也用不上。 */}
@@ -309,8 +309,7 @@ function Toolbar() {
 function FramePanel() {
   useStore('composer');
   const { form } = composer;
-  const allowed = resolutionsFor(form.model);
-  const ratios = ratiosFor(form.model);
+  const { resolutions: allowed, ratios } = capabilities();
   return (
     <>
       <div className="popover-title">画面比例</div>

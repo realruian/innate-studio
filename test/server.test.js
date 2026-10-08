@@ -358,6 +358,35 @@ test('提示词润色：按内容类型改写，只接受列出的模型', async
   assert.equal((await call('POST', '/api/polish', { text: ' ', kind: 'video', model: 'claude-haiku-5-5' })).status, 400);
 });
 
+test('提示词润色：按要用的生成模型选规则', async () => {
+  // 发给文本模型的系统提示词。
+  const guideFor = async (kind, target) => {
+    const res = await call('POST', '/api/polish', { text: '清晨的厨房', kind, model: 'claude-sonnet-5-5', target });
+    assert.equal(res.status, 200);
+    return mock.log.findLast((l) => l.path === '/v1/chat/completions').system;
+  };
+  const seedance = await guideFor('video', { model: 'seedance-2.0', mode: 'text' });
+  assert.match(seedance, /Seedance/);
+  assert.match(seedance, /镜头1/);
+  assert.doesNotMatch(seedance, /首尾帧生成|参考生成/);
+  // 不说是哪个模型时，按 Seedance 来。
+  assert.equal(await guideFor('video'), seedance);
+  assert.match(await guideFor('video', { model: 'seedance-2.0-pro', mode: 'frames' }), /首尾帧生成/);
+  // 参考生成：告诉它带了几份素材、该怎么称呼。
+  const reference = await guideFor('video', { model: 'seedance-2.0', mode: 'reference', refs: { image: 2, video: 0, audio: 1 } });
+  assert.match(reference, /图片 2 张、音频 1 段/);
+  assert.doesNotMatch(reference, /视频 \d+ 段/);
+
+  const grok = await guideFor('video', { model: 'grok-imagine-video-1.5', mode: 'text' });
+  assert.match(grok, /Grok Imagine 视频/);
+  assert.doesNotMatch(grok, /镜头1/);
+  assert.match(await guideFor('video', { model: 'grok-imagine-video', mode: 'frames' }), /图生视频/);
+
+  assert.match(await guideFor('image', { model: 'grok-imagine-image-2.0' }), /Grok Imagine 图片/);
+  assert.doesNotMatch(await guideFor('image', { model: 'some-other-image-model' }), /Grok/);
+  assert.match(await guideFor('sfx'), /ElevenLabs/);
+});
+
 test('删除记录：同时删掉本机的视频文件', async () => {
   const created = await call('POST', '/api/videos', { payload: textPayload('用来删除的一条') });
   const done = await refreshUntil(created.data.id, (item) => item.savedLocally, '视频保存到本机');

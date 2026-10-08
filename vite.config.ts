@@ -11,5 +11,6 @@ export default defineConfig({
   root: 'web',
   plugins: [react()],
   build: { outDir: 'dist', emptyOutDir: true },
-  server: { host: '127.0.0.1', port: 5173, proxy: { '/api': toLocal, '/media': toLocal } },
+  // 页面要读仓库根目录下的 shared/，开发模式下得允许它读 web/ 以外的文件。
+  server: { host: '127.0.0.1', port: 5173, fs: { allow: ['..'] }, proxy: { '/api': toLocal, '/media': toLocal } },
 });

@@ -6,6 +6,7 @@ import { exclusive } from '../playback.ts';
 import { refFromAsset, refFromRecord, assetFromRecord } from '../media.ts';
 import { toast } from '../ui/layers.tsx';
 import { buildRequest as buildVideoRequest, buildImageRequest, buildSpeechRequest, buildSfxRequest, buildMusicRequest, refsInUse, videoFamily, RES_RANK } from '../request.ts';
+import { ALL_RESOLUTIONS, videoCapabilities } from '../../../shared/models.ts';
 import type { BuiltRequest, CreateType, HistoryItem, Ref, RefStatus, Studio, VideoForm, Voice } from '../types.ts';
 
 // 视频的表单单独存一份（生成记录里存的也是它）；当前选的类型和其余几种的表单存在另一份里。
@@ -21,7 +22,7 @@ export const TYPES: { value: CreateType; label: string; title: string; action: s
   { value: 'music', label: '配乐', title: '给哪段视频配乐？', action: '生成配乐' },
 ];
 
-export const RESOLUTIONS = ['480p', '720p', '1080p'];
+export const RESOLUTIONS = ALL_RESOLUTIONS;
 export const RATIOS = [
   { value: '16:9', label: '16:9' },
   { value: '4:3', label: '4:3' },
@@ -31,11 +32,7 @@ export const RATIOS = [
   { value: '21:9', label: '21:9' },
   { value: 'adaptive', label: '自适应' },
 ];
-export const DURATIONS = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
 export const SR_RESOLUTIONS = ['720p', '1080p', '2k', '4k'];
-// Grok 只有文生视频和图生视频，时长 1 到 15 秒，没有 1080p，也没有 Seedance「更多」里的那些设置。
-export const GROK_DURATIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
-const GROK_RATIOS = ['16:9', '4:3', '1:1', '3:4', '9:16'];
 
 const defaults = (): VideoForm => ({
   mode: 'text',
@@ -135,10 +132,10 @@ function persist() {
   }, 300);
 }
 
+// Grok 只有文生视频和图生视频，也没有 Seedance「更多」里的那些设置。
 export const isGrok = (model = composer.form.model) => videoFamily(model) === 'grok';
-// seedance-2.5 文档写明只支持 480p / 720p；Grok 也没有 1080p。
-export const resolutionsFor = (model: string) => (isGrok(model) || /^seedance-2\.5/.test(model) ? ['480p', '720p'] : RESOLUTIONS);
-export const ratiosFor = (model: string) => (isGrok(model) ? GROK_RATIOS : RATIOS.map((r) => r.value));
+// 当前模型能选的分辨率、比例、时长。各模型的范围登记在 shared/models.ts。
+export const capabilities = (model = composer.form.model) => videoCapabilities(model);
 
 const allRefs = () => refsInUse(composer.form);
 export const usedAssetIds = () => allRefs().map((r) => r.assetId).filter((id): id is string => Boolean(id));
@@ -171,14 +168,12 @@ function fitSrTarget() {
 // 换模型后，把当前模型不支持的取值换成它支持的，免得带着一个提交不了的设置。
 function fitModel() {
   const { form } = composer;
-  if (!resolutionsFor(form.model).includes(form.resolution)) form.resolution = '720p';
-  if (!ratiosFor(form.model).includes(form.ratio)) form.ratio = '16:9';
-  if (isGrok()) {
-    if (form.mode === 'reference') form.mode = 'text';
-    form.durationAuto = false;
-  } else if (form.duration < DURATIONS[0]) {
-    form.duration = 5;
-  }
+  const able = capabilities();
+  if (!able.resolutions.includes(form.resolution)) form.resolution = '720p';
+  if (!able.ratios.includes(form.ratio)) form.ratio = '16:9';
+  if (!able.autoDuration) form.durationAuto = false;
+  if (!able.durations.includes(Number(form.duration))) form.duration = 5;
+  if (isGrok() && form.mode === 'reference') form.mode = 'text';
 }
 
 // 用到的素材里有真人素材就盯着那份档案，素材库里查不到的就去问一次。
@@ -362,7 +357,15 @@ export async function polish() {
   emit('composer');
   try {
     const wanted = polishModel();
-    const { text, model } = await api('POST', '/api/polish', { text: original, kind: type, model: wanted });
+    // 各个生成模型的提示词写法不一样，所以把这次要用的模型、生成方式和带了几份参考素材一起告诉它。
+    const { form, studio } = composer;
+    const target =
+      type === 'video'
+        ? { model: form.model, mode: form.mode, refs: { image: form.refs.image.length, video: form.refs.video.length, audio: form.refs.audio.length } }
+        : type === 'image'
+          ? { model: studio.image.model }
+          : {};
+    const { text, model } = await api('POST', '/api/polish', { text: original, kind: type, model: wanted, target });
     // 等结果的时候用户换了类型或者又改了文字，就不去覆盖。
     if (composer.studio.type === type && draftPrompt() === original) {
       composer.beforePolish = original;

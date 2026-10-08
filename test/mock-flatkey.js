@@ -112,10 +112,12 @@ export function startMock({ port = 0, taskSeconds = 14, assetSeconds = 9, sample
           { id: 'gpt-4o', object: 'model', type: 'text' },
           { id: 'claude-haiku-5-5', object: 'model', type: 'text' },
           { id: 'claude-sonnet-5-5', object: 'model', type: 'text' },
-          { id: 'seedance-2.0', object: 'model', type: 'video' },
-          { id: 'seedance-2.0-fast', object: 'model', type: 'video' },
-          { id: 'grok-imagine-video', object: 'model', type: 'video' },
-          { id: 'MiniMax-H3', object: 'model', type: 'video' },
+          { id: 'seedance-2.0', object: 'model', type: 'video', supported_endpoint_types: ['openai-video'] },
+          { id: 'seedance-2.0-fast', object: 'model', type: 'video', supported_endpoint_types: ['openai-video'] },
+          // 和真实接口一样：这个型号接在另一个接口上，POST /v1/videos 用不了。
+          { id: 'seedance2.0-pro', object: 'model', type: 'video', supported_endpoint_types: ['video'] },
+          { id: 'grok-imagine-video', object: 'model', type: 'video', supported_endpoint_types: ['openai-video'] },
+          { id: 'MiniMax-H3', object: 'model', type: 'video', supported_endpoint_types: ['openai-video'] },
           // 和真实接口一样：列表里有两个图片模型，但只有标了 image-generation 的那个能生图。
           { id: 'grok-imagine-image', object: 'model', type: 'image', supported_endpoint_types: ['openai'] },
           { id: 'grok-imagine-image-2.0', object: 'model', type: 'image', supported_endpoint_types: ['image-generation', 'openai'] },
@@ -174,6 +176,7 @@ export function startMock({ port = 0, taskSeconds = 14, assetSeconds = 9, sample
     if (req.method === 'POST' && pathname === '/v1/chat/completions') {
       const payload = JSON.parse(body.toString() || '{}');
       const draft = payload.messages?.at(-1)?.content || '';
+      log.at(-1).system = payload.messages?.[0]?.content || '';
       // 草稿里带 LIMITED 时，haiku 这个模型被限流，其他模型正常。
       if (/LIMITED/.test(draft) && payload.model === 'claude-haiku-5-5') return json(res, 429, { error: { message: 'Upstream rate limit exceeded, please retry later', type: 'rate_limit_error' } });
       return json(res, 200, { model: payload.model, choices: [{ index: 0, message: { role: 'assistant', content: `${draft}，镜头缓慢推进，柔和的晨光` }, finish_reason: 'stop' }] });

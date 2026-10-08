@@ -294,6 +294,10 @@ await must('打开模型菜单', click(control('model')));
 await sleep(250);
 if ((await count('.menu .menu-item')) < 2) problems.push('模型菜单没有出现');
 if ((await count('.menu .menu-item.selected .menu-item-check svg')) !== 1) problems.push('模型菜单没有标出当前项');
+// 型号后面的附注说的是它在同一代里是哪一档：同一族的要么都标，要么都不标，不能只标其中一个
+const modelNotes = Object.fromEntries(await pg.evaluate(() => [...document.querySelectorAll('.menu .menu-item')].map((e) => [e.querySelector('.menu-item-label').textContent, e.querySelector('.menu-item-note')?.textContent || ''])));
+if (modelNotes['seedance-2.0'] !== '专业版' || modelNotes['seedance-2.0-fast'] !== '快速版' || modelNotes['grok-imagine-video'] !== '') problems.push(`型号的附注不对：${JSON.stringify(modelNotes)}`);
+if ('seedance2.0-pro' in modelNotes) problems.push('模型菜单里列出了走不通的型号 seedance2.0-pro');
 await audit('模型菜单');
 await shot('02-model-menu');
 await escape();

@@ -1,13 +1,15 @@
 // 把创作表单转成发给本地服务的请求。纯函数，不碰页面和网络，可以单独测试。
 // 视频有两种请求格式：Seedance 用 content 数组，Grok 用 prompt 字符串。图片、语音、音效、配乐各有一个小函数。
 
+import { videoFamilyOf } from '../../shared/models.ts';
 import type { VideoForm, ImageForm, SpeechForm, SfxForm, MusicForm, Ref, RefStatus, BuiltRequest } from './types.ts';
 
 export const RES_RANK: Record<string, number> = { '480p': 0, '720p': 1, '1080p': 2, '2k': 3, '4k': 4 };
 
 const MEDIA_FIELD: Record<string, string> = { image: 'image_url', video: 'video_url', audio: 'audio_url' };
 
-export const videoFamily = (model?: string) => (/^grok-imagine-video/i.test(model || '') ? 'grok' : 'seedance');
+// 认不出来的型号按 Seedance 的格式发。
+export const videoFamily = (model?: string) => videoFamilyOf(model) ?? 'seedance';
 
 // 当前模式下实际会用到的参考素材。
 export function refsInUse(form: VideoForm): Ref[] {
