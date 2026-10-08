@@ -10,6 +10,25 @@ const clock = (seconds) => {
   return `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
 };
 
+// 同一时间只放一个：新的一个开始播放时，上一个停下并回到开头。自己按了暂停的不算，留在原处。
+// 页面上所有会出声的都要用 exclusive() 登记，包括不走下面这两个播放器的（比如音色试听）。
+let current = null;
+export function stopPlaying() {
+  if (!current) return;
+  current.pause();
+  current.currentTime = 0;
+  current = null;
+}
+export function exclusive(media) {
+  media.addEventListener('play', () => {
+    if (current !== media) stopPlaying();
+    current = media;
+  });
+  media.addEventListener('pause', () => {
+    if (current === media) current = null;
+  });
+}
+
 // 播放键、时间、进度条这一套的行为，视频和音频共用。root 是整个播放器，用来判断它还在不在页面上。
 function wireControls(media, { root, playButton, time, fill, rail, track }) {
   const duration = () => (Number.isFinite(media.duration) ? media.duration : 0);
@@ -40,6 +59,7 @@ function wireControls(media, { root, playButton, time, fill, rail, track }) {
     paint();
     if (root.isConnected && !media.paused) frame = requestAnimationFrame(follow);
   };
+  exclusive(media);
   media.addEventListener('play', () => {
     playButton.replaceChildren(icon('pause', 16));
     playButton.setAttribute('aria-label', '暂停');

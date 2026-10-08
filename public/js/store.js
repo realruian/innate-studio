@@ -43,6 +43,8 @@ export const kindOfType = (type) => ({ image: 'image', video: 'video', audio: 'a
 
 export const state = {
   view: 'create',
+  // 创作页当前选的是哪种内容（视频、图片、语音、音效、配乐）。下面的「最近生成」跟着它走。
+  createType: 'video',
   app: { hasKey: false, keyHint: '', keySource: '', baseUrl: '' },
   models: ['seedance-2.0', 'seedance-2.0-fast'],
   modelsInfo: { source: 'default', error: '', note: '' },

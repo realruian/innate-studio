@@ -197,7 +197,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .sidebar-foot { margin-top: auto; padding-top: var(--sp-8); }
 
 .main { min-width: 0; height: 100vh; overflow: hidden; border-left: 1px solid var(--border); }
-.view { height: 100%; overflow-y: auto; }
+/* 滚动条的位置一直留着：内容变高、滚动条出现时，页面里的东西不会因此变窄或挪位置 */
+.view { height: 100%; overflow-y: auto; scrollbar-gutter: stable; }
 .view-create { padding: 0 var(--sp-32) var(--sp-64); }
 
 /* ---------- 基础控件 ---------- */

@@ -2,7 +2,8 @@
 // 把表单拼成请求的逻辑在 request.js。
 
 import { h, icon, add, toast, clear, segmented, toggle, dropdown, formRow, openPopover, openMenu } from './dom.js';
-import { api, state, on, KINDS, findAsset, assetReadiness, refreshAsset, startHistoryLoop, loadVoices, polishModel, goTo } from './store.js';
+import { api, state, on, emit, KINDS, findAsset, assetReadiness, refreshAsset, startHistoryLoop, loadVoices, polishModel, goTo } from './store.js';
+import { exclusive } from './player.js';
 import { openAssetPicker, thumbEl, refFromAsset, refFromRecord, assetFromRecord } from './assets.js';
 import { openSettings } from './settings.js';
 import { buildRequest as buildVideoRequest, buildImageRequest, buildSpeechRequest, buildSfxRequest, buildMusicRequest, refsInUse, videoFamily, RES_RANK } from './request.js';
@@ -123,6 +124,7 @@ function load(key, merge) {
 
 let form = load(FORM_KEY, mergeForm);
 let studio = load(STUDIO_KEY, mergeStudio);
+state.createType = studio.type;
 let els = null;
 let submitting = false;
 let submitError = '';
@@ -219,6 +221,8 @@ function updateStudio(type, patch, redraw = drawAll) {
 
 function setType(type) {
   studio.type = type;
+  state.createType = type;
+  emit('createType');
   beforePolish = null;
   submitError = '';
   stopPreview();
@@ -599,10 +603,15 @@ function stopPreview() {
   preview.pause();
   previewing = '';
 }
-preview.addEventListener('ended', () => {
+// 试听放完、或者被别处的播放顶掉时，按钮变回「试听」。换一个音色试听时地址会换，那一下不算停。
+exclusive(preview);
+const previewStopped = () => {
+  if (!preview.paused && !preview.ended) return;
   previewing = '';
   if (popovers.voice) drawVoices();
-});
+};
+preview.addEventListener('ended', previewStopped);
+preview.addEventListener('pause', previewStopped);
 
 function togglePreview(voice) {
   if (previewing === voice.id) {

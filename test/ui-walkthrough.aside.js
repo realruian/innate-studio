@@ -79,7 +79,7 @@ async function audit(state) {
       if (!allowed.includes(size)) odd.add(`${size}（${el.className || el.tagName.toLowerCase()}）`);
     }
     if (odd.size) issues.push(`规范外的字号：${[...odd].join('，')}`);
-    if (root.dataset.theme !== localStorage.getItem('seedance-studio.theme')) issues.push('主题和保存的不一致');
+    if (root.dataset.theme !== localStorage.getItem('seedance-studio.theme')) issues.push(`主题和保存的不一致：页面是 ${root.dataset.theme}，保存的是 ${localStorage.getItem('seedance-studio.theme')}`);
     return issues;
   }, ALLOWED_FONT_SIZES);
   for (const issue of found) problems.push(`${state}：${issue}`);
@@ -491,15 +491,46 @@ await sleep(500);
 if ((await text(`${V} .page-head h1`)).join('') !== '创作记录') problems.push('点「创作记录」没有进入记录页');
 if ((await pg.evaluate(() => document.querySelector('.nav-item[aria-current=page]')?.textContent.trim())) !== '创作记录') problems.push('侧栏没有高亮「创作记录」');
 if (await pg.evaluate(() => [...document.querySelectorAll('.view-create video')].some((v) => !v.paused))) problems.push('离开创作页后，那里的视频还在播放');
-const total = Number(((await text(`${V} .filters .seg`))[0] || '').replace(/\D/g, ''));
+// 筛选这一行：左边是类型的分段（和创作页是同一组），右边是条数、状态下拉、搜索
+const shown = async () => Number(((await text(`${V} .feed-tools .muted`))[0] || '').replace(/\D/g, ''));
+const statusMenu = `${V} .feed-tools .dropdown`;
+const total = await shown();
 if (!total || (await count(`${V} .card`)) !== total) problems.push(`记录页列出的数量不对：卡片 ${await count(`${V} .card`)}，应为 ${total}`);
+if ((await text(`${V} .filters .seg`)).join('|') !== '全部|视频|图片|语音|音效|配乐') problems.push(`记录页的类型切换不对：${(await text(`${V} .filters .seg`)).join('|')}`);
 await audit('创作记录页');
 await shot('08b-records');
-const failedTotal = Number(((await text(`${V} .filters .seg`))[3] || '').replace(/\D/g, ''));
-await must('筛选失败', clickText(`${V} .filters .seg`, '失败'));
+// 同一时间只放一个：播着一条再去播另一条，前一条要停下并回到开头
+const solo = (i) => `${V} [data-solo="${i}"]`;
+const playable = await pg.evaluate((v) => {
+  const cards = [...document.querySelectorAll(`${v} .card`)].filter((card) => card.querySelector('.player-btn, .audio-play')).slice(0, 2);
+  cards.forEach((card, i) => { card.dataset.solo = String(i); });
+  return cards.length;
+}, V);
+if (playable < 2) problems.push('记录页里能播放的不到两条，「同一时间只放一个」没有测到');
+else {
+  const mediaOf = (i) => pg.evaluate((s) => { const m = document.querySelector(`${s} :is(video, audio)`); return m ? { paused: m.paused, time: m.currentTime } : null; }, solo(i));
+  await pg.locator(`${solo(0)} :is(.player-btn, .audio-play)`).first().click();
+  await sleep(500);
+  const before = await mediaOf(0);
+  await pg.locator(`${solo(1)} :is(.player-btn, .audio-play)`).first().click();
+  await sleep(500);
+  const after = { first: await mediaOf(0), second: await mediaOf(1) };
+  if (!before || before.paused || before.time <= 0) problems.push(`记录页里点了播放但没有播起来：${JSON.stringify(before)}`);
+  else if (!after.first?.paused || after.first.time !== 0 || after.second?.paused !== false) problems.push(`播放另一条时，前一条没有停下并回到开头：${JSON.stringify(after)}`);
+  await pg.evaluate((s) => document.querySelector(`${s} :is(video, audio)`)?.pause(), solo(1));
+}
+await must('打开状态筛选', click(statusMenu));
 await sleep(250);
-if ((await count(`${V} .card`)) !== failedTotal || (await count(`${V} .card:not(.status-failed)`))) problems.push(`按「失败」筛选的结果不对：应有 ${failedTotal} 条`);
-await must('筛选全部', clickText(`${V} .filters .seg`, '全部'));
+if ((await text('.menu .menu-item .menu-item-label')).join('|') !== '全部状态|生成中|已完成|失败') problems.push(`状态筛选的选项不对：${(await text('.menu .menu-item .menu-item-label')).join('|')}`);
+const failedTotal = Number(((await text('.menu .menu-item')).find((t) => t.startsWith('失败')) || '').replace(/\D/g, ''));
+await audit('创作记录页·状态菜单');
+await must('筛选失败', clickText('.menu .menu-item', '失败'));
+await sleep(250);
+if ((await count(`${V} .card`)) !== failedTotal || (await count(`${V} .card:not(.status-failed)`)) || (await shown()) !== failedTotal) problems.push(`按「失败」筛选的结果不对：应有 ${failedTotal} 条`);
+await must('打开状态筛选', click(statusMenu));
+await sleep(250);
+await must('看全部状态', clickText('.menu .menu-item', '全部状态'));
+await sleep(250);
 // 搜这次走查自己提交的那条，不依赖数据里碰巧有什么
 await pg.locator(`${V} input.search`).fill('工作室');
 await sleep(300);
@@ -536,9 +567,13 @@ const composer = () =>
     extraRows: document.querySelectorAll('.composer-card ~ *, .composer-card > :not(.media-block):not(.prompt):not(.composer-bar)').length,
   }));
 const feedFirst = () => pg.evaluate(() => document.querySelector('.view-create .card .card-media > :first-child')?.className || '');
-const waitFirst = async (cls, what, tries = 20) => {
-  for (let i = 0; i < tries && !(await feedFirst()).includes(cls); i += 1) await sleep(500);
-  if (!(await feedFirst()).includes(cls)) problems.push(`${what}：最新一张卡片是 ${await feedFirst()}`);
+// 「最近生成」里本来就有同类型的旧记录。提交前先给现有的卡片做记号，
+// 之后等的是"排在最前面的是一张没有记号的、已经出结果的卡片"，才不会把旧的当成新的。
+const markOld = () => pg.evaluate(() => document.querySelectorAll('.view-create .card').forEach((card) => { card.dataset.old = '1'; }));
+const waitNew = async (cls, what, tries = 20) => {
+  const arrived = () => pg.evaluate((c) => { const card = document.querySelector('.view-create .card'); return Boolean(card && !card.dataset.old && card.querySelector('.card-media > :first-child')?.className.includes(c)); }, cls);
+  for (let i = 0; i < tries && !(await arrived()); i += 1) await sleep(500);
+  if (!(await arrived())) problems.push(`${what}：最新一张卡片是 ${await feedFirst()}`);
 };
 const detailOf = () =>
   pg.evaluate(() => {
@@ -551,10 +586,14 @@ const openFirstCard = async () => {
 };
 
 if ((await text('.type-switch .seg')).join('|') !== '视频|图片|语音|音效|配乐') problems.push(`类型切换的选项不对：${(await text('.type-switch .seg')).join('|')}`);
+// 「最近生成」跟着上面选的类型走：只列这一种，别的类型的画面不该出现
+const strangers = (selector, label) => count(`.view-create .card :is(${selector})`).then((n) => n && problems.push(`切到${label}后，「最近生成」里还有别的类型的记录`));
+if (await count('.view-create .card :is(.image-view, .audio-player)')) problems.push('选着视频时，「最近生成」里不该有图片和音频');
 
 // 图片：三个入口；润色能改写、能撤销；一次两张就是两张卡片
 await must('切到图片', typeSeg('图片'));
 await sleep(300);
+await strangers('.player, .audio-player', '图片');
 let face = await composer();
 if (face.title !== '想生成什么图片？' || face.tools.length !== 3 || face.extraRows || face.stray) problems.push(`图片的输入框不对：${JSON.stringify(face)}`);
 await pg.locator('textarea.prompt').fill('静水上的红色纸船');
@@ -575,8 +614,9 @@ await sleep(200);
 await shot('12-image');
 await must('选 9:16', clickText('.menu .menu-item', '9:16'));
 await sleep(200);
+await markOld();
 await must('生成图片', click('.send-btn'));
-await waitFirst('image-view', '图片没有生成出来');
+await waitNew('image-view', '图片没有生成出来');
 if ((await pg.evaluate(() => [...document.querySelectorAll('.view-create .card')].slice(0, 2).filter((c) => c.querySelector('.image-view') && c.getAttribute('aria-label') === '静水上的红色纸船').length)) !== 2) problems.push('一次生成两张图片，最新的两张卡片应该都是它');
 await pg.locator('.view-create .card .card-media').first().hover();
 await sleep(350);
@@ -592,10 +632,20 @@ await audit('图片详情');
 await shot('13-image-detail');
 await escape();
 await sleep(200);
+// 「查看全部」带着当前类型去记录页
+if (await count('.view-create .feed-head .entry-action-btn:not([hidden])')) {
+  await must('点查看全部', click('.view-create .feed-head .entry-action-btn'));
+  await sleep(500);
+  const landed = await pg.evaluate((v) => ({ active: document.querySelector(`${v} .filters .seg.active`)?.textContent, others: document.querySelectorAll(`${v} .card :is(.player, .audio-player)`).length }), V);
+  if (landed.active !== '图片' || landed.others) problems.push(`从图片的「查看全部」进记录页，应该只看图片：${JSON.stringify(landed)}`);
+  await must('回到创作', clickText('.nav-item', '新建创作'));
+  await sleep(300);
+}
 
 // 语音：一个入口（音色）；面板里能筛语言、能试听；没有润色
 await must('切到语音', typeSeg('语音'));
 await sleep(900);
+await strangers('.player, .image-view', '语音');
 face = await composer();
 if (face.title !== '想让它读什么？' || face.tools.length !== 1 || face.stray || (await count('[data-control=polish]'))) problems.push(`语音的输入框不对：${JSON.stringify(face)}`);
 const beforeVoices = await layout();
@@ -613,8 +663,9 @@ await must('选一个音色', click('.voice-popover .voice-pick', 0));
 await sleep(300);
 if (await count('.voice-popover')) problems.push('选完音色后面板没有收起');
 await pg.locator('textarea.prompt').fill('你好，这是一次走查。');
+await markOld();
 await must('生成语音', click('.send-btn'));
-await waitFirst('audio-player', '语音没有生成出来');
+await waitNew('audio-player', '语音没有生成出来');
 // 音频卡片：没有画面，控制条一直显示；点控制条不打开详情
 await pg.locator('.brand').hover();
 await sleep(300);
@@ -627,6 +678,24 @@ if (!audioCard || audioCard.shown !== '1' || !audioCard.kind.startsWith('语音'
 await pg.locator('.view-create .card .audio-play').first().click();
 await sleep(300);
 if (await count('.modal')) problems.push('点音频的播放键不应该打开详情');
+// 音色试听也算在「同一时间只放一个」里：卡片播着时点试听，卡片要停下并回到开头。
+// 示例音频可能很短，先让它循环着，不然还没点试听它自己就放完了；没给 MOCK_AUDIO 时音频播不起来，这一条测不到。
+const cardSounding = await pg.evaluate(() => {
+  const audio = document.querySelector('.view-create .card audio');
+  audio.loop = true;
+  return !audio.paused && audio.readyState >= 2;
+});
+if (cardSounding) {
+  await must('再打开音色面板', click('[data-control=voice]'));
+  await sleep(300);
+  await pg.locator('.voice-popover .voice-row .entry-action-btn').first().click();
+  await sleep(300);
+  const quiet = await pg.evaluate(() => { const audio = document.querySelector('.view-create .card audio'); return { paused: audio.paused, time: audio.currentTime }; });
+  if (!quiet.paused || quiet.time !== 0) problems.push(`点音色试听时，正在放的卡片没有停下并回到开头：${JSON.stringify(quiet)}`);
+  await escape();
+  await sleep(200);
+  if (await count('.voice-popover')) problems.push('按 Esc 没有收起音色面板');
+}
 await pg.evaluate(() => document.querySelector('.view-create .card audio').pause());
 await openFirstCard();
 view = await detailOf();
@@ -647,15 +716,17 @@ await audit('音效·贴合度菜单');
 await escape();
 await sleep(150);
 await pg.locator('textarea.prompt').fill('厚重的关门声');
+await markOld();
 await must('生成音效', click('.send-btn'));
 await sleep(700);
-await waitFirst('audio-player', '音效没有生成出来');
+await waitNew('audio-player', '音效没有生成出来');
 
 // 配乐：从视频卡片的菜单进来，视频已经选好；没有提示词输入框
 // 这时创作页最新的几条已经是图片和音频了，视频到记录页里找。
 await must('进入创作记录', clickText('.nav-item', '创作记录'));
 await sleep(500);
 await pg.locator(`${V} input.search`).fill('');
+await must('看全部类型', clickText(`${V} .filters .seg`, '全部'));
 await sleep(300);
 const videoIndex = await pg.evaluate((v) => [...document.querySelectorAll(`${v} .card`)].findIndex((c) => c.querySelector('.player')), V);
 await must('打开视频卡片的更多', click(`${V} .card .card-more`, videoIndex));
@@ -667,10 +738,12 @@ if (face.title !== '给哪段视频配乐？' || !face.promptHidden || face.stra
 if ((await count('.frame-slot .ref-tile:not(.ref-add)')) !== 1 || !/\d+ 秒/.test((await text('.frame-slot')).join(''))) problems.push(`从视频卡片点「配乐」后，视频没有选好：${(await text('.frame-slot')).join('')}`);
 await audit('配乐');
 await shot('16-music');
+await markOld();
 await must('生成配乐', click('.send-btn'));
 await sleep(700);
 if (!(await feedFirst()).includes('is-pending')) problems.push('提交配乐后没有出现生成中的卡片');
-await waitFirst('audio-player', '配乐没有生成出来', 60);
+// 配乐是异步任务：模拟接口要十几秒才出结果，再加上本地服务的轮询间隔。
+await waitNew('audio-player', '配乐没有生成出来', 120);
 await openFirstCard();
 await sleep(400);
 view = await detailOf();
@@ -685,6 +758,7 @@ if (await pg.evaluate(() => [...document.querySelectorAll('video, audio')].some(
 // Grok 视频：只有文生和图生两种方式，没有「更多」；不支持的比例和分辨率不能选
 await must('切回视频', typeSeg('视频'));
 await sleep(300);
+await strangers('.image-view, .audio-player', '视频');
 await must('打开模型菜单', click(control('model')));
 await sleep(200);
 await must('选 Grok', clickText('.menu .menu-item', 'grok-imagine-video'));
@@ -731,19 +805,22 @@ await must('进入创作记录', clickText('.nav-item', '创作记录'));
 await sleep(500);
 await pg.locator(`${V} input.search`).fill('');
 await sleep(300);
-await must('打开类型筛选', click(`${V} .feed-tools .dropdown`));
-await sleep(250);
-if ((await text('.menu .menu-item .menu-item-label')).join('|') !== '全部类型|视频|图片|音频') problems.push(`类型筛选的选项不对：${(await text('.menu .menu-item .menu-item-label')).join('|')}`);
-await must('只看音频', clickText('.menu .menu-item', '音频'));
-await sleep(400);
-const audioOnly = await pg.evaluate((v) => ({ cards: document.querySelectorAll(`${v} .card`).length, others: document.querySelectorAll(`${v} .card .player, ${v} .card .image-view`).length, total: Number((document.querySelector(`${v} .filters .seg`)?.textContent || '').replace(/\D/g, '')) }), V);
-if (audioOnly.cards < 3 || audioOnly.others || audioOnly.cards !== audioOnly.total) problems.push(`按「音频」筛选的结果不对：${JSON.stringify(audioOnly)}`);
-await audit('创作记录·只看音频');
-await shot('19-records-audio');
-await must('打开类型筛选', click(`${V} .feed-tools .dropdown`));
-await sleep(250);
-await must('看全部类型', clickText('.menu .menu-item', '全部类型'));
+for (const [label, mark] of [['图片', '.image-view'], ['语音', '.audio-kind'], ['配乐', '.audio-kind']]) {
+  await must(`只看${label}`, clickText(`${V} .filters .seg`, label));
+  await sleep(400);
+  const only = await pg.evaluate(([v, m, l]) => {
+    const cards = [...document.querySelectorAll(`${v} .card`)];
+    // 已完成的卡片要带这种类型的画面；音频还要看面板上写的是不是这一种
+    const wrong = cards.filter((c) => !c.querySelector('.card-state') && !(c.querySelector(m) && (m !== '.audio-kind' || c.querySelector(m).textContent.startsWith(l)))).length;
+    return { cards: cards.length, wrong };
+  }, [V, mark, label]);
+  if (!only.cards || only.wrong || only.cards !== (await shown())) problems.push(`按「${label}」筛选的结果不对：${JSON.stringify(only)}，显示 ${await shown()} 条`);
+}
+await audit('创作记录·只看配乐');
+await shot('19-records-type');
+await must('看全部类型', clickText(`${V} .filters .seg`, '全部'));
 await sleep(300);
+if ((await shown()) !== (await count(`${V} .card`)) || (await shown()) < total) problems.push('切回「全部」后记录没有列全');
 
 // 7. 素材库
 await must('进入素材库', clickText('.nav-item', '素材库'));

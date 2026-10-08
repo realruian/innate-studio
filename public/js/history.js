@@ -5,19 +5,20 @@ import { h, icon, toast, clear, openModal, openMenu, confirmDialog, copyText, fm
 import { api, state, on, loadHistory, isPendingTask, isTimedOutTask, goTo } from './store.js';
 import { thumbEl } from './assets.js';
 import { setForm, setStudio, useImageAsFirstFrame, useVideoForMusic } from './composer.js';
-import { videoPlayer, audioPlayer } from './player.js';
+import { videoPlayer, audioPlayer, stopPlaying } from './player.js';
 import { videoFamily } from './request.js';
 
 const MODE_LABELS = { text: '文生视频', frames: '首尾帧', reference: '参考生成' };
 const STATUS_LABELS = { queued: '排队中', in_progress: '生成中', completed: '已完成', failed: '失败' };
 const KIND_LABELS = { video: '视频', image: '图片', audio: '音频' };
-const TOOL_LABELS = { speech: '语音', sfx: '音效', music: '配乐' };
+// 五种内容，和创作页输入框上方的切换是同一组。
+const TYPE_LABELS = { video: '视频', image: '图片', speech: '语音', sfx: '音效', music: '配乐' };
 // 生成中的卡片上那句说明：各种内容要等多久差别很大。
 const WAIT_HINTS = { video: '通常需要几分钟，可以关掉页面，回来再看', image: '通常十几秒', speech: '通常几秒', sfx: '通常几秒', music: '通常不到一分钟' };
 
 // 这条记录是哪种内容：视频、图片，或者音频里的语音、音效、配乐。
 const typeOf = (item) => (item.kind === 'audio' ? item.tool : item.kind);
-const typeLabel = (item) => TOOL_LABELS[item.tool] || KIND_LABELS[item.kind];
+const typeLabel = (item) => TYPE_LABELS[typeOf(item)];
 // 没有提示词的记录（配乐）用它的类型来称呼。
 const nameOf = (item) => item.prompt || typeLabel(item);
 
@@ -249,8 +250,8 @@ function paramsOf(item) {
 export function openDetail(id) {
   const item = state.history.find((i) => i.id === id);
   if (!item) return;
-  // 详情里的视频会自动播放，先停掉列表里正在放的，免得两个声音叠在一起。
-  for (const media of document.querySelectorAll('.card video, .card audio')) media.pause();
+  // 详情盖住了列表，先停掉列表里正在放的。详情是图片、或者自动播放被浏览器拦下时，没有新的播放来顶掉它。
+  stopPlaying();
   const refs = refsOf(item);
   const present = ([, value]) => value != null && value !== '' && value !== false;
   const kindLabel = KIND_LABELS[item.kind];
@@ -371,35 +372,58 @@ function cardGrid(emptyState) {
   return { grid, draw };
 }
 
-// 创作页输入框下面：只列最新的几条，刚提交的任务在这里看进度。
+// 记录页画出来之后，别处可以让它直接切到某一种类型。
+let showRecordsOf = null;
+
+// 创作页输入框下面：只列当前这种内容最新的几条，刚提交的任务在这里看进度。上面切换类型，这里跟着换。
 export function renderRecent(root) {
-  const allButton = h('button', { class: 'entry-action-btn', type: 'button', onClick: () => goTo('records') });
+  const allButton = h('button', {
+    class: 'entry-action-btn',
+    type: 'button',
+    onClick: () => {
+      const type = state.createType;
+      goTo('records');
+      showRecordsOf?.(type);
+    },
+  });
   const { grid, draw } = cardGrid(() =>
     h(
       'div',
       { class: 'empty' },
-      h('div', { class: 'empty-title' }, state.historyLoaded ? '还没有生成过内容' : '正在读取记录…'),
-      state.historyLoaded ? h('div', { class: 'muted' }, '在上面写下提示词，点右下角的发送键。生成的结果和参数都会保存下来。') : null,
+      h('div', { class: 'empty-title' }, state.historyLoaded ? `还没有生成过${TYPE_LABELS[state.createType]}` : '正在读取记录…'),
+      state.historyLoaded ? h('div', { class: 'muted' }, '生成的结果和参数都会保存下来，在这里看进度。') : null,
     ),
   );
   const update = () => {
-    allButton.textContent = `查看全部 ${state.history.length} 条`;
-    allButton.hidden = state.history.length <= RECENT_COUNT;
-    draw(state.history.slice(0, RECENT_COUNT));
+    const list = state.history.filter((item) => typeOf(item) === state.createType);
+    allButton.textContent = `查看全部 ${list.length} 条`;
+    allButton.hidden = list.length <= RECENT_COUNT;
+    draw(list.slice(0, RECENT_COUNT));
   };
 
   root.append(h('section', { class: 'feed' }, h('header', { class: 'feed-head' }, h('h2', null, '最近生成'), allButton), grid));
   update();
   on('history', update);
+  on('createType', update);
 }
 
-// 「创作记录」页：全部记录，可以按状态和类型筛选、按提示词搜索。
+// 记录页的两种筛选。类型和创作页输入框上方的切换是同一组，摆成分段；状态用得少，收在下拉里。
+const TYPE_FILTERS = [{ value: 'all', label: '全部' }, ...Object.entries(TYPE_LABELS).map(([value, label]) => ({ value, label }))];
+const STATUS_FILTERS = [
+  { value: 'all', label: '全部状态', test: () => true },
+  { value: 'pending', label: '生成中', test: isPendingTask },
+  { value: 'completed', label: '已完成', test: (item) => item.status === 'completed' },
+  { value: 'failed', label: '失败', test: (item) => item.status === 'failed' },
+];
+
+// 「创作记录」页：全部记录，可以按类型和状态筛选、按提示词搜索。
 export function renderRecords(root) {
-  let filter = 'all';
-  let kind = 'all';
+  let type = 'all';
+  let status = 'all';
   let query = '';
-  const filterEl = h('div');
-  const kindEl = h('div');
+  let statusSignature = '';
+  const typeEl = h('div');
+  const statusEl = h('div');
   const countEl = h('span', { class: 'muted small' });
   const search = h('input', {
     class: 'input search',
@@ -420,32 +444,17 @@ export function renderRecords(root) {
     ),
   );
 
-  function drawFilter() {
-    // 状态旁边的数字跟着类型走：选了「图片」，数的就只是图片。
-    const pool = state.history.filter(ofKind);
-    const count = (fn) => pool.filter(fn).length;
-    clear(kindEl).append(
-      dropdown({
-        label: '类型',
-        value: kind,
-        options: [{ value: 'all', label: '全部类型' }, ...Object.entries(KIND_LABELS).map(([value, label]) => ({ value, label }))],
-        onChange: (next) => {
-          kind = next;
-          draw();
-        },
-      }),
-    );
-    clear(filterEl).append(
+  const ofType = (item) => type === 'all' || typeOf(item) === type;
+  const ofStatus = (item) => STATUS_FILTERS.find((s) => s.value === status).test(item);
+
+  function drawType() {
+    clear(typeEl).append(
       segmented(
-        [
-          { value: 'all', label: `全部 ${pool.length}` },
-          { value: 'pending', label: `生成中 ${count(isPendingTask)}` },
-          { value: 'completed', label: `已完成 ${count((i) => i.status === 'completed')}` },
-          { value: 'failed', label: `失败 ${count((i) => i.status === 'failed')}` },
-        ],
-        filter,
+        TYPE_FILTERS,
+        type,
         (next) => {
-          filter = next;
+          type = next;
+          drawType();
           draw();
         },
         'filters',
@@ -453,17 +462,30 @@ export function renderRecords(root) {
     );
   }
 
-  const ofKind = (item) => kind === 'all' || item.kind === kind;
+  // 状态旁边的数字跟着类型走：选了「图片」，数的就只是图片。数字没变就不重画，免得把打开着的菜单弄丢。
+  function drawStatus() {
+    const pool = state.history.filter(ofType);
+    const options = STATUS_FILTERS.map((s) => ({ value: s.value, label: s.label, note: String(pool.filter(s.test).length) }));
+    const signature = JSON.stringify([status, options.map((o) => o.note)]);
+    if (signature === statusSignature) return;
+    statusSignature = signature;
+    clear(statusEl).append(
+      dropdown({
+        label: '状态',
+        value: status,
+        options,
+        onChange: (next) => {
+          status = next;
+          draw();
+        },
+      }),
+    );
+  }
 
   function draw() {
-    drawFilter();
-    const list = state.history.filter((item) => {
-      if (!ofKind(item)) return false;
-      if (filter === 'pending' && !isPendingTask(item)) return false;
-      if ((filter === 'completed' || filter === 'failed') && item.status !== filter) return false;
-      return !query || (item.prompt || '').toLowerCase().includes(query);
-    });
-    countEl.textContent = query || filter !== 'all' || kind !== 'all' ? `显示 ${list.length} 条` : '';
+    drawStatus();
+    const list = state.history.filter((item) => ofType(item) && ofStatus(item) && (!query || (item.prompt || '').toLowerCase().includes(query)));
+    countEl.textContent = state.historyLoaded ? `${list.length} 条` : '';
     drawCards(list);
   }
 
@@ -472,10 +494,16 @@ export function renderRecords(root) {
       'div',
       { class: 'page' },
       h('header', { class: 'page-head' }, h('div', null, h('h1', null, '创作记录'), h('p', { class: 'muted' }, '生成过的全部视频、图片和音频。点画面看详情，点「复用」把那次的参数填回创作面板。'))),
-      h('div', { class: 'page-tools' }, filterEl, h('div', { class: 'feed-tools' }, countEl, kindEl, search)),
+      h('div', { class: 'page-tools' }, typeEl, h('div', { class: 'feed-tools' }, countEl, statusEl, search)),
       grid,
     ),
   );
+  drawType();
   draw();
   on('history', draw);
+  showRecordsOf = (next) => {
+    type = next;
+    drawType();
+    draw();
+  };
 }
