@@ -104,3 +104,5 @@ npm test
 ## 许可
 
 [MIT](LICENSE)
+
+图标取自 Hugeicons 的免费图标（MIT 许可），声明见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
