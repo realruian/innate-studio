@@ -11,7 +11,7 @@
 // - 用到的字号都在规范的几档之内
 
 const THEME = '__THEME__';
-const ALLOWED_FONT_SIZES = ['11px', '12px', '13px', '14px', '15px', '18px', '26px'];
+const ALLOWED_FONT_SIZES = ['11px', '12px', '13px', '14px', '18px', '26px'];
 const pg = await openTab('http://127.0.0.1:5179/');
 const errors = [];
 const problems = [];
@@ -136,6 +136,24 @@ for (const [name, want] of Object.entries(REFERENCE)) {
   if (colours[name] !== want) problems.push(`颜色和 Antigravity 不一致：${name} 是 ${colours[name]}，应为 ${want}`);
 }
 if (colours.托边高度 !== '0px 8px 0px 0px' || colours.托边占位 !== '8px') problems.push(`输入框托边不对：${colours.托边高度}，占位 ${colours.托边占位}`);
+
+// 1c. 版式：对齐到共同的边；弹窗之外，标题和正文的行高按角色区分
+const edges = await pg.evaluate(() => {
+  const left = (selector) => Math.round(document.querySelector(selector).getBoundingClientRect().left);
+  const prompt = document.querySelector('textarea.prompt');
+  const title = getComputedStyle(document.querySelector('.composer-title'));
+  return {
+    提示词: Math.round(prompt.getBoundingClientRect().left + parseFloat(getComputedStyle(prompt).paddingLeft)),
+    工具栏图标: left('.composer-params .icon'),
+    品牌标记: left('.brand-mark'),
+    导航图标: left('.nav-item .icon'),
+    问句行高: Math.round((parseFloat(title.lineHeight) / parseFloat(title.fontSize)) * 100) / 100,
+    正文行高: Math.round((parseFloat(getComputedStyle(document.body).lineHeight) / parseFloat(getComputedStyle(document.body).fontSize)) * 100) / 100,
+  };
+});
+if (edges.提示词 !== edges.工具栏图标) problems.push(`输入框里提示词和工具栏图标的左边线没对齐：${edges.提示词} / ${edges.工具栏图标}`);
+if (edges.品牌标记 !== edges.导航图标) problems.push(`侧栏的品牌标记和导航图标的左边线没对齐：${edges.品牌标记} / ${edges.导航图标}`);
+if (edges.问句行高 !== 1.2 || edges.正文行高 !== 1.5) problems.push(`行高不对：问句 ${edges.问句行高}（应为 1.2），正文 ${edges.正文行高}（应为 1.5）`);
 
 // 2. 视频播放器：自绘控制条，能播放、能静音
 // 先给要测的那张卡片做个记号。创作记录会随任务进度更新，"第一张带视频的卡片"随时可能换成别的，
@@ -325,7 +343,8 @@ await must('点生成', click('.send-btn'));
 await sleep(1800);
 if (!(await count('.view-create .card:first-child .card-state.is-pending'))) problems.push('提交后「最近生成」的第一张不是刚提交的任务');
 if ((await count('.view-create .card')) > 6) problems.push(`创作页的「最近生成」超过了 6 条：${await count('.view-create .card')}`);
-if ((await text('.view-create .feed-head h1')).join('') !== '最近生成') problems.push('创作页下方的标题应为「最近生成」');
+if ((await text('.view-create .feed-head h2')).join('') !== '最近生成') problems.push('创作页下方的标题应为「最近生成」');
+if ((await count('.view-create h1')) !== 1) problems.push('创作页应该只有一个一级标题（首屏问句），「最近生成」是二级标题');
 const sideText = (await text('.sidebar')).join('');
 if ((await count('.side-list, .side-row')) || sideText.includes('最近生成')) problems.push('侧栏里不应该有「最近生成」列表');
 if ((await text('.sidebar .nav-item')).join('|') !== '新建创作|创作记录|素材库|真人档案|设置') problems.push(`侧栏的入口不对：${(await text('.sidebar .nav-item')).join('|')}`);

@@ -284,7 +284,7 @@ export function renderRecent(root) {
     draw(state.history.slice(0, RECENT_COUNT));
   };
 
-  root.append(h('section', { class: 'feed' }, h('header', { class: 'feed-head' }, h('h1', null, '最近生成'), allButton), grid));
+  root.append(h('section', { class: 'feed' }, h('header', { class: 'feed-head' }, h('h2', null, '最近生成'), allButton), grid));
   update();
   on('history', update);
 }
