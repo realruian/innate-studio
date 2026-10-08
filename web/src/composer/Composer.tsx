@@ -7,6 +7,7 @@ import { RES_RANK } from '../request.ts';
 import { Icon, type IconName } from '../ui/Icon.tsx';
 import { Segmented, Toggle, Dropdown, FormRow, tip, clipTip } from '../ui/controls.tsx';
 import { openPopover, openMenu } from '../ui/layers.tsx';
+import { enter, enterEach, reducedMotion, useOnChange, EASE_OUT } from '../ui/motion.ts';
 import { Thumb, openAssetPicker } from '../assets.tsx';
 import { openSettings } from '../settings.tsx';
 import type { Kind, Ref, VideoForm } from '../types.ts';
@@ -497,7 +498,10 @@ function SendArea() {
           </button>
         ))}
       <button key="send" className={`send-btn ${blocked ? 'blocked' : ''}`} type="button" {...tip(blocked || submitError || `${type.action}（⌘ Enter）`)} aria-label={type.action} aria-disabled={blocked ? 'true' : undefined} disabled={submitting} onClick={submit}>
-        {submitting ? <span className="spinner" /> : <Icon name="arrowUp" size={18} />}
+        <span className="icon-swap">
+          <Icon name="arrowUp" size={18} shown={!submitting} />
+          <span className="spinner" data-shown={submitting ? '' : undefined} />
+        </span>
       </button>
     </>
   );
@@ -509,6 +513,12 @@ export function Composer() {
   const type = typeOf();
   const text = draftPrompt();
   const prompt = useRef<HTMLTextAreaElement>(null);
+  const title = useRef<HTMLHeadingElement>(null);
+  const types = useRef<HTMLDivElement>(null);
+  const card = useRef<HTMLDivElement>(null);
+  const params = useRef<HTMLDivElement>(null);
+  const resizing = useRef<Animation | null>(null);
+  const settledHeight = useRef(0);
 
   // 文本框里的字由用户打，不由这里逐字回写；只有换类型、润色、复用这些从外面改了文字的时候才写回去。
   // 高度跟着内容长，最高 280。
@@ -523,14 +533,46 @@ export function Composer() {
     return () => registerPrompt(null);
   }, []);
 
+  // 打开页面时：问句、类型切换、输入框依次进场。
+  useLayoutEffect(() => {
+    enter(title.current, { y: 12, blur: 4, duration: 420 });
+    enter(types.current, { y: 12, duration: 420, delay: 90 });
+    enter(card.current, { y: 12, duration: 420, delay: 180 });
+  }, []);
+
+  // 换了一种内容：问句换一句，工具栏的入口依次出现。
+  useOnChange(studio.type, () => {
+    enter(title.current, { y: 6, blur: 3, duration: 200 });
+    enterEach(params.current!.children, { y: 4, duration: 180, stagger: 30 });
+  });
+
+  // 类型、生成方式、模型家族变了，输入框里的东西就不一样高。高度滑过去，下面的记录跟着挪，不是跳一下。
+  // 只管这几种变化：打字撑高文本框时不做动效。
+  const shape = `${studio.type}:${composer.form.mode}:${isGrok()}`;
+  useLayoutEffect(() => {
+    const el = card.current!;
+    // 上一次还没滑完就又变了，从现在停着的高度接着滑。
+    const from = resizing.current?.playState === 'running' ? el.offsetHeight : settledHeight.current;
+    resizing.current?.cancel();
+    const to = el.offsetHeight;
+    if (!from) return;
+    enter(el.querySelector('.media-block:not([hidden])'), { y: 4, duration: 200 });
+    if (Math.abs(to - from) > 1 && !reducedMotion()) resizing.current = el.animate([{ height: `${from}px` }, { height: `${to}px` }], { duration: 240, easing: EASE_OUT });
+  }, [shape]);
+  useLayoutEffect(() => {
+    if (resizing.current?.playState !== 'running') settledHeight.current = card.current!.offsetHeight;
+  });
+
   // 读到模型列表后，账号用不了的类型不能选。
   const { known, image, audio } = state.catalog;
   const missing: Record<string, boolean> = { image: known && !image.length, speech: known && !audio.speech, sfx: known && !audio.sfx, music: known && !audio.music };
 
   return (
     <section className="composer">
-      <h1 className="composer-title">{type.title}</h1>
-      <div className="composer-types">
+      <h1 ref={title} className="composer-title">
+        {type.title}
+      </h1>
+      <div ref={types} className="composer-types">
         <Segmented
           options={TYPES.map((t) => ({ value: t.value, label: t.label, disabled: missing[t.value] && t.value !== studio.type, title: missing[t.value] ? '这个账号没有对应的模型' : null }))}
           value={studio.type}
@@ -538,7 +580,7 @@ export function Composer() {
           className="type-switch"
         />
       </div>
-      <div className="composer-card">
+      <div ref={card} className="composer-card">
         <MediaBlock />
         <textarea
           ref={prompt}
@@ -557,7 +599,7 @@ export function Composer() {
           }}
         />
         <div className="composer-bar">
-          <div className="composer-params">
+          <div ref={params} className="composer-params">
             <Toolbar />
           </div>
           <div className="composer-send">

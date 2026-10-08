@@ -595,6 +595,18 @@ await sleep(300);
 await strangers('.player, .audio-player', '图片');
 let face = await composer();
 if (face.title !== '想生成什么图片？' || face.tools.length !== 3 || face.extraRows || face.stray) problems.push(`图片的输入框不对：${JSON.stringify(face)}`);
+// 分段选择里选中项的底色是一块滑块：滑完之后要正好盖在选中的那一格上；动效播完不在节点上留样式
+await sleep(500);
+const settled = await pg.evaluate(() => {
+  const off = [...document.querySelectorAll('.segmented')].filter((s) => s.getClientRects().length && s.querySelector('.seg.active')).filter((s) => {
+    const thumb = s.querySelector('.seg-thumb').getBoundingClientRect();
+    const active = s.querySelector('.seg.active').getBoundingClientRect();
+    return Math.abs(thumb.left - active.left) > 1 || Math.abs(thumb.width - active.width) > 1;
+  });
+  const moving = document.getAnimations().filter((a) => a.playState === 'running' && a.animationName !== 'spin').length;
+  return { off: off.map((s) => s.className), moving, card: document.querySelector('.composer-card').getAttribute('style') };
+});
+if (settled.off.length || settled.moving || settled.card) problems.push(`切换类型的动效没有收干净：${JSON.stringify(settled)}`);
 await pg.locator('textarea.prompt').fill('静水上的红色纸船');
 await must('点润色', click('[data-control=polish]'));
 await sleep(900);

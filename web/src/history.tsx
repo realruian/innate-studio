@@ -1,7 +1,7 @@
 // 生成记录：任务进度、播放、下载、复用参数、详情。视频、图片、音频（语音、音效、配乐）都在这里。
 // 有两处用到：创作页输入框下面的「最近生成」（只列最新几条），和单独的「创作记录」页（全部，带筛选和搜索）。
 
-import { memo, useState, type ReactNode } from 'react';
+import { memo, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { api, state, emit, useStore, loadHistory, isPendingTask, isTimedOutTask, goTo } from './store.ts';
 import { fmtTime, fmtDuration, fmtBytes } from './format.ts';
 import { videoFamily } from './request.ts';
@@ -11,6 +11,7 @@ import { Thumb } from './assets.tsx';
 import { Icon } from './ui/Icon.tsx';
 import { Segmented, Dropdown, tip } from './ui/controls.tsx';
 import { toast, openModal, openMenu, confirmDialog, copyText } from './ui/layers.tsx';
+import { enter } from './ui/motion.ts';
 import { setForm, setStudio, useImageAsFirstFrame, useVideoForMusic } from './composer/state.ts';
 import type { CreateType, HistoryItem, Ref } from './types.ts';
 
@@ -243,9 +244,14 @@ const CardMedia = memo(
 
 // 一张卡片只有画面。提示词、参数、时间都在详情里，点画面打开；
 // 操作收在画面右上角的「更多」里，鼠标移上去才出现。
-function Card({ item }: { item: HistoryItem }) {
+// index 是它在列表里排第几：一批卡片一起出现时，靠后的晚一点进场。新提交的任务排在最前，单独进场。
+function Card({ item, index }: { item: HistoryItem; index: number }) {
+  const ref = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    enter(ref.current, { y: 8, duration: 260, delay: Math.min(index, 8) * 35 });
+  }, []);
   return (
-    <article className={`card status-${item.status}`} aria-label={nameOf(item)}>
+    <article ref={ref} className={`card status-${item.status}`} aria-label={nameOf(item)}>
       {/* 控制条和「更多」上的点击各管各的，不算在"点画面打开详情"里。 */}
       <div className="card-media" onClick={(e) => !(e.target as Element).closest('.player-bar, .audio-controls, .card-more') && openDetail(item.id)}>
         <CardMedia item={item} signature={mediaSignature(item)} />
@@ -259,7 +265,7 @@ function Card({ item }: { item: HistoryItem }) {
 
 // 把一组记录画成卡片网格。卡片按记录的 id 对应，进度更新时正在播放的视频不会被打断。
 function CardGrid({ list, empty }: { list: HistoryItem[]; empty: ReactNode }) {
-  return <div className="card-grid">{list.length ? list.map((item) => <Card key={item.id} item={item} />) : empty}</div>;
+  return <div className="card-grid">{list.length ? list.map((item, index) => <Card key={item.id} item={item} index={index} />) : empty}</div>;
 }
 
 // ---------- 详情 ----------
@@ -440,8 +446,13 @@ export function Recent() {
   useStore('history', 'createType');
   const type = state.createType;
   const list = state.history.filter((item) => typeOf(item) === type);
+  const feed = useRef<HTMLElement>(null);
+  // 打开页面时排在问句、输入框之后进场。
+  useLayoutEffect(() => {
+    enter(feed.current, { y: 12, duration: 420, delay: 270 });
+  }, []);
   return (
-    <section className="feed">
+    <section ref={feed} className="feed">
       <header className="feed-head">
         <h2>最近生成</h2>
         <button

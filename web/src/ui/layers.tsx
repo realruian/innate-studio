@@ -4,6 +4,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Icon } from './Icon.tsx';
+import { enter, leave } from './motion.ts';
 
 // 一个能被订阅的列表：打开、关闭就是往里加、往外拿。
 function createList<T>() {
@@ -44,12 +45,20 @@ export function toast(message: string, type: ToastType = 'info', ms = 3600) {
   }, ms);
 }
 
-function ToastHost() {
-  return useList(toasts).map((t) => (
-    <div key={t.id} className={`toast toast-${t.type}${t.leaving ? ' leaving' : ''}`} role="status">
-      {t.message}
+function ToastView({ message, type, leaving }: { message: string; type: ToastType; leaving: boolean }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    enter(ref.current, { y: 8, duration: 200 });
+  }, []);
+  return (
+    <div ref={ref} className={`toast toast-${type}${leaving ? ' leaving' : ''}`} role="status">
+      {message}
     </div>
-  ));
+  );
+}
+
+function ToastHost() {
+  return useList(toasts).map((t) => <ToastView key={t.id} {...t} />);
 }
 
 export async function copyText(text: string, okMessage = '已复制') {
@@ -118,6 +127,7 @@ function TooltipHost() {
     const top = below + el.offsetHeight > window.innerHeight - 8 ? a.top - 6 - el.offsetHeight : below;
     el.style.left = `${Math.round(left)}px`;
     el.style.top = `${Math.round(top)}px`;
+    enter(el, { y: 0, scale: 0.97, duration: 120 });
   }, [tip]);
 
   return tip ? (
@@ -255,6 +265,8 @@ function PopoverView({ layer }: { layer: Layer }) {
       }
       el.style.left = `${Math.round(left)}px`;
       el.style.top = `${Math.round(top)}px`;
+      // 出现时从贴着按钮的那个角长出来。
+      el.style.transformOrigin = `${top < a.top ? 'bottom' : 'top'} ${layer.align === 'end' ? 'right' : 'left'}`;
     };
 
     const onScroll = (e: Event) => {
@@ -270,6 +282,7 @@ function PopoverView({ layer }: { layer: Layer }) {
     window.addEventListener('resize', place);
     window.addEventListener('scroll', onScroll, true);
     place();
+    enter(el, { y: 0, scale: 0.96, duration: 150 });
     if (layer.menu) el.focus();
     return () => {
       cancelAnimationFrame(frame);
@@ -375,6 +388,10 @@ interface Modal {
   subtitle?: string;
   content: ReactNode;
   size: 'sm' | 'md' | 'lg';
+  // 遮罩的节点。关闭时在它上面播出场动效。
+  el: HTMLElement | null;
+  // 已经在关了，只是出场动效还没播完。
+  leaving: boolean;
   close: () => void;
 }
 
@@ -388,10 +405,25 @@ export function openModal({ title, subtitle, content, size = 'md', onClose }: { 
     subtitle,
     content,
     size,
+    el: null,
+    leaving: false,
     close() {
-      if (!modals.get().includes(modal)) return;
-      modals.set(modals.get().filter((m) => m !== modal));
-      setTimeout(closeOrphanLayers, 0);
+      if (modal.leaving || !modals.get().includes(modal)) return;
+      modal.leaving = true;
+      // 从它里面打开的菜单跟着关掉。
+      for (const layer of [...layers.get()]) if (modal.el?.contains(layer.anchor)) layer.close();
+      const remove = () => {
+        modals.set(modals.get().filter((m) => m !== modal));
+        setTimeout(closeOrphanLayers, 0);
+      };
+      // 出场比进场短，而且不再挡着下面的点击；调用的地方不用等它播完。
+      if (modal.el) {
+        modal.el.style.pointerEvents = 'none';
+        leave(modal.el.firstElementChild, { scale: 0.98 });
+        leave(modal.el).then(remove);
+      } else {
+        remove();
+      }
       onClose?.();
     },
   };
@@ -402,12 +434,19 @@ export function openModal({ title, subtitle, content, size = 'md', onClose }: { 
 document.addEventListener('keydown', (e) => {
   // 这次 Esc 已经用来关掉弹窗里的菜单了，就不再关弹窗。
   if (e.key !== 'Escape' || e.timeStamp === lastLayerEscape) return;
-  modals.get().at(-1)?.close();
+  modals.get().findLast((m) => !m.leaving)?.close();
 });
 
-function ModalHost() {
-  return useList(modals).map((modal) => (
-    <div key={modal.id} className="modal-overlay" onMouseDown={(e) => e.target === e.currentTarget && modal.close()}>
+function ModalView({ modal }: { modal: Modal }) {
+  const overlay = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    modal.el = overlay.current;
+    // 遮罩淡入，弹窗从略小、略低的位置到位。
+    enter(overlay.current, { y: 0, duration: 160 });
+    enter(overlay.current!.firstElementChild, { y: 8, scale: 0.97, duration: 220 });
+  }, [modal]);
+  return (
+    <div ref={overlay} className="modal-overlay" onMouseDown={(e) => e.target === e.currentTarget && modal.close()}>
       <div className={`modal modal-${modal.size}`} role="dialog" aria-modal="true" aria-label={modal.title}>
         <header className="modal-head">
           <div>
@@ -421,7 +460,11 @@ function ModalHost() {
         <div className="modal-body">{modal.content}</div>
       </div>
     </div>
-  ));
+  );
+}
+
+function ModalHost() {
+  return useList(modals).map((modal) => <ModalView key={modal.id} modal={modal} />);
 }
 
 export function confirmDialog({ title, message, okText = '确定', cancelText = '取消', danger = false }: { title: string; message: string; okText?: string; cancelText?: string; danger?: boolean }) {

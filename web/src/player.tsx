@@ -4,7 +4,7 @@
 // 音频：没有画面，所以是一块写着内容的面板，下面一行播放键、时间和进度，一直显示。
 
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type RefObject } from 'react';
-import { Icon } from './ui/Icon.tsx';
+import { Icon, IconSwap } from './ui/Icon.tsx';
 import { exclusive } from './playback.ts';
 
 const clock = (seconds: number) => {
@@ -189,7 +189,7 @@ export function VideoPlayer({ src, autoplay = false, label = '视频', clickToPl
       {soundtrack && <audio ref={music} src={soundtrack} preload="auto" />}
       <div className="player-bar">
         <button className="player-btn" type="button" aria-label={playing ? '暂停' : '播放'} onClick={toggle}>
-          <Icon name={playing ? 'pause' : 'play'} size={16} />
+          <IconSwap icons={['play', 'pause']} show={playing ? 'pause' : 'play'} />
         </button>
         <span ref={time} className="player-time">
           0:00 / 0:00
@@ -200,7 +200,7 @@ export function VideoPlayer({ src, autoplay = false, label = '视频', clickToPl
           </div>
         </div>
         <button className="player-btn" type="button" aria-label={muted ? '取消静音' : '静音'} onClick={() => setMuted(!muted)}>
-          <Icon name={muted ? 'mute' : 'volume'} size={16} />
+          <IconSwap icons={['volume', 'mute']} show={muted ? 'mute' : 'volume'} />
         </button>
         <button className="player-btn" type="button" aria-label="全屏" onClick={toggleFullscreen}>
           <Icon name="expand" size={16} />
@@ -224,7 +224,7 @@ export function AudioPlayer({ src, kind, text, label = '音频' }: { src?: strin
       </div>
       <div className="audio-controls">
         <button className="audio-play" type="button" aria-label={playing ? '暂停' : '播放'} onClick={toggle}>
-          <Icon name={playing ? 'pause' : 'play'} size={16} />
+          <IconSwap icons={['play', 'pause']} show={playing ? 'pause' : 'play'} />
         </button>
         <span ref={time} className="audio-time">
           0:00 / 0:00

@@ -1,6 +1,6 @@
 // 表单控件。所有页面都只用这里的控件，不直接用浏览器原生的下拉框、勾选框和折叠标签。
 
-import { useRef, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, type ReactNode } from 'react';
 import { Icon, type IconName } from './Icon.tsx';
 import { openMenu } from './layers.tsx';
 
@@ -16,10 +16,33 @@ export interface SegOption<V extends string = string> {
   disabled?: boolean;
 }
 
-// 分段选择器。
+// 分段选择器。选中项的底色是一块单独的滑块，换选中项时它滑过去。
 export function Segmented<V extends string>({ options, value, onChange, className = '' }: { options: SegOption<V>[]; value: V; onChange: (value: V) => void; className?: string }) {
+  const root = useRef<HTMLDivElement>(null);
+  const thumb = useRef<HTMLSpanElement>(null);
+
+  // 把滑块摆到选中的那一格上。
+  const place = () => {
+    const active = root.current?.querySelector<HTMLElement>('.seg.active');
+    // 所在的页面被藏起来时量不到尺寸，先保持原样，等它显示出来（下面的 ResizeObserver 会知道）再量。
+    if (!active || !active.offsetWidth || !thumb.current) return;
+    thumb.current.style.width = `${active.offsetWidth}px`;
+    thumb.current.style.transform = `translateX(${active.offsetLeft}px)`;
+  };
+  useLayoutEffect(place);
+  useEffect(() => {
+    const el = root.current!;
+    const observer = new ResizeObserver(place);
+    observer.observe(el);
+    // 第一次摆好位置之后才打开过渡，不然刚出现时滑块会从最左边滑过来。
+    thumb.current!.getBoundingClientRect();
+    el.dataset.ready = '';
+    return () => observer.disconnect();
+  }, []);
+
   return (
-    <div className={`segmented ${className}`} role="radiogroup">
+    <div ref={root} className={`segmented ${className}`} role="radiogroup">
+      <span ref={thumb} className="seg-thumb" />
       {options.map((opt) => (
         <button
           key={opt.value}

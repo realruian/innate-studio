@@ -72,6 +72,10 @@
   --r-md: 12px;
   --r-lg: 16px;
   --ease: cubic-bezier(0.2, 0, 0, 1);
+  /* 进场、出场、按下：起步快、收尾慢 */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  /* 带一点回弹（过头不到 3%），给滑块、开关这类会"到位"的东西用 */
+  --spring: linear(0, 0.08, 0.254, 0.45, 0.629, 0.774, 0.881, 0.952, 0.995, 1.018, 1.027, 1.028, 1.024, 1.019, 1.013, 1.009, 1.005, 1.002, 1);
   --font: ui-sans-serif, -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Segoe UI", Roboto, sans-serif;
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
@@ -143,6 +147,10 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 .icon { display: inline-flex; flex: none; }
+/* 会随状态换的图标叠在同一个位置：换的时候一个缩小淡出、一个放大淡入 */
+.icon-swap { display: inline-grid; place-items: center; flex: none; }
+.icon-swap > * { grid-area: 1 / 1; opacity: 0; scale: 0.25; filter: blur(4px); transition: opacity 300ms var(--ease), scale 300ms var(--ease), filter 300ms var(--ease); }
+.icon-swap > [data-shown] { opacity: 1; scale: 1; filter: none; }
 .row { display: flex; gap: var(--sp-8); align-items: center; }
 .row > .input { flex: 1; min-width: 0; }
 .row.wrap { flex-wrap: wrap; }
@@ -198,13 +206,15 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 .main { min-width: 0; height: 100vh; overflow: hidden; border-left: 1px solid var(--border); }
 /* 滚动条的位置一直留着：内容变高、滚动条出现时，页面里的东西不会因此变窄或挪位置 */
-.view { height: 100%; overflow-y: auto; scrollbar-gutter: stable; }
+.view { height: 100%; overflow-y: auto; scrollbar-gutter: stable; animation: fade 160ms var(--ease-out); }
 .view-create { padding: 0 var(--sp-32) var(--sp-64); }
 
 /* ---------- 基础控件 ---------- */
 
 /* 带边框的按钮 */
-.btn { display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-8); flex: none; height: var(--h-md); padding: 0 var(--sp-12); border: 1px solid var(--border-strong); border-radius: var(--r-sm); background: none; color: var(--text); font-size: var(--text-ui); white-space: nowrap; text-decoration: none; cursor: pointer; transition: background-color 120ms var(--ease), border-color 120ms var(--ease); }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-8); flex: none; height: var(--h-md); padding: 0 var(--sp-12); border: 1px solid var(--border-strong); border-radius: var(--r-sm); background: none; color: var(--text); font-size: var(--text-ui); white-space: nowrap; text-decoration: none; cursor: pointer; transition: background-color 120ms var(--ease), border-color 120ms var(--ease), scale 150ms var(--ease-out); }
+/* 按下时轻轻缩一下，松手弹回 */
+.btn:active:not(:disabled), .send-btn:active:not(:disabled), .audio-play:active { scale: 0.96; }
 .btn:hover:not(:disabled) { background: var(--hover); }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .btn-primary { background: var(--text); border-color: transparent; color: var(--bg); font-weight: var(--fw-medium); }
@@ -261,10 +271,13 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 .tab-pane > .dropdown-field { width: 100%; }
 
 /* 分段选择 */
-.segmented { display: inline-flex; align-self: flex-start; justify-self: start; gap: var(--sp-2); height: var(--h-md); padding: var(--sp-2); background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--r-sm); }
-.seg { padding: 0 var(--sp-12); border: 0; border-radius: var(--r-xs); background: none; color: var(--text-2); font-size: var(--text-ui); white-space: nowrap; cursor: pointer; transition: background-color 120ms var(--ease), color 120ms var(--ease); }
+.segmented { position: relative; display: inline-flex; align-self: flex-start; justify-self: start; gap: var(--sp-2); height: var(--h-md); padding: var(--sp-2); background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--r-sm); }
+.seg { position: relative; z-index: 1; padding: 0 var(--sp-12); border: 0; border-radius: var(--r-xs); background: none; color: var(--text-2); font-size: var(--text-ui); white-space: nowrap; cursor: pointer; transition: background-color 120ms var(--ease), color 120ms var(--ease); }
 .seg:hover:not(:disabled) { color: var(--text); }
-.seg.active { background: var(--surface-3); color: var(--text); }
+.seg.active { color: var(--text); }
+/* 选中项的底色：一块滑块，位置和宽度由 Segmented 量出来写上，换选中项时滑过去 */
+.seg-thumb { position: absolute; left: 0; top: var(--sp-2); bottom: var(--sp-2); border-radius: var(--r-xs); background: var(--surface-3); pointer-events: none; }
+.segmented[data-ready] .seg-thumb { transition: transform 450ms var(--spring), width 240ms var(--ease-out); }
 .seg:disabled { opacity: 0.4; cursor: not-allowed; }
 .modal .segmented, .popover .segmented { background: var(--bg); }
 .feed-tools .segmented, .form-control .segmented { align-self: center; }
@@ -273,7 +286,7 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 /* 开关 */
 .switch { position: relative; display: inline-flex; flex: none; cursor: pointer; }
 .switch input { appearance: none; -webkit-appearance: none; width: 34px; height: 20px; margin: 0; border-radius: 999px; background: var(--switch-track); cursor: pointer; transition: background-color 160ms var(--ease); }
-.switch input::after { content: ""; position: absolute; left: 3px; top: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--switch-knob); transition: transform 160ms var(--ease), background-color 160ms var(--ease); }
+.switch input::after { content: ""; position: absolute; left: 3px; top: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--switch-knob); transition: transform 450ms var(--spring), background-color 160ms var(--ease); }
 .switch input:checked { background: var(--text); }
 .switch input:checked::after { transform: translateX(14px); background: var(--bg); }
 
@@ -344,7 +357,7 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 /* 配乐没有参数，工具栏的位置放一句说明，和提示词同一条左边线 */
 .composer-hint { padding: 0 var(--sp-8); color: var(--text-3); font-size: var(--text-caption); }
 
-.send-btn { display: grid; place-items: center; width: var(--h-md); height: var(--h-md); padding: 0; border: 0; border-radius: 50%; background: var(--text); color: var(--bg); cursor: pointer; transition: background-color 120ms var(--ease); }
+.send-btn { display: grid; place-items: center; width: var(--h-md); height: var(--h-md); padding: 0; border: 0; border-radius: 50%; background: var(--text); color: var(--bg); cursor: pointer; transition: background-color 120ms var(--ease), scale 150ms var(--ease-out); }
 .send-btn:hover:not(:disabled) { background: var(--text-strong); }
 .send-btn.blocked, .send-btn.blocked:hover, .send-btn:disabled { background: var(--surface-3); color: var(--text-off); cursor: default; }
 .send-btn .spinner { border-color: color-mix(in srgb, var(--bg) 30%, transparent); border-top-color: var(--bg); }
@@ -411,7 +424,7 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 .audio-kind { color: var(--text-3); font-size: var(--text-caption); }
 .audio-text { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 3; word-break: break-word; }
 .audio-controls { display: flex; align-items: center; gap: var(--sp-8); flex: none; cursor: default; }
-.audio-play { display: grid; place-items: center; flex: none; width: var(--h-md); height: var(--h-md); padding: 0; border: 0; border-radius: 50%; background: var(--text); color: var(--bg); cursor: pointer; transition: background-color 120ms var(--ease); }
+.audio-play { display: grid; place-items: center; flex: none; width: var(--h-md); height: var(--h-md); padding: 0; border: 0; border-radius: 50%; background: var(--text); color: var(--bg); cursor: pointer; transition: background-color 120ms var(--ease), scale 150ms var(--ease-out); }
 .audio-play:hover { background: var(--text-strong); }
 .audio-time { flex: none; color: var(--text-3); font-size: var(--text-caption); white-space: nowrap; }
 .audio-track { display: flex; align-items: center; flex: 1; min-width: 24px; height: var(--h-sm); cursor: pointer; touch-action: none; }
@@ -438,7 +451,7 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 
 /* ---------- 弹窗、提示 ---------- */
 
-.modal-overlay { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: var(--sp-24); background: var(--overlay); animation: fade 140ms var(--ease); }
+.modal-overlay { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: var(--sp-24); background: var(--overlay); }
 .modal { display: flex; flex-direction: column; width: 100%; max-height: calc(100vh - 48px); background: var(--surface-1); border: 1px solid var(--border-float); border-radius: var(--r-lg); box-shadow: var(--shadow-float); }
 .modal-sm { max-width: 440px; }
 .modal-md { max-width: 560px; }
@@ -453,7 +466,7 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 .tab-pane { display: flex; flex-direction: column; gap: var(--sp-8); min-height: 150px; }
 
 #toast-root { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 80; display: flex; flex-direction: column; align-items: center; gap: var(--sp-8); pointer-events: none; }
-.toast { max-width: min(560px, 90vw); padding: var(--sp-8) var(--sp-12); border: 1px solid var(--border-float); border-radius: var(--r-sm); background: var(--surface-float); box-shadow: var(--shadow-float); font-size: var(--text-ui); animation: fade 140ms var(--ease); transition: opacity 200ms var(--ease); }
+.toast { max-width: min(560px, 90vw); padding: var(--sp-8) var(--sp-12); border: 1px solid var(--border-float); border-radius: var(--r-sm); background: var(--surface-float); box-shadow: var(--shadow-float); font-size: var(--text-ui); transition: opacity 200ms var(--ease); }
 .toast-error { color: var(--danger); }
 .toast.leaving { opacity: 0; }
 
