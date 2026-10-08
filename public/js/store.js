@@ -99,6 +99,8 @@ export async function loadHistory() {
 }
 
 export const isPendingTask = (item) => item.status === 'queued' || item.status === 'in_progress';
+// 等太久、本地服务已停止自动查询的任务。它在 Flatkey 那边不一定失败了，可以手动再查一次。
+export const isTimedOutTask = (item) => item.status === 'failed' && item.error?.code === 'poll_timeout';
 
 let historyTimer = null;
 

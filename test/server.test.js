@@ -71,7 +71,7 @@ before(async () => {
     cwd: root,
     stdio: 'ignore',
     // FLATKEY_API_KEY 置空：即使本机设置了真实 Key，测试也绝不会用到它。
-    env: { ...process.env, PORT: String(port), FLATKEY_BASE_URL: mock.url, SEEDANCE_DATA_DIR: dataDir, FLATKEY_API_KEY: '' },
+    env: { ...process.env, PORT: String(port), FLATKEY_BASE_URL: mock.url, SEEDANCE_DATA_DIR: dataDir, FLATKEY_API_KEY: '', SEEDANCE_PENDING_LIMIT_MS: '1500' },
   });
   await waitFor(async () => (await fetch(`${base}/api/state`)).ok, '服务启动');
 });
@@ -165,6 +165,34 @@ test('任务中途失败：记录失败原因', async () => {
   assert.equal(failed.error.code, 'video_generation_failed');
   assert.ok(failed.error.message);
   assert.equal(failed.videoUrl, null);
+});
+
+test('任务一直没结果：超过时限后停止自动查询，手动再查能接上', async () => {
+  const created = await call('POST', '/api/videos', { payload: textPayload('STUCK 这条会一直卡住') });
+  const { id } = created.data;
+  const pollCount = () => mock.log.filter((l) => l.method === 'GET' && l.path === `/v1/videos/${id}`).length;
+
+  // 不去手动刷新，只靠服务自己的轮询走到超时。
+  const timedOut = await waitFor(async () => {
+    const item = (await call('GET', '/api/history')).data.items.find((i) => i.id === id);
+    return item.status === 'failed' ? item : null;
+  }, '任务被标为查询超时');
+  assert.equal(timedOut.error.code, 'poll_timeout');
+
+  // 超时之后服务不再自己去查。
+  const before = pollCount();
+  await new Promise((r) => setTimeout(r, 2500));
+  assert.equal(pollCount(), before);
+
+  // 手动再查：上游仍没结果就保持超时；上游完成了就照常完成并保存。
+  const again = await call('POST', `/api/history/${id}/refresh`);
+  assert.equal(pollCount(), before + 1);
+  assert.equal(again.data.error.code, 'poll_timeout');
+
+  mock.tasks.get(id).stuck = false;
+  const done = await refreshUntil(id, (item) => item.savedLocally, '超时的任务再查后完成');
+  assert.equal(done.status, 'completed');
+  assert.equal(done.error, null);
 });
 
 test('删除记录：同时删掉本机的视频文件', async () => {

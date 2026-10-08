@@ -3,6 +3,7 @@
 // 约定：
 // - 提示词里带 REJECT：创建时直接返回 400
 // - 提示词里带 FAIL：任务中途变成 failed
+// - 提示词里带 STUCK：任务一直停在 in_progress（把 tasks 里这条的 stuck 改成 false 才会继续）
 // - 其余任务按时间走 queued → in_progress → completed
 
 import http from 'node:http';
@@ -36,6 +37,7 @@ export function startMock({ port = 0, taskSeconds = 14, assetSeconds = 9, sample
     const age = ageOf(t);
     const view = { id: t.id, object: 'video', model: t.model, created_at: Math.floor(t.start / 1000) };
     if (age < taskSeconds * 0.1) return { ...view, status: 'queued', progress: 0 };
+    if (t.stuck) return { ...view, status: 'in_progress', progress: 50 };
     if (t.fail && age >= taskSeconds * 0.4) {
       return { ...view, status: 'failed', error: { message: '视频生成任务失败。', code: 'video_generation_failed' } };
     }
@@ -112,7 +114,7 @@ export function startMock({ port = 0, taskSeconds = 14, assetSeconds = 9, sample
       const text = payload.content.filter((c) => c.type === 'text').map((c) => c.text).join(' ');
       if (/REJECT/.test(text)) return json(res, 400, { code: 'invalid_request', message: 'unsupported resolution' });
       const id = `task_${hex(16)}`;
-      tasks.set(id, { id, model: payload.model, start: Date.now(), fail: /FAIL/.test(text), payload });
+      tasks.set(id, { id, model: payload.model, start: Date.now(), fail: /FAIL/.test(text), stuck: /STUCK/.test(text), payload });
       return json(res, 200, { id, task_id: id, object: 'video', model: payload.model, status: 'queued', progress: 0, created_at: Math.floor(Date.now() / 1000) });
     }
     if (req.method === 'GET' && (m = /^\/v1\/videos\/([\w-]+)$/.exec(pathname))) {

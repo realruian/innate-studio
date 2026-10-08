@@ -2,7 +2,7 @@
 // 有两处用到：创作页输入框下面的「最近生成」（只列最新几条），和单独的「创作记录」页（全部，带筛选和搜索）。
 
 import { h, icon, toast, clear, openModal, openMenu, confirmDialog, copyText, fmtTime, fmtDuration, fmtBytes, segmented } from './dom.js';
-import { api, state, on, loadHistory, isPendingTask, goTo } from './store.js';
+import { api, state, on, loadHistory, isPendingTask, isTimedOutTask, goTo } from './store.js';
 import { thumbEl } from './assets.js';
 import { setForm } from './composer.js';
 import { videoPlayer } from './player.js';
@@ -65,6 +65,18 @@ async function refresh(item) {
   }
 }
 
+// 查询超时的任务：再向 Flatkey 查一次，并说明这次查到了什么。
+async function recheck(item) {
+  try {
+    const next = await api('POST', `/api/history/${encodeURIComponent(item.id)}/refresh`);
+    await loadHistory();
+    if (next.status === 'completed') toast('任务已经完成', 'success');
+    else if (isTimedOutTask(next)) toast(next.pollError ? `查询状态出错：${next.pollError}` : '还是没有结果', 'info');
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
 function downloadLink(item, children, cls) {
   const href = item.savedLocally ? `${item.videoUrl}?download=1` : item.videoUrl;
   return h('a', { class: cls, href, download: item.savedLocally ? '' : null, target: item.savedLocally ? null : '_blank', rel: 'noopener' }, children);
@@ -77,13 +89,14 @@ function download(item) {
   link.remove();
 }
 
-// 卡片右上角的「更多」。菜单内容按点开那一刻的状态来定：生成中的可以刷新，已完成的可以下载。
+// 卡片右上角的「更多」。菜单内容按点开那一刻的状态来定：生成中的可以刷新，查询超时的可以再查一次，已完成的可以下载。
 function openCardMenu(button, id) {
   const item = state.history.find((i) => i.id === id);
   if (!item) return;
   const actions = {
     download: () => download(item),
     refresh: () => refresh(item),
+    recheck: () => recheck(item),
     reuse: () => reuse(item),
     detail: () => openDetail(item.id),
     remove: () => removeItem(item),
@@ -94,6 +107,7 @@ function openCardMenu(button, id) {
     items: [
       item.status === 'completed' && item.videoUrl && { value: 'download', label: '下载' },
       isPendingTask(item) && { value: 'refresh', label: '刷新' },
+      isTimedOutTask(item) && { value: 'recheck', label: '再查一次' },
       { value: 'reuse', label: '复用' },
       { value: 'detail', label: '详情' },
       { value: 'remove', label: '删除', danger: true },
@@ -110,9 +124,9 @@ function mediaBox(item, large = false) {
     return h(
       'div',
       { class: 'card-state is-failed' },
-      h('div', { class: 'state-title' }, '生成失败'),
+      h('div', { class: 'state-title' }, isTimedOutTask(item) ? '查询超时' : '生成失败'),
       h('div', { class: 'state-text' }, item.error?.message || '未知错误'),
-      h('div', { class: 'small muted' }, '预扣的余额会自动退还'),
+      !isTimedOutTask(item) && h('div', { class: 'small muted' }, '预扣的余额会自动退还'),
     );
   }
   if (item.status === 'completed') {
@@ -205,6 +219,18 @@ export function openDetail(id) {
             },
             '复用参数',
           ),
+          isTimedOutTask(item) &&
+            h(
+              'button',
+              {
+                class: 'btn',
+                onClick: () => {
+                  modal.close();
+                  recheck(item);
+                },
+              },
+              '再查一次',
+            ),
           !item.savedLocally && item.status === 'completed' && h('button', { class: 'btn', onClick: () => refresh(item).then(() => toast('已重新尝试保存', 'info')) }, '重新保存到本机'),
         ),
       ),

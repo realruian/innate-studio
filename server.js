@@ -23,6 +23,8 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 const MAX_UPLOAD_BYTES = 64 * 1024 * 1024;
 const MAX_JSON_BYTES = 6 * 1024 * 1024;
 const POLL_INTERVAL_MS = 6000;
+// 任务提交后超过这么久还没有结果，就停止自动查询。可以用环境变量 SEEDANCE_PENDING_LIMIT_MS 改。
+const MAX_PENDING_MS = Number(process.env.SEEDANCE_PENDING_LIMIT_MS) || 6 * 60 * 60 * 1000;
 const DOWNLOAD_RETRY_MS = 30000;
 const MAX_DOWNLOAD_ATTEMPTS = 6;
 const DEFAULT_MODELS = ['seedance-2.0', 'seedance-2.0-fast'];
@@ -162,6 +164,7 @@ const STATUS_ALIASES = {
 };
 
 const isPending = (item) => item.status === 'queued' || item.status === 'in_progress';
+const isTimedOut = (item) => item.status === 'failed' && item.error?.code === 'poll_timeout';
 
 function applyTaskState(item, data) {
   if (!data) return;
@@ -173,6 +176,7 @@ function applyTaskState(item, data) {
   if (data.metadata?.url) item.remoteUrl = data.metadata.url;
   if (item.status === 'completed') {
     item.progress = 100;
+    item.error = null;
     if (!item.completedAt) item.completedAt = Date.now();
   }
   if (item.status === 'failed') {
@@ -203,6 +207,11 @@ async function pollTask(item) {
     }
   } finally {
     item.lastPolledAt = Date.now();
+    // 先查再判断：服务停了很久再启动时，任务可能早就完成了。查过这一次仍没有结果才算超时。
+    if (isPending(item) && Date.now() - item.createdAt > MAX_PENDING_MS) {
+      item.status = 'failed';
+      item.error = { message: '等了很久还没有结果，已停止自动查询。任务可能还在 Flatkey 那边进行，可以再查一次。', code: 'poll_timeout' };
+    }
     polling.delete(item.id);
     saveHistory();
   }
@@ -495,7 +504,7 @@ route('GET', /^\/api\/history$/, async () => ({ items: history.map(historyView) 
 route('POST', /^\/api\/history\/([^/]+)\/refresh$/, async ({ params }) => {
   const item = history.find((h) => h.id === params[0]);
   if (!item) throw new HttpError(404, 'not_found', '没有这条记录');
-  if (isPending(item)) {
+  if (isPending(item) || isTimedOut(item)) {
     await pollTask(item);
   } else if (item.status === 'completed' && !item.localFile) {
     item.downloadAttempts = 0;
