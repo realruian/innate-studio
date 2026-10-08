@@ -343,18 +343,17 @@ function sendJson(res, status, body) {
 
 function readBody(req, limit) {
   return new Promise((resolve, reject) => {
+    // 超过上限时不掐断连接：浏览器要等自己发完才读响应，中途断开它只会报"网络错误"，
+    // 页面上就成了"连不上本地服务"。所以把剩下的内容读完丢掉，再正常返回 413。
+    const tooLarge = () => new HttpError(413, 'payload_too_large', `文件太大，超过 ${Math.round(limit / 1024 / 1024)} MB`);
     const chunks = [];
     let size = 0;
     req.on('data', (chunk) => {
       size += chunk.length;
-      if (size > limit) {
-        reject(new HttpError(413, 'payload_too_large', `文件太大，超过 ${Math.round(limit / 1024 / 1024)} MB`));
-        req.destroy();
-        return;
-      }
-      chunks.push(chunk);
+      if (size > limit) chunks.length = 0;
+      else chunks.push(chunk);
     });
-    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('end', () => (size > limit ? reject(tooLarge()) : resolve(Buffer.concat(chunks))));
     req.on('error', reject);
   });
 }

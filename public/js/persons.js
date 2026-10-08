@@ -2,7 +2,7 @@
 
 import { h, toast, clear, add, openModal, confirmDialog, copyText, fmtTime, segmented } from './dom.js';
 import { api, state, on, KINDS, loadPersons, loadPersonAssets } from './store.js';
-import { assetCard, uploadPane, xhrUpload, makeThumb } from './assets.js';
+import { assetCard, uploadPane, xhrUpload, makeThumb, checkFileSize } from './assets.js';
 
 const PERSON_STATUS = {
   pending_verification: { label: '待认证', tone: 'pending' },
@@ -70,9 +70,7 @@ async function newVerification(person) {
 }
 
 async function uploadPersonAsset(personId, name, file, kind, onProgress) {
-  if (file.size > KINDS[kind].maxBytes) {
-    throw new Error(`超过${KINDS[kind].label}大小上限（${Math.round(KINDS[kind].maxBytes / 1024 / 1024)} MiB）`);
-  }
+  checkFileSize(file, kind);
   const thumb = await makeThumb(file, kind);
   const form = new FormData();
   form.append('asset_type', KINDS[kind].type);

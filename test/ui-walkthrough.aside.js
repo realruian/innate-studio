@@ -278,6 +278,18 @@ await sleep(900);
 await audit('选素材弹窗·真人素材');
 await must('切回本地上传', click('.modal .tabs .seg', 0));
 await sleep(200);
+// 超过大小上限的文件：不发出去，直接说明原因（不能显示成"连不上本地服务"）
+await pg.evaluate(() => {
+  const dt = new DataTransfer();
+  dt.items.add(new File([new Uint8Array(31 * 1024 * 1024)], '太大的图.png', { type: 'image/png' }));
+  const input = document.querySelector('.modal input[type=file]');
+  input.files = dt.files;
+  input.dispatchEvent(new Event('change', { bubbles: true }));
+});
+await sleep(500);
+const tooBig = (await text('.modal .upload-row .error-text')).join('');
+if (!tooBig.includes('文件太大') || !tooBig.includes('30 MB') || tooBig.includes('连不上')) problems.push(`超过上限的文件提示不对：「${tooBig}」`);
+if ((await count('.modal')) !== 1) problems.push('文件太大时弹窗不应该关闭');
 await pg.evaluate(async () => {
   const c = document.createElement('canvas');
   c.width = 640;

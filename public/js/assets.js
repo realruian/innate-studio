@@ -89,7 +89,14 @@ export function xhrUpload(url, formData, headers, onProgress) {
   });
 }
 
+// 接口对每类素材有大小上限。超了的文件不发出去，直接说明原因。
+export function checkFileSize(file, kind) {
+  const { label, maxBytes } = KINDS[kind];
+  if (file.size > maxBytes) throw new Error(`文件太大：${label}最大 ${Math.round(maxBytes / 1024 / 1024)} MB，这个文件有 ${fmtBytes(file.size)}。请先裁剪或压缩。`);
+}
+
 export async function uploadVirtualAsset(file, kind, onProgress) {
+  checkFileSize(file, kind);
   const thumb = await makeThumb(file, kind);
   const form = new FormData();
   form.append('file', file);

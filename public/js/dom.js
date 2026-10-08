@@ -427,7 +427,9 @@ export function fmtDuration(ms) {
 
 export function fmtBytes(n) {
   if (!n) return '';
-  return n < 1024 * 1024 ? `${(n / 1024).toFixed(0)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  return `${(n / 1024 / 1024 / 1024).toFixed(1)} GB`;
 }
 
 // 分段选择器。options: [{ value, label, title, disabled }]

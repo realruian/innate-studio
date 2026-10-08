@@ -195,6 +195,17 @@ test('素材：用链接创建，轮询到可用', async () => {
   assert.equal(active.name, '背景视频');
 });
 
+test('素材：超过大小上限的上传返回 413 和说明，而不是断开连接', async () => {
+  const before = mock.log.length;
+  const form = new FormData();
+  form.append('file', new Blob([Buffer.alloc(65 * 1024 * 1024)], { type: 'video/mp4' }), '太大.mp4');
+  form.append('asset_type', 'Video');
+  const res = await call('POST', '/api/assets/upload', form, { 'X-Asset-Name': encodeURIComponent('太大.mp4'), 'X-Asset-Type': 'Video' });
+  assert.equal(res.status, 413);
+  assert.match(res.data.error.message, /文件太大/);
+  assert.equal(mock.log.slice(before).some((l) => l.path === '/v1/assets/upload'), false);
+});
+
 test('素材：上传文件、补缩略图、只从列表移除、从上游删除', async () => {
   const form = new FormData();
   form.append('file', new Blob([Buffer.from('fake png')], { type: 'image/png' }), '参考图.png');
