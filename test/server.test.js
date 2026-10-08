@@ -55,6 +55,20 @@ async function call(method, url, body, headers = {}) {
 
 const textPayload = (text, extra = {}) => ({ model: 'seedance-2.0', content: [{ type: 'text', text }], resolution: '480p', ratio: '16:9', duration: 4, ...extra });
 
+// 等服务自己把某条记录推进到满足条件（不手动刷新）。
+const waitItem = (id, done, what) =>
+  waitFor(async () => {
+    const item = (await call('GET', '/api/history')).data.items.find((i) => i.id === id);
+    return item && done(item) ? item : null;
+  }, what);
+
+const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
+
+async function upload(bytes, type) {
+  const res = await fetch(`${base}/api/uploads`, { method: 'POST', headers: { 'Content-Type': type }, body: bytes });
+  return { status: res.status, data: await res.json() };
+}
+
 // 反复让服务去查上游，直到这条记录满足条件。
 const refreshUntil = (id, done, what) =>
   waitFor(async () => {
@@ -104,10 +118,20 @@ test('保存 Key：拒绝不是 Key 的内容，接受正常的 Key，且不回�
   assert.equal(JSON.stringify(saved.data).includes(MOCK_KEY), false);
 });
 
-test('模型列表只保留 Seedance 模型', async () => {
+test('模型列表：按用途分好，只留接得上的模型', async () => {
   const { data } = await call('GET', '/api/models');
   assert.equal(data.source, 'remote');
-  assert.deepEqual(data.models, ['seedance-2.0', 'seedance-2.0-fast']);
+  // 视频只留 Seedance 和 Grok 两类，Seedance 排在前面。
+  assert.deepEqual(data.models, ['seedance-2.0', 'seedance-2.0-fast', 'grok-imagine-video']);
+  // 图片模型只留能走生图接口的那个。
+  assert.deepEqual(data.imageModels, ['grok-imagine-image-2.0']);
+  assert.deepEqual(data.polishModels, ['claude-haiku-5-5', 'claude-sonnet-5-5']);
+  assert.deepEqual(data.audio, { speech: true, sfx: true, music: true });
+});
+
+test('余额：读取剩余和已用', async () => {
+  const { data } = await call('GET', '/api/credits');
+  assert.deepEqual(data, { remaining: 34.18, used: 185.13 });
 });
 
 test('页面能打开，目录穿越和跨站请求被拦截', async () => {
@@ -193,6 +217,145 @@ test('任务一直没结果：超过时限后停止自动查询，手动再查�
   const done = await refreshUntil(id, (item) => item.savedLocally, '超时的任务再查后完成');
   assert.equal(done.status, 'completed');
   assert.equal(done.error, null);
+});
+
+test('Grok 视频：用 prompt 格式；本机的首帧发给上游时换成 data URL，记录里仍是短地址', async () => {
+  const frame = await upload(PNG, 'image/png');
+  assert.equal(frame.status, 200);
+  assert.match(frame.data.url, /^\/media\/uploads\/up_[0-9a-f]+\.png$/);
+
+  const payload = { model: 'grok-imagine-video', prompt: '纸船缓缓漂远', duration: 3, aspect_ratio: '9:16', resolution: '720p', image: { url: frame.data.url } };
+  const created = await call('POST', '/api/videos', { payload, form: { mode: 'frames' } });
+  assert.equal(created.status, 200);
+  assert.equal(created.data.kind, 'video');
+  assert.equal(created.data.prompt, '纸船缓缓漂远');
+
+  const sent = mock.tasks.get(created.data.id).payload;
+  assert.equal(sent.prompt, '纸船缓缓漂远');
+  assert.equal(sent.content, undefined);
+  assert.equal(sent.image.url, `data:image/png;base64,${PNG.toString('base64')}`);
+  assert.equal(created.data.payload.image.url, frame.data.url);
+
+  const done = await refreshUntil(created.data.id, (item) => item.savedLocally, 'Grok 视频完成并保存');
+  assert.match(done.videoUrl, /^\/media\/videos\/task_\w+\.mp4$/);
+
+  // 指向不存在的本机文件：直接说明，不发给上游。
+  const missing = await call('POST', '/api/videos', { payload: { ...payload, image: { url: '/media/uploads/up_none.png' } } });
+  assert.equal(missing.status, 400);
+  assert.equal(missing.data.error.code, 'file_not_found');
+});
+
+test('生图：一次出两张，各自一条记录，文件存到本机', async () => {
+  const before = mock.log.filter((l) => l.path === '/v1/images/generations').length;
+  const created = await call('POST', '/api/images', { payload: { model: 'grok-imagine-image-2.0', prompt: '静水上的红色纸船', n: 2, aspect_ratio: '9:16' }, form: { prompt: '静水上的红色纸船' } });
+  assert.equal(created.status, 200);
+  assert.equal(created.data.items.length, 2);
+  // 请求一发出就有记录，状态是生成中。
+  for (const item of created.data.items) {
+    assert.equal(item.kind, 'image');
+    assert.equal(item.status, 'in_progress');
+    assert.match(item.id, /^img_/);
+  }
+
+  const [first, second] = await Promise.all(created.data.items.map((i) => waitItem(i.id, (item) => item.status === 'completed', '图片生成完成')));
+  // 两张图只发了一次请求。
+  assert.equal(mock.log.filter((l) => l.path === '/v1/images/generations').length, before + 1);
+  assert.match(first.mediaUrl, /^\/media\/images\/img_[0-9a-f]+\.png$/);
+  assert.equal(first.videoUrl, null);
+  assert.notEqual(first.mediaUrl, second.mediaUrl);
+  assert.equal(first.usage.cost_usd, 0.04);
+  assert.equal(first.payload.aspect_ratio, '9:16');
+
+  const file = await fetch(base + first.mediaUrl);
+  assert.equal(file.status, 200);
+  assert.equal(file.headers.get('content-type'), 'image/png');
+  assert.deepEqual(Buffer.from(await file.arrayBuffer()), PNG);
+
+  // 删除记录时图片文件一起删掉。
+  assert.equal((await call('DELETE', `/api/history/${second.id}`)).status, 204);
+  assert.equal(fs.existsSync(path.join(dataDir, 'images', second.localFile)), false);
+});
+
+test('生图失败：记录留下来并写明原因', async () => {
+  const created = await call('POST', '/api/images', { payload: { model: 'grok-imagine-image-2.0', prompt: 'FAIL 这张会失败' } });
+  const failed = await waitItem(created.data.items[0].id, (item) => item.status === 'failed', '图片记录变成失败');
+  assert.match(failed.error.message, /image generation failed/);
+  assert.equal(failed.mediaUrl, null);
+
+  assert.equal((await call('POST', '/api/images', { payload: { model: 'grok-imagine-image-2.0', prompt: '  ' } })).status, 400);
+});
+
+test('语音和音效：选音色、生成、存成 MP3', async () => {
+  const voices = await call('GET', '/api/voices');
+  assert.deepEqual(voices.data.items.map((v) => [v.id, v.language, v.gender]), [['voiceEnRoger01', 'en', 'male'], ['voiceZhAnson02', 'zh', 'male']]);
+  assert.ok(voices.data.items[0].previewUrl);
+
+  const speech = await call('POST', '/api/audio/speech', { text: '你好，这是一次测试。', voiceId: 'voiceZhAnson02', voiceName: 'Anson' });
+  assert.equal(speech.status, 200);
+  assert.equal(speech.data.tool, 'speech');
+  const spoken = await waitItem(speech.data.id, (item) => item.status === 'completed', '语音生成完成');
+  assert.match(spoken.mediaUrl, /^\/media\/audio\/aud_[0-9a-f]+\.mp3$/);
+  assert.equal((await fetch(base + spoken.mediaUrl)).headers.get('content-type'), 'audio/mpeg');
+  assert.equal(mock.log.some((l) => l.path === '/v1/text-to-speech/voiceZhAnson02'), true);
+  assert.equal((await call('POST', '/api/audio/speech', { text: '没选音色' })).status, 400);
+
+  const sfx = await call('POST', '/api/audio/sfx', { text: '厚重的关门声', duration: 2, influence: 0.5 });
+  assert.deepEqual(sfx.data.payload, { text: '厚重的关门声', duration_seconds: 2, prompt_influence: 0.5 });
+  await waitItem(sfx.data.id, (item) => item.status === 'completed', '音效生成完成');
+  // 不带时长就不传这个字段，交给模型决定。
+  assert.deepEqual((await call('POST', '/api/audio/sfx', { text: '雨声' })).data.payload, { text: '雨声' });
+  assert.equal((await call('POST', '/api/audio/sfx', { text: '太长', duration: 60 })).status, 400);
+});
+
+test('配乐：把本机视频传上去，轮询到完成，音乐存到本机', async () => {
+  const video = await upload(Buffer.from('fake mp4 bytes'), 'video/mp4');
+  assert.match(video.data.url, /^\/media\/uploads\/up_[0-9a-f]+\.mp4$/);
+
+  const created = await call('POST', '/api/audio/music', { video: video.data.url, duration: 5.04, form: { video: { url: video.data.url } } });
+  assert.equal(created.status, 200);
+  assert.equal(created.data.tool, 'music');
+  assert.match(created.data.id, /^task_/);
+  assert.equal(created.data.status, 'in_progress');
+  assert.equal(mock.log.find((l) => l.path === '/v1/video-to-music').contentType.startsWith('multipart/form-data'), true);
+
+  const done = await refreshUntil(created.data.id, (item) => item.savedLocally, '配乐完成并保存');
+  assert.equal(done.status, 'completed');
+  assert.match(done.mediaUrl, /^\/media\/audio\/task_\w+\.mp3$/);
+  assert.equal(fs.readFileSync(path.join(dataDir, 'audio', done.localFile), 'utf8'), `mock music for ${created.data.id}`);
+
+  // 没有时长、不是视频、文件不存在，都在本地拦下。
+  assert.equal((await call('POST', '/api/audio/music', { video: video.data.url })).status, 400);
+  assert.equal((await call('POST', '/api/audio/music', { video: (await upload(PNG, 'image/png')).data.url, duration: 5 })).status, 400);
+  assert.equal((await call('POST', '/api/audio/music', { video: '/media/videos/../config.json', duration: 5 })).status, 400);
+});
+
+test('本机上传：只收图片和视频；/media 只给出这几个目录里的文件', async () => {
+  assert.equal((await upload(Buffer.from('x'), 'application/zip')).status, 415);
+  assert.equal((await upload(Buffer.alloc(0), 'image/png')).status, 400);
+  assert.equal((await fetch(`${base}/media/config.json`)).status, 404);
+  assert.equal((await fetch(`${base}/media/uploads/..%2Fconfig.json`)).status, 404);
+});
+
+test('提示词润色：按内容类型改写，只接受列出的模型', async () => {
+  const res = await call('POST', '/api/polish', { text: '清晨的厨房', kind: 'video', model: 'claude-haiku-5-5' });
+  assert.equal(res.status, 200);
+  assert.equal(res.data.text, '清晨的厨房，镜头缓慢推进，柔和的晨光');
+  assert.equal(res.data.model, 'claude-haiku-5-5');
+
+  // 选中的模型被限流：自动换下一个，并说明这次用的是谁。
+  const chats = () => mock.log.filter((l) => l.path === '/v1/chat/completions').length;
+  const before = chats();
+  const limited = await call('POST', '/api/polish', { text: 'LIMITED 清晨的厨房', kind: 'video', model: 'claude-haiku-5-5' });
+  assert.equal(limited.status, 200);
+  assert.equal(limited.data.model, 'claude-sonnet-5-5');
+  assert.equal(chats(), before + 2);
+  // 刚失败过的模型先不再试，直接用能用的那个。
+  const again = await call('POST', '/api/polish', { text: 'LIMITED 再来一次', kind: 'video', model: 'claude-haiku-5-5' });
+  assert.equal(again.data.model, 'claude-sonnet-5-5');
+  assert.equal(chats(), before + 3);
+  assert.equal((await call('POST', '/api/polish', { text: '清晨的厨房', kind: 'video', model: 'gpt-4o' })).status, 400);
+  assert.equal((await call('POST', '/api/polish', { text: '要朗读的话', kind: 'speech', model: 'claude-haiku-5-5' })).status, 400);
+  assert.equal((await call('POST', '/api/polish', { text: ' ', kind: 'video', model: 'claude-haiku-5-5' })).status, 400);
 });
 
 test('删除记录：同时删掉本机的视频文件', async () => {

@@ -1,8 +1,11 @@
-// 把创作表单转成 POST /v1/videos 的请求体。纯函数，不碰页面和网络，可以单独测试。
+// 把创作表单转成发给本地服务的请求。纯函数，不碰页面和网络，可以单独测试。
+// 视频有两种请求格式：Seedance 用 content 数组，Grok 用 prompt 字符串。图片、语音、音效、配乐各有一个小函数。
 
 export const RES_RANK = { '480p': 0, '720p': 1, '1080p': 2, '2k': 3, '4k': 4 };
 
 const MEDIA_FIELD = { image: 'image_url', video: 'video_url', audio: 'audio_url' };
+
+export const videoFamily = (model) => (/^grok-imagine-video/i.test(model || '') ? 'grok' : 'seedance');
 
 // 当前模式下实际会用到的参考素材。
 export function refsInUse(form) {
@@ -14,6 +17,7 @@ export function refsInUse(form) {
 // 返回 { payload, problems }。problems 非空时不能提交。
 // refStatus(ref) 由调用方提供，返回 { ready, tone }，表示素材能否用于当前模型。
 export function buildRequest(form, refStatus = () => ({ ready: true, tone: 'ok' })) {
+  if (videoFamily(form.model) === 'grok') return buildGrokRequest(form);
   const problems = [];
   const content = [];
   const text = form.prompt.trim();
@@ -37,7 +41,9 @@ export function buildRequest(form, refStatus = () => ({ ready: true, tone: 'ok' 
   }
 
   const statuses = refsInUse(form).map(refStatus);
-  if (statuses.some((s) => s.tone === 'error')) problems.push('有素材不可用，请移除后再生成');
+  // 只存在本机的文件（为 Grok 选的首帧）Seedance 读不到，它只认素材库里的素材和公网链接。
+  if (refsInUse(form).some((r) => r.source === 'local')) problems.push('有素材只存在本机，Seedance 用不了，请移除后重新添加');
+  else if (statuses.some((s) => s.tone === 'error')) problems.push('有素材不可用，请移除后再生成');
   else if (statuses.some((s) => !s.ready)) problems.push(`有素材还在处理中，可用于 ${form.model} 后才能生成`);
 
   const payload = {
@@ -80,4 +86,56 @@ export function buildRequest(form, refStatus = () => ({ ready: true, tone: 'ok' 
   }
 
   return { payload, problems };
+}
+
+// Grok 视频：只有文生视频和图生视频（给一张首帧）。首帧可以是公网链接，也可以是本机文件，本机文件由本地服务换成内嵌数据再发出去。
+function buildGrokRequest(form) {
+  const problems = [];
+  const text = form.prompt.trim();
+  const payload = { model: form.model, prompt: text, duration: Number(form.duration), resolution: form.resolution };
+  if (!text) problems.push('请填写提示词');
+  if (form.mode === 'reference') problems.push('这个模型不支持参考生成，请改用文生视频或图生视频');
+
+  if (form.mode === 'frames') {
+    const first = form.frames.first;
+    if (!first) problems.push('请添加首帧图片');
+    else if (first.source === 'asset') problems.push('这个模型用不了素材库里的素材，请移除后重新添加首帧');
+    else payload.image = { url: first.url };
+  } else {
+    // 有首帧时画面比例跟着图片走，只有纯文字生成才需要指定。
+    payload.aspect_ratio = form.ratio;
+  }
+  return { payload, problems };
+}
+
+export function buildImageRequest(form) {
+  const prompt = form.prompt.trim();
+  return {
+    payload: { model: form.model, prompt, n: Number(form.count) || 1, aspect_ratio: form.ratio },
+    problems: prompt ? [] : ['请填写提示词'],
+  };
+}
+
+export function buildSpeechRequest(form) {
+  const text = form.prompt.trim();
+  const problems = [];
+  if (!text) problems.push('请填写要朗读的文字');
+  else if (!form.voiceId) problems.push('请选择音色');
+  return { body: { text, voiceId: form.voiceId, voiceName: form.voiceName }, problems };
+}
+
+export function buildSfxRequest(form) {
+  const text = form.prompt.trim();
+  const body = { text, influence: Number(form.influence) };
+  // 时长选"自动"时不传，由模型决定。
+  if (form.duration !== 'auto') body.duration = Number(form.duration);
+  return { body, problems: text ? [] : ['请描述想要的声音'] };
+}
+
+export function buildMusicRequest(form) {
+  const video = form.video;
+  const problems = [];
+  if (!video) problems.push('请选择要配乐的视频');
+  else if (!(video.duration > 0)) problems.push('没有读到这段视频的时长，请重新选择');
+  return { body: { video: video?.url, duration: video?.duration }, problems };
 }

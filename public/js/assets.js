@@ -24,23 +24,25 @@ async function imageThumb(file) {
   return url;
 }
 
-function videoThumb(file) {
+// 读一段视频的缩略图和时长。source 可以是刚选的文件，也可以是本机已有视频的地址。
+export function readVideo(source) {
   return new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(file);
+    const own = typeof source !== 'string';
+    const url = own ? URL.createObjectURL(source) : source;
     const video = document.createElement('video');
     video.muted = true;
     video.playsInline = true;
     video.preload = 'auto';
     const finish = (fn) => {
       clearTimeout(timer);
-      URL.revokeObjectURL(url);
+      if (own) URL.revokeObjectURL(url);
       fn();
     };
     const timer = setTimeout(() => finish(() => reject(new Error('timeout'))), 6000);
     video.onloadeddata = () => {
       video.currentTime = Math.min(0.2, (video.duration || 1) / 2);
     };
-    video.onseeked = () => finish(() => resolve(drawThumb(video, video.videoWidth, video.videoHeight)));
+    video.onseeked = () => finish(() => resolve({ thumb: drawThumb(video, video.videoWidth, video.videoHeight), duration: Number.isFinite(video.duration) ? video.duration : 0 }));
     video.onerror = () => finish(() => reject(new Error('decode')));
     video.src = url;
   });
@@ -49,7 +51,7 @@ function videoThumb(file) {
 export async function makeThumb(file, kind) {
   try {
     if (kind === 'image') return await imageThumb(file);
-    if (kind === 'video') return await videoThumb(file);
+    if (kind === 'video') return (await readVideo(file)).thumb;
   } catch {
     /* 生成不了缩略图就用图标代替 */
   }
@@ -123,6 +125,37 @@ export function refFromAsset(asset, kind) {
     name: asset.name || asset.id,
     thumb: asset.thumb || null,
   };
+}
+
+// ---------- 只存在本机的素材 ----------
+// Grok 的首帧、要配乐的视频不经过 Flatkey 的素材库：文件存在本地服务的 data/uploads 里，
+// 或者直接用生成记录里已经存到本机的结果。这类素材的 source 是 local，地址是 /media/ 开头的本机地址。
+
+export async function uploadLocalFile(file, kind, onProgress) {
+  checkFileSize(file, kind);
+  const video = kind === 'video' ? await readVideo(file).catch(() => null) : null;
+  const thumb = video ? video.thumb : await makeThumb(file, kind);
+  const saved = await xhrUpload('/api/uploads', file, { 'Content-Type': file.type }, onProgress);
+  return { uid: crypto.randomUUID(), kind, source: 'local', url: saved.url, name: file.name, thumb, duration: video?.duration };
+}
+
+const recordName = (item) => (item.prompt || '').trim().slice(0, 40) || item.id;
+
+// 把一条已经存到本机的生成记录当素材用。
+export async function refFromRecord(item) {
+  const ref = { uid: crypto.randomUUID(), kind: item.kind, source: 'local', url: item.mediaUrl, name: recordName(item), thumb: item.kind === 'image' ? item.mediaUrl : null };
+  if (item.kind !== 'video') return ref;
+  const video = await readVideo(item.mediaUrl).catch(() => null);
+  return { ...ref, thumb: video?.thumb || null, duration: video?.duration || 0 };
+}
+
+// Seedance 只认素材库里的素材：把生成记录里的文件取出来，传进 Flatkey 的素材库。
+export async function assetFromRecord(item) {
+  const res = await fetch(item.mediaUrl);
+  if (!res.ok) throw new Error('这条记录的文件已经不在本机了');
+  const blob = await res.blob();
+  const file = new File([blob], `${recordName(item)}.${item.mediaUrl.split('.').pop()}`, { type: blob.type });
+  return uploadVirtualAsset(file, item.kind);
 }
 
 // 上传面板：拖拽或选择文件，逐个上传并显示进度。
@@ -209,9 +242,13 @@ export function uploadPane({ kind, limit = 1, upload, onUploaded, onAllDone, not
 
 // ---------- 选择素材的弹窗（创作页用） ----------
 
-export function openAssetPicker({ kind, remaining = 1, usedIds = [], onPick }) {
+// local 为 true 时选的是只存在本机的素材（见上面"只存在本机的素材"），不经过 Flatkey 的素材库。
+// sources 是这次能用的来源，按显示顺序。
+const SOURCE_LABELS = { upload: '本地上传', url: '粘贴链接', library: '素材库', person: '真人素材', records: '生成记录' };
+
+export function openAssetPicker({ kind, remaining = 1, usedIds = [], onPick, local = false, sources = local ? ['upload', 'url', 'records'] : ['upload', 'url', 'library', 'person', 'records'] }) {
   const meta = KINDS[kind];
-  let tab = 'upload';
+  let tab = sources[0];
   const pane = h('div', { class: 'tab-pane' });
   const tabsEl = h('div');
   let left = remaining;
@@ -225,12 +262,7 @@ export function openAssetPicker({ kind, remaining = 1, usedIds = [], onPick }) {
   function renderTabs() {
     clear(tabsEl).append(
       segmented(
-        [
-          { value: 'upload', label: '本地上传' },
-          { value: 'url', label: '粘贴链接' },
-          { value: 'library', label: '素材库' },
-          { value: 'person', label: '真人素材' },
-        ],
+        sources.map((value) => ({ value, label: SOURCE_LABELS[value] })),
         tab,
         (next) => {
           tab = next;
@@ -239,6 +271,43 @@ export function openAssetPicker({ kind, remaining = 1, usedIds = [], onPick }) {
         },
         'tabs',
       ),
+    );
+  }
+
+  // 生成记录里已经存到本机的结果。选中后：本机素材直接引用这个文件；要进素材库的先传上去。
+  function recordGrid() {
+    const list = state.history.filter((i) => i.kind === kind && i.status === 'completed' && i.savedLocally).slice(0, 60);
+    if (!list.length) return h('div', { class: 'empty small-empty' }, `还没有生成过${meta.label}。`);
+    return h(
+      'div',
+      { class: 'pick-grid' },
+      list.map((item) => {
+        const badge = h('span', { class: 'badge badge-pending' }, fmtTime(item.createdAt));
+        const card = h(
+          'button',
+          {
+            class: 'pick-card',
+            type: 'button',
+            title: item.prompt,
+            onClick: async () => {
+              for (const other of card.parentElement.children) other.disabled = true;
+              badge.textContent = local ? '读取中' : '上传中';
+              try {
+                pick(local ? await refFromRecord(item) : refFromAsset(await assetFromRecord(item), kind));
+                modal.close();
+              } catch (err) {
+                toast(err.message, 'error', 6000);
+                for (const other of card.parentElement.children) other.disabled = false;
+                badge.textContent = fmtTime(item.createdAt);
+              }
+            },
+          },
+          h('div', { class: 'pick-thumb' }, kind === 'video' ? h('video', { class: 'thumb-img', src: item.mediaUrl, preload: 'metadata', muted: true, playsinline: true }) : thumbEl(kind === 'image' ? item.mediaUrl : null, kind)),
+          h('div', { class: 'pick-name ellipsis' }, recordName(item)),
+          badge,
+        );
+        return card;
+      }),
     );
   }
 
@@ -277,10 +346,10 @@ export function openAssetPicker({ kind, remaining = 1, usedIds = [], onPick }) {
         uploadPane({
           kind,
           limit: left,
-          upload: uploadVirtualAsset,
-          onUploaded: (asset) => pick(refFromAsset(asset, kind)),
+          upload: local ? uploadLocalFile : uploadVirtualAsset,
+          onUploaded: (result) => pick(local ? result : refFromAsset(result, kind)),
           onAllDone: () => modal.close(),
-          note: `文件会先上传到你的 Flatkey 素材库，处理完成后才能用于生成${left > 1 ? `；最多还能添加 ${left} 个` : ''}`,
+          note: local ? '文件只保存在这台电脑上' : `文件会先上传到你的 Flatkey 素材库，处理完成后才能用于生成${left > 1 ? `；最多还能添加 ${left} 个` : ''}`,
         }),
       );
     } else if (tab === 'url') {
@@ -301,11 +370,13 @@ export function openAssetPicker({ kind, remaining = 1, usedIds = [], onPick }) {
       pane.append(
         h('label', { class: 'field-label' }, `${meta.label}地址`),
         h('div', { class: 'row' }, input, h('button', { class: 'btn btn-primary', onClick: submit }, '添加')),
-        h('p', { class: 'muted small' }, '链接会原样发给 Seedance，需要是公网能直接访问的 https 地址。想反复使用，可以到「素材库」里用链接创建素材。'),
+        h('p', { class: 'muted small' }, local ? '链接会原样发给模型，需要是公网能直接访问的 https 地址。' : '链接会原样发给 Seedance，需要是公网能直接访问的 https 地址。想反复使用，可以到「素材库」里用链接创建素材。'),
       );
       setTimeout(() => input.focus(), 0);
     } else if (tab === 'library') {
       pane.append(assetGrid(state.assets, `素材库里还没有${meta.label}素材。可以切到「本地上传」添加。`));
+    } else if (tab === 'records') {
+      pane.append(recordGrid());
     } else {
       renderPersonPane();
     }

@@ -1,12 +1,14 @@
-// 设置弹窗：外观、API Key。
+// 设置弹窗：外观、润色用的模型、API Key 和余额。
 
-import { h, toast, clear, openModal, confirmDialog, segmented, formRow } from './dom.js';
-import { api, state, loadApp, loadModels } from './store.js';
+import { h, toast, clear, openModal, confirmDialog, segmented, formRow, dropdown } from './dom.js';
+import { api, state, loadApp, loadModels, polishModel, setPolishModel } from './store.js';
 import { currentTheme, setTheme } from './theme.js';
 
 export function openSettings() {
   const themeEl = h('div');
+  const polishEl = h('div', { class: 'form-section' });
   const statusEl = h('div', { class: 'form-section' });
+  const creditsEl = h('span', { class: 'muted' }, '—');
   const input = h('input', { class: 'input mono masked', type: 'text', placeholder: 'sk-fk-…', autocomplete: 'off', 'data-1p-ignore': true, 'data-lpignore': 'true', 'aria-label': 'Flatkey API Key' });
   const revealBtn = h('button', { class: 'btn', type: 'button', onClick: () => reveal(input.classList.contains('masked')) }, '显示');
   const saveBtn = h('button', { class: 'btn btn-primary', type: 'button', onClick: save }, '保存');
@@ -28,11 +30,50 @@ export function openSettings() {
     );
   }
 
+  // 润色提示词用哪个文本模型。账号里一个可用的都没有时，创作面板上不会出现「润色」。
+  function drawPolish() {
+    const models = state.catalog.polish;
+    clear(polishEl).append(
+      formRow(
+        '润色用的模型',
+        models.length
+          ? dropdown({
+              label: '润色用的模型',
+              value: polishModel(),
+              options: models.map((m) => ({ value: m, label: m })),
+              onChange: (model) => {
+                setPolishModel(model);
+                drawPolish();
+              },
+            })
+          : h('span', { class: 'muted' }, state.catalog.known ? '账号里没有可用的文本模型' : '读到模型列表后才能选'),
+        '创作面板上的「润色」会让它把提示词补充得更具体',
+      ),
+    );
+  }
+
+  const amount = (n) => n.toLocaleString('zh-CN', { maximumFractionDigits: 2 });
+
+  async function drawCredits() {
+    if (!state.app.hasKey) {
+      creditsEl.textContent = '—';
+      return;
+    }
+    creditsEl.textContent = '读取中…';
+    try {
+      const { remaining, used } = await api('GET', '/api/credits');
+      creditsEl.textContent = `剩余 ${amount(remaining)} · 已用 ${amount(used)}`;
+    } catch {
+      creditsEl.textContent = '没有读到';
+    }
+  }
+
   function drawStatus() {
     const { hasKey, keyHint, keySource, baseUrl } = state.app;
     clear(statusEl).append(
       formRow('当前 Key', h('span', { class: hasKey ? 'mono' : 'warn-text' }, hasKey ? `${keyHint}${keySource === 'env' ? '（来自环境变量）' : ''}` : '还没有设置')),
       formRow('接口地址', h('span', { class: 'mono' }, baseUrl)),
+      formRow('账户余额', creditsEl),
     );
     input.disabled = keySource === 'env';
     saveBtn.disabled = keySource === 'env';
@@ -44,16 +85,19 @@ export function openSettings() {
     testEl.className = 'small muted';
     testEl.textContent = '正在连接 Flatkey…';
     await loadModels();
+    drawPolish();
     const info = state.modelsInfo;
     if (info.source === 'remote') {
+      const { image, audio } = state.catalog;
+      const extras = [image.length && '图片', audio.speech && '语音', audio.sfx && '音效', audio.music && '配乐'].filter(Boolean);
       testEl.className = 'small ok-text';
-      testEl.textContent = `连接正常，账号可用的 Seedance 模型：${state.models.join('、')}`;
+      testEl.textContent = `连接正常。可用的视频模型：${state.models.join('、')}${extras.length ? `；还可以生成${extras.join('、')}` : ''}`;
     } else if (info.error) {
       testEl.className = 'small error-text';
       testEl.textContent = `连接失败：${info.error}`;
     } else {
       testEl.className = 'small warn-text';
-      testEl.textContent = info.note || '连接正常，但没有读到 Seedance 模型。';
+      testEl.textContent = info.note || '连接正常，但没有读到视频模型。';
     }
   }
 
@@ -75,6 +119,7 @@ export function openSettings() {
       reveal(false);
       await loadApp();
       drawStatus();
+      drawCredits();
       toast('API Key 已保存', 'success');
       await test();
     } catch (err) {
@@ -85,12 +130,13 @@ export function openSettings() {
   }
 
   async function remove() {
-    const ok = await confirmDialog({ title: '清除已保存的 API Key？', message: '清除后需要重新填写才能生成视频。进行中的任务也会暂停查询。', okText: '清除', danger: true });
+    const ok = await confirmDialog({ title: '清除已保存的 API Key？', message: '清除后需要重新填写才能生成。进行中的任务也会暂停查询。', okText: '清除', danger: true });
     if (!ok) return;
     try {
       await api('DELETE', '/api/key');
       await loadApp();
       drawStatus();
+      drawCredits();
       testEl.textContent = '';
       toast('已清除', 'success');
     } catch (err) {
@@ -106,6 +152,8 @@ export function openSettings() {
     content: [
       h('div', { class: 'section-title' }, '外观'),
       h('div', { class: 'form-section' }, formRow('主题', themeEl)),
+      h('div', { class: 'section-title' }, '提示词润色'),
+      polishEl,
       h('div', { class: 'section-title' }, 'Flatkey API Key'),
       statusEl,
       h('div', { class: 'row' }, input, revealBtn, saveBtn),
@@ -121,5 +169,7 @@ export function openSettings() {
     ],
   });
   drawTheme();
+  drawPolish();
   drawStatus();
+  drawCredits();
 }

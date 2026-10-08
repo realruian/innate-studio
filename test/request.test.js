@@ -2,7 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildRequest, refsInUse } from '../public/js/request.js';
+import { buildRequest, refsInUse, buildImageRequest, buildSpeechRequest, buildSfxRequest, buildMusicRequest } from '../public/js/request.js';
 
 const baseForm = (patch = {}) => ({
   mode: 'text',
@@ -130,4 +130,59 @@ test('超分：按短边像素时不带 resolution，范围 64–2160', () => {
 
   assert.equal(buildRequest(baseForm({ sr: { ...sr, limit: '4000' } })).problems.length, 1);
   assert.equal(buildRequest(baseForm({ sr: { ...sr, fps: '0' } })).problems.length, 1);
+});
+
+// ---------- Grok 视频 ----------
+
+const local = (url) => ({ uid: url, kind: 'image', source: 'local', url });
+
+test('Grok 文生视频：用 prompt 字符串，带比例、分辨率、时长，不带 Seedance 的参数', () => {
+  const { payload, problems } = buildRequest(baseForm({ model: 'grok-imagine-video', ratio: '9:16', duration: 3, seed: '7', webSearch: true }));
+  assert.deepEqual(problems, []);
+  assert.deepEqual(payload, { model: 'grok-imagine-video', prompt: '清晨的厨房', duration: 3, resolution: '720p', aspect_ratio: '9:16' });
+});
+
+test('Grok 图生视频：首帧放在 image 里，比例跟着图片走；素材库里的素材用不了', () => {
+  const withFrame = buildRequest(baseForm({ model: 'grok-imagine-video-1.5', mode: 'frames', frames: { first: local('/media/images/img_1.jpg'), last: null } }));
+  assert.deepEqual(withFrame.problems, []);
+  assert.deepEqual(withFrame.payload.image, { url: '/media/images/img_1.jpg' });
+  assert.equal('aspect_ratio' in withFrame.payload, false);
+
+  const fromLibrary = { uid: 'a', kind: 'image', source: 'asset', assetId: 'ast_1', url: 'asset://ast_1' };
+  assert.deepEqual(buildRequest(baseForm({ model: 'grok-imagine-video', mode: 'frames', frames: { first: fromLibrary, last: null } })).problems, ['这个模型用不了素材库里的素材，请移除后重新添加首帧']);
+  assert.deepEqual(buildRequest(baseForm({ model: 'grok-imagine-video', mode: 'frames' })).problems, ['请添加首帧图片']);
+  assert.deepEqual(buildRequest(baseForm({ model: 'grok-imagine-video', mode: 'reference' })).problems, ['这个模型不支持参考生成，请改用文生视频或图生视频']);
+});
+
+test('Seedance 用不了只存在本机的首帧', () => {
+  const { problems } = buildRequest(baseForm({ mode: 'frames', frames: { first: local('/media/uploads/up_1.png'), last: null } }));
+  assert.deepEqual(problems, ['有素材只存在本机，Seedance 用不了，请移除后重新添加']);
+});
+
+// ---------- 图片、语音、音效、配乐 ----------
+
+test('生图：模型、提示词、张数、比例', () => {
+  assert.deepEqual(buildImageRequest({ prompt: ' 红色纸船 ', model: 'grok-imagine-image-2.0', ratio: '16:9', count: 2 }), {
+    payload: { model: 'grok-imagine-image-2.0', prompt: '红色纸船', n: 2, aspect_ratio: '16:9' },
+    problems: [],
+  });
+  assert.deepEqual(buildImageRequest({ prompt: '', model: 'm', ratio: '1:1', count: 1 }).problems, ['请填写提示词']);
+});
+
+test('语音：要有文字和音色', () => {
+  assert.deepEqual(buildSpeechRequest({ prompt: '你好', voiceId: 'v1', voiceName: 'Anson' }), { body: { text: '你好', voiceId: 'v1', voiceName: 'Anson' }, problems: [] });
+  assert.deepEqual(buildSpeechRequest({ prompt: '', voiceId: 'v1' }).problems, ['请填写要朗读的文字']);
+  assert.deepEqual(buildSpeechRequest({ prompt: '你好', voiceId: '' }).problems, ['请选择音色']);
+});
+
+test('音效：时长选自动时不传', () => {
+  assert.deepEqual(buildSfxRequest({ prompt: '关门声', duration: 'auto', influence: '0.3' }).body, { text: '关门声', influence: 0.3 });
+  assert.deepEqual(buildSfxRequest({ prompt: '关门声', duration: '5', influence: '0.6' }).body, { text: '关门声', influence: 0.6, duration: 5 });
+  assert.deepEqual(buildSfxRequest({ prompt: ' ', duration: 'auto', influence: '0.3' }).problems, ['请描述想要的声音']);
+});
+
+test('配乐：要有视频，并且读到了时长', () => {
+  assert.deepEqual(buildMusicRequest({ video: { url: '/media/videos/a.mp4', duration: 5.04 } }), { body: { video: '/media/videos/a.mp4', duration: 5.04 }, problems: [] });
+  assert.deepEqual(buildMusicRequest({ video: null }).problems, ['请选择要配乐的视频']);
+  assert.deepEqual(buildMusicRequest({ video: { url: '/media/videos/a.mp4', duration: 0 } }).problems, ['没有读到这段视频的时长，请重新选择']);
 });

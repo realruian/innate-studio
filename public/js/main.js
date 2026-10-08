@@ -32,8 +32,8 @@ const rendered = new Set();
 function show(id) {
   state.view = id;
   for (const [key, el] of Object.entries(views)) {
-    // 离开一个页面时停掉它里面正在放的视频，免得声音留在后台。
-    if (key !== id) for (const video of el.querySelectorAll('video')) video.pause();
+    // 离开一个页面时停掉它里面正在放的视频和音频，免得声音留在后台。
+    if (key !== id) for (const media of el.querySelectorAll('video, audio')) media.pause();
     el.hidden = key !== id;
   }
   if (!rendered.has(id)) {

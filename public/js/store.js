@@ -46,6 +46,9 @@ export const state = {
   app: { hasKey: false, keyHint: '', keySource: '', baseUrl: '' },
   models: ['seedance-2.0', 'seedance-2.0-fast'],
   modelsInfo: { source: 'default', error: '', note: '' },
+  // 视频之外账号还能用什么。known 为 false 表示还没读到模型列表，这时不拦任何一种创作。
+  catalog: { known: false, image: [], polish: [], audio: { speech: false, sfx: false, music: false } },
+  voices: null,
   history: [],
   historyLoaded: false,
   assets: [],
@@ -82,14 +85,41 @@ export async function loadModels() {
   const data = await api('GET', '/api/models');
   state.models = data.models;
   state.modelsInfo = { source: data.source, error: data.error || '', note: data.note || '' };
+  state.catalog = { known: !data.error, image: data.imageModels || [], polish: data.polishModels || [], audio: data.audio || {} };
   emit('models');
+}
+
+export async function loadVoices() {
+  if (!state.voices) state.voices = (await api('GET', '/api/voices')).items;
+  return state.voices;
+}
+
+// 润色提示词用哪个文本模型。选择存在浏览器里；没选过或选的已经不可用，就用列表里的第一个。
+const POLISH_KEY = 'seedance-studio.polish-model';
+
+export function polishModel() {
+  let saved = '';
+  try {
+    saved = localStorage.getItem(POLISH_KEY) || '';
+  } catch {
+    /* 读不到就用默认的 */
+  }
+  return state.catalog.polish.includes(saved) ? saved : state.catalog.polish[0] || '';
+}
+
+export function setPolishModel(model) {
+  try {
+    localStorage.setItem(POLISH_KEY, model);
+  } catch {
+    /* 存不了就只在本次打开期间生效 */
+  }
 }
 
 let historySignature = '';
 
 export async function loadHistory() {
   const data = await api('GET', '/api/history');
-  const signature = JSON.stringify(data.items.map((i) => [i.id, i.status, i.progress, i.videoUrl, i.pollError, i.downloadError, i.error?.message]));
+  const signature = JSON.stringify(data.items.map((i) => [i.id, i.status, i.progress, i.mediaUrl, i.pollError, i.downloadError, i.error?.message]));
   state.history = data.items;
   if (signature !== historySignature || !state.historyLoaded) {
     historySignature = signature;

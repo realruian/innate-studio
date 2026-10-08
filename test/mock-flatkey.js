@@ -5,6 +5,9 @@
 // - 提示词里带 FAIL：任务中途变成 failed
 // - 提示词里带 STUCK：任务一直停在 in_progress（把 tasks 里这条的 stuck 改成 false 才会继续）
 // - 其余任务按时间走 queued → in_progress → completed
+// - 生图的提示词里带 FAIL：返回 500
+// - 润色的草稿里带 LIMITED：claude-haiku-5-5 返回 429，其他模型正常
+// 除了视频，还模拟了生图、语音、音效、配乐、对话（润色用）和余额这几个接口。
 
 import http from 'node:http';
 import fs from 'node:fs';
@@ -15,10 +18,12 @@ export const MOCK_KEY = 'sk-fk-mocktestkey0001';
 
 const hex = (n) => crypto.randomBytes(n).toString('hex');
 
-export function startMock({ port = 0, taskSeconds = 14, assetSeconds = 9, sampleFile = '' } = {}) {
+// sampleFile、imageFile、audioFile：生成结果用这几个真实文件代替占位内容，调界面时才看得到画面、听得到声音。
+export function startMock({ port = 0, taskSeconds = 14, assetSeconds = 9, sampleFile = '', imageFile = '', audioFile = '' } = {}) {
   const tasks = new Map();
   const assets = new Map();
   const persons = new Map();
+  const music = new Map();
   const log = [];
 
   const json = (res, status, body) => {
@@ -32,6 +37,12 @@ export function startMock({ port = 0, taskSeconds = 14, assetSeconds = 9, sample
       req.on('end', () => resolve(Buffer.concat(chunks)));
     });
   const ageOf = (item) => (Date.now() - item.start) / 1000;
+  const sample = (file, fallback) => (file && fs.existsSync(file) ? fs.readFileSync(file) : Buffer.from(fallback));
+  const sendAudio = (res, fallback) => {
+    const bytes = sample(audioFile, fallback);
+    res.writeHead(200, { 'Content-Type': 'audio/mpeg', 'Content-Length': bytes.length });
+    res.end(bytes);
+  };
 
   function taskView(t, base) {
     const age = ageOf(t);
@@ -99,19 +110,85 @@ export function startMock({ port = 0, taskSeconds = 14, assetSeconds = 9, sample
         object: 'list',
         data: [
           { id: 'gpt-4o', object: 'model', type: 'text' },
+          { id: 'claude-haiku-5-5', object: 'model', type: 'text' },
+          { id: 'claude-sonnet-5-5', object: 'model', type: 'text' },
           { id: 'seedance-2.0', object: 'model', type: 'video' },
           { id: 'seedance-2.0-fast', object: 'model', type: 'video' },
+          { id: 'grok-imagine-video', object: 'model', type: 'video' },
           { id: 'MiniMax-H3', object: 'model', type: 'video' },
+          // 和真实接口一样：列表里有两个图片模型，但只有标了 image-generation 的那个能生图。
+          { id: 'grok-imagine-image', object: 'model', type: 'image', supported_endpoint_types: ['openai'] },
+          { id: 'grok-imagine-image-2.0', object: 'model', type: 'image', supported_endpoint_types: ['image-generation', 'openai'] },
+          { id: 'eleven_multilingual_v2', object: 'model', type: 'audio' },
+          { id: 'eleven_sound_v1', object: 'model', type: 'audio' },
+          { id: 'sonilo-video-to-music', object: 'model', type: 'audio' },
         ],
       });
     }
 
+    if (req.method === 'GET' && pathname === '/v1/credits') return json(res, 200, { remaining: 34.18, used: 185.13 });
+
+    if (req.method === 'POST' && pathname === '/v1/images/generations') {
+      const payload = JSON.parse(body.toString() || '{}');
+      if (/FAIL/.test(payload.prompt || '')) return json(res, 500, { error: { message: 'image generation failed', code: 'server_error' } });
+      const count = payload.n || 1;
+      // 没给示例图时用一张 1×1 的 PNG。
+      const pixel = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+      const real = imageFile && fs.existsSync(imageFile);
+      const image = { b64_json: real ? fs.readFileSync(imageFile).toString('base64') : pixel, mime_type: real && /\.jpe?g$/i.test(imageFile) ? 'image/jpeg' : 'image/png' };
+      return json(res, 200, { data: Array.from({ length: count }, () => image), usage: { cost_in_usd_ticks: 400000000 * count } });
+    }
+
+    if (req.method === 'GET' && pathname === '/v1/voices') {
+      return json(res, 200, {
+        voices: [
+          { voice_id: 'voiceEnRoger01', name: 'Roger - Laid-Back, Casual', labels: { gender: 'male', language: 'en', accent: 'american' }, preview_url: `${base}/preview/roger.mp3` },
+          { voice_id: 'voiceZhAnson02', name: 'Anson - Clear Young Baritone', labels: { gender: 'male', language: 'zh', accent: 'beijing mandarin' }, preview_url: `${base}/preview/anson.mp3` },
+        ],
+      });
+    }
+    if (req.method === 'POST' && (/^\/v1\/text-to-speech\/[\w-]+$/.test(pathname) || pathname === '/v1/sound-generation')) {
+      const payload = JSON.parse(body.toString() || '{}');
+      if (!payload.text) return json(res, 422, { error: { message: 'text is required', code: 'invalid_request' } });
+      return sendAudio(res, `mock mp3: ${payload.text}`);
+    }
+
+    if (req.method === 'POST' && pathname === '/v1/video-to-music') {
+      if (!/^multipart\/form-data/.test(req.headers['content-type'] || '')) return json(res, 400, { code: 'invalid_content_type', message: 'content type must be multipart/form-data' });
+      const seconds = Number(multipartField(body, 'duration_seconds'));
+      if (!(seconds > 0)) return json(res, 400, { code: 'invalid_duration_seconds', message: 'duration_seconds must be a positive number' });
+      if (!/name="video"; filename=/.test(body.toString('latin1'))) return json(res, 400, { code: 'invalid_video_source', message: 'exactly one of video or video_url is required' });
+      const id = `task_${hex(16)}`;
+      music.set(id, { id, start: Date.now(), seconds });
+      return json(res, 200, { id, task_id: id, status: 'processing', model: 'sonilo-video-to-music', created_at: Math.floor(Date.now() / 1000) });
+    }
+    if (req.method === 'GET' && (m = /^\/v1\/video-to-music\/([\w-]+)(\/content)?$/.exec(pathname))) {
+      const task = music.get(m[1]);
+      if (!task) return json(res, 400, { code: 'task_not_exist', message: 'task_not_exist' });
+      if (m[2]) return sendAudio(res, `mock music for ${task.id}`);
+      const view = { id: task.id, task_id: task.id, model: 'sonilo-video-to-music', created_at: Math.floor(task.start / 1000) };
+      if (ageOf(task) < taskSeconds) return json(res, 200, { ...view, status: 'processing' });
+      return json(res, 200, { ...view, status: 'succeeded', duration_seconds: task.seconds, audio: [{ url: `${base}/v1/video-to-music/${task.id}/content?variant=0`, content_type: 'audio/mpeg' }] });
+    }
+
+    if (req.method === 'POST' && pathname === '/v1/chat/completions') {
+      const payload = JSON.parse(body.toString() || '{}');
+      const draft = payload.messages?.at(-1)?.content || '';
+      // 草稿里带 LIMITED 时，haiku 这个模型被限流，其他模型正常。
+      if (/LIMITED/.test(draft) && payload.model === 'claude-haiku-5-5') return json(res, 429, { error: { message: 'Upstream rate limit exceeded, please retry later', type: 'rate_limit_error' } });
+      return json(res, 200, { model: payload.model, choices: [{ index: 0, message: { role: 'assistant', content: `${draft}，镜头缓慢推进，柔和的晨光` }, finish_reason: 'stop' }] });
+    }
+
     if (req.method === 'POST' && pathname === '/v1/videos') {
       const payload = JSON.parse(body.toString() || '{}');
-      if (!Array.isArray(payload.content) || !payload.content.length) {
+      // 两种请求格式，各模型只认一种：Grok 用 prompt 字符串，其余用 content 数组。
+      const grok = /^grok-imagine-video/.test(payload.model || '');
+      if (grok && !payload.prompt) return json(res, 400, { code: 'invalid_request', message: 'prompt is required' });
+      if (grok && !(payload.duration >= 1 && payload.duration <= 15)) return json(res, 400, { code: 'invalid_request', message: 'duration must be between 1 and 15' });
+      if (!grok && (!Array.isArray(payload.content) || !payload.content.length)) {
         return json(res, 400, { error: { message: 'content is required', type: 'invalid_request_error', code: 'invalid_request' } });
       }
-      const text = payload.content.filter((c) => c.type === 'text').map((c) => c.text).join(' ');
+      const text = grok ? payload.prompt : payload.content.filter((c) => c.type === 'text').map((c) => c.text).join(' ');
       if (/REJECT/.test(text)) return json(res, 400, { code: 'invalid_request', message: 'unsupported resolution' });
       const id = `task_${hex(16)}`;
       tasks.set(id, { id, model: payload.model, start: Date.now(), fail: /FAIL/.test(text), stuck: /STUCK/.test(text), payload });
@@ -197,6 +274,6 @@ export function startMock({ port = 0, taskSeconds = 14, assetSeconds = 9, sample
 
 // 直接运行：node test/mock-flatkey.js
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const mock = await startMock({ port: Number(process.env.MOCK_PORT) || 5999, sampleFile: process.env.MOCK_SAMPLE || '' });
+  const mock = await startMock({ port: Number(process.env.MOCK_PORT) || 5999, sampleFile: process.env.MOCK_SAMPLE || '', imageFile: process.env.MOCK_IMAGE || '', audioFile: process.env.MOCK_AUDIO || '' });
   console.log(`模拟 Flatkey 已启动：${mock.url}（Key：${MOCK_KEY}）`);
 }

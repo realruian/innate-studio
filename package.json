@@ -2,7 +2,7 @@
   "name": "seedance-studio",
   "version": "1.0.0",
   "private": true,
-  "description": "通过 Flatkey 调用 Seedance 生成视频的本地网页应用",
+  "description": "通过 Flatkey 生成视频、图片和音频的本地网页应用",
   "license": "MIT",
   "scripts": {
     "start": "node server.js",
