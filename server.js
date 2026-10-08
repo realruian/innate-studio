@@ -1,15 +1,17 @@
 #!/usr/bin/env node
-'use strict';
 
 // Seedance Studio 本地服务：托管页面、保管 API Key、转发 Flatkey 请求、轮询任务并保存历史。
 // 零依赖，需要 Node 18 以上。
 
-const http = require('node:http');
-const fs = require('node:fs');
-const path = require('node:path');
-const crypto = require('node:crypto');
-const { Readable } = require('node:stream');
-const { pipeline } = require('node:stream/promises');
+import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const PORT = Number(process.env.PORT) || 5178;
 const HOST = '127.0.0.1';

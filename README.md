@@ -36,10 +36,21 @@ node server.js
 
 也可以不把 Key 存进文件，改用环境变量：`FLATKEY_API_KEY=sk-fk-... node server.js`。
 
+## 测试
+
+```bash
+npm test
+```
+
+用模拟的 Flatkey 接口跑一遍主要流程（创建、轮询、保存视频、素材、真人档案），不花钱，也不会用到真实的 Key 和 `data/`。
+
+调界面时可以用 `npm run dev:mock` 另起一份接模拟接口的应用（<http://127.0.0.1:5179>）。
+
 ## 结构
 
 - `server.js`：本地服务。托管页面、保管 Key、转发 Flatkey 请求、轮询任务、保存视频。只监听 `127.0.0.1`，并拒绝其他网站发来的跨站请求。
 - `public/`：页面。原生 JavaScript 模块，没有构建步骤。
+- `test/`：模拟接口和自动化测试。
 - `DESIGN.md`：界面的视觉规范（对标 Antigravity 与 Codex 的深色工作台），改界面前先看它。
 
 接口文档：<https://docs.flatkey.ai/zh/guides/seedance>

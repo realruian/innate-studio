@@ -4,9 +4,12 @@
   "private": true,
   "description": "通过 Flatkey 调用 Seedance 生成视频的本地网页应用",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test test/*.test.js",
+    "dev:mock": "node test/run-with-mock.js"
   },
   "engines": {
     "node": ">=18"
-  }
+  },
+  "type": "module"
 }

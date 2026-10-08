@@ -4,6 +4,7 @@ import { h, icon, toast, clear, segmented, toggle } from './dom.js';
 import { api, state, on, KINDS, findAsset, assetReadiness, refreshAsset, startHistoryLoop } from './store.js';
 import { openAssetPicker, thumbEl } from './assets.js';
 import { openSettings } from './settings.js';
+import { buildRequest as buildPayload, refsInUse, RES_RANK } from './request.js';
 
 const FORM_KEY = 'seedance-studio.form.v1';
 
@@ -19,7 +20,6 @@ const RATIOS = [
 ];
 const DURATIONS = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
 const SR_RESOLUTIONS = ['720p', '1080p', '2k', '4k'];
-const RES_RANK = { '480p': 0, '720p': 1, '1080p': 2, '2k': 3, '4k': 4 };
 const SR_SCENES = [
   { value: '', label: '不指定' },
   { value: 'aigc', label: 'AIGC 内容' },
@@ -93,11 +93,7 @@ function persist() {
 // seedance-2.5 文档写明只支持 480p / 720p。
 const resolutionsFor = (model) => (/^seedance-2\.5/.test(model) ? ['480p', '720p'] : RESOLUTIONS);
 
-function allRefs(f = form) {
-  if (f.mode === 'frames') return [f.frames.first, f.frames.last].filter(Boolean);
-  if (f.mode === 'reference') return [...f.refs.image, ...f.refs.video, ...f.refs.audio];
-  return [];
-}
+const allRefs = (f = form) => refsInUse(f);
 
 const usedAssetIds = () => allRefs().map((r) => r.assetId).filter(Boolean);
 
@@ -106,76 +102,9 @@ function refStatus(ref) {
   return assetReadiness(findAsset(ref.assetId), form.model);
 }
 
-const MEDIA_FIELD = { image: 'image_url', video: 'video_url', audio: 'audio_url' };
-
-// 把表单转成 POST /v1/videos 的请求体，同时给出不能提交的原因。
+// 当前表单对应的请求体，以及不能提交的原因。
 export function buildRequest(f = form) {
-  const problems = [];
-  const content = [];
-  const text = f.prompt.trim();
-  const media = (ref, role) => ({ type: MEDIA_FIELD[ref.kind], [MEDIA_FIELD[ref.kind]]: { url: ref.url }, role });
-
-  if (text) content.push({ type: 'text', text });
-
-  if (f.mode === 'text') {
-    if (!text) problems.push('请填写提示词');
-  } else if (f.mode === 'frames') {
-    if (f.frames.first) content.push(media(f.frames.first, 'first_frame'));
-    else problems.push('请添加首帧图片');
-    if (f.frames.last) content.push(media(f.frames.last, 'last_frame'));
-  } else {
-    for (const ref of f.refs.image) content.push(media(ref, 'reference_image'));
-    for (const ref of f.refs.video) content.push(media(ref, 'reference_video'));
-    for (const ref of f.refs.audio) content.push(media(ref, 'reference_audio'));
-    if (!text && !f.refs.image.length && !f.refs.video.length) {
-      problems.push(f.refs.audio.length ? '只有音频不够，还需要提示词、图片或视频' : '请填写提示词，或添加参考图片、视频');
-    }
-  }
-
-  const statuses = allRefs(f).map(refStatus);
-  if (statuses.some((s) => s.tone === 'error')) problems.push('有素材不可用，请移除后再生成');
-  else if (statuses.some((s) => !s.ready)) problems.push(`有素材还在处理中，可用于 ${f.model} 后才能生成`);
-
-  const payload = {
-    model: f.model,
-    content,
-    resolution: f.resolution,
-    ratio: f.ratio,
-    duration: f.durationAuto ? -1 : Number(f.duration),
-    generate_audio: Boolean(f.generateAudio),
-    watermark: Boolean(f.watermark),
-  };
-
-  const seed = String(f.seed).trim();
-  if (seed !== '') {
-    if (/^-?\d+$/.test(seed)) payload.seed = Number(seed);
-    else problems.push('随机种子需要是整数');
-  }
-  if (f.webSearch) payload.web_search = true;
-  if (f.inputType !== 'auto') payload.input_type = f.inputType;
-
-  if (f.sr.enabled) {
-    const sr = {};
-    if (f.sr.by === 'resolution') {
-      sr.resolution = f.sr.resolution;
-      if (RES_RANK[f.sr.resolution] <= RES_RANK[f.resolution]) problems.push('超分的目标分辨率必须高于原始分辨率');
-    } else {
-      const limit = Number(f.sr.limit);
-      if (Number.isInteger(limit) && limit >= 64 && limit <= 2160) sr.resolution_limit = limit;
-      else problems.push('超分的短边像素需要是 64 到 2160 之间的整数');
-    }
-    if (f.sr.scene) sr.scene = f.sr.scene;
-    sr.tool_version = f.sr.tool;
-    const fps = String(f.sr.fps).trim();
-    if (fps !== '') {
-      const n = Number(fps);
-      if (Number.isInteger(n) && n >= 1 && n <= 120) sr.fps = n;
-      else problems.push('超分的帧率需要是 1 到 120 之间的整数');
-    }
-    payload.super_resolution_config = sr;
-  }
-
-  return { payload, problems };
+  return buildPayload(f, refStatus);
 }
 
 // ---------- 渲染 ----------
