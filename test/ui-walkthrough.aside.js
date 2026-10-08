@@ -203,23 +203,34 @@ if (pinned) {
   if (!(await pg.evaluate((sel) => document.querySelector(`${sel} video`)?.paused, P))) problems.push('点了暂停但还在播放');
   await shot('01b-player');
 
-  // 2b. 卡片：下面只有两行字；控制条和「更多」只在鼠标移到画面上时出现；操作都在「更多」的菜单里
+  // 2b. 卡片：只有画面，下面没有文字；视频铺满画框；控制条和「更多」只在鼠标移到画面上时出现；操作都在「更多」的菜单里
   const cardLook = () =>
     pg.evaluate((sel) => {
       const card = document.querySelector(sel);
       return {
         bar: getComputedStyle(card.querySelector('.player-bar')).opacity,
         more: getComputedStyle(card.querySelector('.card-more')).opacity,
-        lines: card.querySelector('.card-body').children.length,
-        buttonsBelow: card.querySelectorAll('.card-body button, .card-body a').length,
-        promptLines: Math.round(card.querySelector('.card-prompt').getBoundingClientRect().height / parseFloat(getComputedStyle(card.querySelector('.card-prompt')).lineHeight)),
+        parts: card.children.length,
+        textBelow: card.innerText.replace(card.querySelector('.card-media').innerText, '').trim(),
+        named: Boolean(card.getAttribute('aria-label')),
       };
     }, P);
   await pg.locator('.brand').hover();
   await sleep(350);
   const away = await cardLook();
   if (away.bar !== '0' || away.more !== '0') problems.push(`鼠标不在卡片上时，控制条和「更多」应该隐藏：${JSON.stringify(away)}`);
-  if (away.lines !== 2 || away.promptLines !== 1 || away.buttonsBelow) problems.push(`卡片下方应该只有两行字、没有按钮：${JSON.stringify(away)}`);
+  if (away.parts !== 1 || away.textBelow || !away.named) problems.push(`卡片应该只有画面，下面没有文字和按钮：${JSON.stringify(away)}`);
+  // 视频比例和画框差不多时要铺满，四边都不露出播放器的黑底；差得多（比如竖屏）才完整显示
+  const fit = await pg.evaluate((sel) => {
+    const video = document.querySelector(`${sel} video`);
+    const frame = document.querySelector(`${sel} .card-media`);
+    const close = Math.abs(video.videoWidth / video.videoHeight / (16 / 9) - 1) < 0.03;
+    const v = video.getBoundingClientRect();
+    const f = frame.getBoundingClientRect();
+    const border = parseFloat(getComputedStyle(frame).borderLeftWidth);
+    return { close, objectFit: getComputedStyle(video).objectFit, covers: v.left <= f.left + border + 0.01 && v.right >= f.right - border - 0.01 && v.top <= f.top + border + 0.01 && v.bottom >= f.bottom - border - 0.01, size: `${video.videoWidth}x${video.videoHeight}` };
+  }, P);
+  if (fit.objectFit !== (fit.close ? 'cover' : 'contain') || !fit.covers) problems.push(`视频没有按规则铺满画框：${JSON.stringify(fit)}`);
   await pg.locator(`${P} .card-media`).hover();
   await sleep(350);
   const over = await cardLook();
@@ -457,7 +468,8 @@ await must('筛选全部', clickText(`${V} .filters .seg`, '全部'));
 // 搜这次走查自己提交的那条，不依赖数据里碰巧有什么
 await pg.locator(`${V} input.search`).fill('工作室');
 await sleep(300);
-if (!(await count(`${V} .card`)) || (await text(`${V} .card .card-prompt`)).some((t) => !t.includes('工作室'))) problems.push('按提示词搜索的结果不对');
+const found = await pg.evaluate((v) => [...document.querySelectorAll(`${v} .card`)].map((c) => c.getAttribute('aria-label') || ''), V);
+if (!found.length || found.some((t) => !t.includes('工作室'))) problems.push('按提示词搜索的结果不对');
 await pg.locator(`${V} input.search`).fill('不存在的提示词');
 await sleep(300);
 if ((await count(`${V} .card`)) || !(await text(`${V} .empty`)).join('').includes('没有符合条件的记录')) problems.push('搜不到时没有显示空状态');

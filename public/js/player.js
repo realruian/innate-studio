@@ -9,7 +9,7 @@ const clock = (seconds) => {
   return `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
 };
 
-export function videoPlayer({ src, autoplay = false, label = '视频', clickToPlay = true }) {
+export function videoPlayer({ src, autoplay = false, label = '视频', clickToPlay = true, frameRatio = null }) {
   const video = h('video', { class: 'player-video', src, preload: 'metadata', playsinline: true, loop: true, autoplay, disablepictureinpicture: true });
   const playButton = h('button', { class: 'player-btn', type: 'button', 'aria-label': '播放', onClick: () => toggle() }, icon('play', 16));
   const muteButton = h('button', { class: 'player-btn', type: 'button', 'aria-label': '静音', onClick: () => setMuted(!video.muted) }, icon('volume', 16));
@@ -78,6 +78,14 @@ export function videoPlayer({ src, autoplay = false, label = '视频', clickToPl
   });
   for (const name of ['loadedmetadata', 'durationchange', 'seeked', 'timeupdate']) video.addEventListener(name, paint);
   if (clickToPlay) video.addEventListener('click', toggle);
+  // 画框是固定比例时（记录卡片是 16:9）：视频比例和它差不多就铺满画框，不然边上会露出一线黑底；
+  // 差得多（比如竖屏视频）就完整显示、两边留黑，不去裁画面。
+  if (frameRatio) {
+    video.addEventListener('loadedmetadata', () => {
+      const own = video.videoWidth / video.videoHeight;
+      video.classList.toggle('cover', Math.abs(own / frameRatio - 1) < 0.03);
+    });
+  }
 
   let dragging = false;
   track.addEventListener('pointerdown', (e) => {

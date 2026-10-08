@@ -27,11 +27,6 @@ function refsOf(item) {
   return [];
 }
 
-// 卡片下方那行小字：只留最能区分两条记录的三项，其余参数在详情里。
-function cardSummary(item) {
-  const p = item.payload || {};
-  return [MODE_LABELS[modeOf(item)], p.resolution, p.duration === -1 ? '时长自动' : p.duration && `${p.duration} 秒`].filter(Boolean).join(' · ');
-}
 
 async function removeItem(item) {
   const ok = await confirmDialog({
@@ -109,7 +104,7 @@ function openCardMenu(button, id) {
 
 function mediaBox(item, large = false) {
   if (item.status === 'completed' && item.videoUrl) {
-    return videoPlayer({ src: item.videoUrl, autoplay: large, clickToPlay: large, label: item.prompt || '生成的视频' });
+    return videoPlayer({ src: item.videoUrl, autoplay: large, clickToPlay: large, frameRatio: large ? null : 16 / 9, label: item.prompt || '生成的视频' });
   }
   if (item.status === 'failed') {
     return h(
@@ -133,22 +128,16 @@ function mediaBox(item, large = false) {
   );
 }
 
-// 一张卡片：画面，下面两行字（提示词；模式、分辨率、时长和时间）。
-// 操作都收在画面右上角的「更多」里，鼠标移上去才出现；点画面打开详情。
+// 一张卡片只有画面。提示词、参数、时间都在详情里，点画面打开；
+// 操作收在画面右上角的「更多」里，鼠标移上去才出现。
 function buildCard(item) {
   const mediaEl = mediaBox(item);
   const more = h('button', { class: 'card-more', type: 'button', title: '更多', 'aria-label': '更多操作', 'aria-haspopup': 'menu', 'aria-expanded': 'false', onClick: () => openCardMenu(more, item.id) }, icon('more', 16));
   const el = h(
     'article',
-    { class: `card status-${item.status}` },
+    { class: `card status-${item.status}`, 'aria-label': item.prompt || '没有提示词的记录' },
     // 控制条和「更多」上的点击各管各的，不算在"点画面打开详情"里。
     h('div', { class: 'card-media', onClick: (e) => !e.target.closest('.player-bar, .card-more') && openDetail(item.id) }, mediaEl, more),
-    h(
-      'div',
-      { class: 'card-body' },
-      h('p', { class: 'card-prompt', clipTitle: item.prompt }, item.prompt || h('span', { class: 'muted' }, '（没有提示词）')),
-      h('div', { class: 'card-meta' }, h('span', { class: 'ellipsis' }, cardSummary(item)), h('span', null, fmtTime(item.createdAt))),
-    ),
   );
   return { el, mediaEl };
 }
