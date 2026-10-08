@@ -28,16 +28,6 @@ npm start
 
 它会先把页面构建一遍，再启动服务。然后在浏览器打开 <http://127.0.0.1:5178>。换端口：`PORT=5180 npm start`。
 
-### 把这个项目发给别人
-
-不要直接压缩整个文件夹：里面的 `data/` 存着你的 API Key、创作记录和视频。在这个文件夹里运行下面的命令，会生成一个不含 `data/` 的干净压缩包 `dist/seedance-studio.zip`，发这个：
-
-```bash
-mkdir -p dist && git archive --format=zip --prefix=seedance-studio/ -o dist/seedance-studio.zip HEAD
-```
-
-对方解压后按上面"第一次使用"的三步走，用他自己的 Key。
-
 ## 功能
 
 能生成五种内容，在输入框上方切换。具体能用哪些，取决于你的 Key 开通了哪些模型：
