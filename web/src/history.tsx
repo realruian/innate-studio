@@ -589,7 +589,7 @@ export function Records() {
         empty={
           <div className="empty">
             <div className="empty-title">{!state.historyLoaded ? '正在读取记录…' : state.history.length ? '没有符合条件的记录' : '还没有生成过内容'}</div>
-            {state.historyLoaded && !state.history.length ? <div className="muted">点左边的「新建创作」开始。生成的结果和参数都会保存在这里。</div> : null}
+            {state.historyLoaded && !state.history.length ? <div className="muted">点左边的「创作」开始。生成的结果和参数都会保存在这里。</div> : null}
           </div>
         }
       />

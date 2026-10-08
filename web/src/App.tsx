@@ -13,9 +13,9 @@ import { Persons } from './persons.tsx';
 import { openSettings } from './settings.tsx';
 import type { ViewId } from './types.ts';
 
-// 「新建创作」是一个动作按钮，不是页签，所以始终是凸起的样子，不参与"当前页"高亮。
-const VIEWS: { id: ViewId; label: string; icon: IconName; action?: boolean }[] = [
-  { id: 'create', label: '新建创作', icon: 'plus', action: true },
+// 四项是同一层的页签。「创作」是首页，在首页再点一次会回到顶部并把光标放回输入框。
+const VIEWS: { id: ViewId; label: string; icon: IconName }[] = [
+  { id: 'create', label: '创作', icon: 'sparkle' },
   { id: 'records', label: '创作记录', icon: 'history' },
   { id: 'library', label: '素材库', icon: 'folder' },
   { id: 'persons', label: '真人档案', icon: 'user' },
@@ -52,9 +52,9 @@ export function App() {
         </div>
         <nav className="nav">
           {VIEWS.map((v) => {
-            const current = !v.action && view === v.id;
+            const current = view === v.id;
             return (
-              <button key={v.id} className={`nav-item ${v.action ? 'nav-new' : ''} ${current ? 'active' : ''}`} type="button" aria-current={current ? 'page' : undefined} onClick={() => goTo(v.id)}>
+              <button key={v.id} className={`nav-item ${current ? 'active' : ''}`} type="button" aria-current={current ? 'page' : undefined} onClick={() => goTo(v.id)}>
                 <Icon name={v.icon} />
                 <span>{v.label}</span>
               </button>

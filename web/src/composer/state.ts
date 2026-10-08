@@ -1,11 +1,11 @@
 // 创作输入框的状态和动作：正在编辑的表单、润色、音色试听、提交。界面在 Composer.tsx，把表单拼成请求的逻辑在 request.ts。
 // 这里改完状态都要调 changed()，输入框才会重画。
 
-import { api, state, on, emit, findAsset, assetReadiness, refreshAsset, startHistoryLoop, loadVoices, polishModel, goTo } from '../store.ts';
+import { api, state, on, emit, KINDS, findAsset, assetReadiness, refreshAsset, startHistoryLoop, loadVoices, polishModel, goTo } from '../store.ts';
 import { exclusive } from '../playback.ts';
 import { refFromAsset, refFromRecord, assetFromRecord, readVideo } from '../media.ts';
 import { toast } from '../ui/layers.tsx';
-import { buildRequest as buildVideoRequest, buildImageRequest, buildSpeechRequest, buildSfxRequest, buildMusicRequest, refsInUse, videoFamily, RES_RANK } from '../request.ts';
+import { buildRequest as buildVideoRequest, buildImageRequest, buildSpeechRequest, buildSfxRequest, buildMusicRequest, refsInUse, carryRefs, videoFamily, RES_RANK } from '../request.ts';
 import { ALL_RESOLUTIONS, VIDEO_TASKS, videoCapabilities, videoFamilyOf, type VideoTask } from '../../../shared/models.ts';
 import type { Asset, BuiltRequest, CreateType, HistoryItem, Ref, RefStatus, Studio, VideoForm, Voice } from '../types.ts';
 
@@ -201,6 +201,17 @@ export function update(patch: Partial<VideoForm>) {
   composer.submitError = '';
   persist();
   changed();
+}
+
+// 换生成方式。Grok 的首帧只能用本机的文件，素材库里的参考图带不过去。
+export function setMode(mode: VideoForm['mode']) {
+  update({ mode, ...(isGrok() ? {} : carryRefs(composer.form, mode, KINDS.image.max)) });
+}
+
+// 首帧和尾帧对调。
+export function swapFrames() {
+  const { first, last } = composer.form.frames;
+  update({ frames: { first: last, last: first } });
 }
 
 export function updateSr(patch: Partial<VideoForm['sr']>) {
@@ -446,7 +457,7 @@ export async function submit() {
   }
 }
 
-// 输入框的文本框。点「新建创作」时要把光标放回去。
+// 输入框的文本框。点侧栏的「创作」时要把光标放回去。
 let promptEl: HTMLTextAreaElement | null = null;
 export const registerPrompt = (el: HTMLTextAreaElement | null) => {
   promptEl = el;

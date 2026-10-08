@@ -18,6 +18,31 @@ export function refsInUse(form: VideoForm): Ref[] {
   return [];
 }
 
+// 换生成方式时把已经添加的图片带过去，不用重新添加。返回换完之后的首尾帧和参考素材。
+// 换成首尾帧：首帧空着的话，第一张参考图当首帧。换成参考生成：首帧、尾帧排到参考图的最前面，放不下的留在原处。
+// 图是挪过去的，不在原处留一份，免得在一边移除了、换回来又出现。
+export function carryRefs(form: VideoForm, mode: VideoForm['mode'], maxImages: number): Pick<VideoForm, 'frames' | 'refs'> {
+  const frames = { ...form.frames };
+  let images = [...form.refs.image];
+  if (mode === 'frames' && !frames.first && images.length) {
+    frames.first = images[0];
+    images = images.slice(1);
+  } else if (mode === 'reference') {
+    const same = (a: Ref, b: Ref) => (a.assetId ? a.assetId === b.assetId : a.url === b.url);
+    const moved: Ref[] = [];
+    for (const key of ['first', 'last'] as const) {
+      const ref = frames[key];
+      if (!ref) continue;
+      const known = [...moved, ...images].some((r) => same(r, ref));
+      if (!known && moved.length + images.length >= maxImages) continue;
+      if (!known) moved.push(ref);
+      frames[key] = null;
+    }
+    images = [...moved, ...images];
+  }
+  return { frames, refs: { ...form.refs, image: images } };
+}
+
 // 返回 { payload, problems }。problems 非空时不能提交。
 // refStatus(ref) 由调用方提供，返回 { ready, tone }，表示素材能否用于当前模型。
 export function buildRequest(form: VideoForm, refStatus: (ref: Ref) => RefStatus = () => ({ ready: true, tone: 'ok' })): BuiltRequest {

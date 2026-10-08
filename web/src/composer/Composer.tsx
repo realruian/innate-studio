@@ -15,7 +15,7 @@ import type { Kind, Ref, VideoForm } from '../types.ts';
 import {
   composer, TYPES, RESOLUTIONS, RATIOS, SR_RESOLUTIONS,
   typeOf, draftPrompt, isGrok, capabilities, usedAssetIds, refStatus, currentRequest,
-  update, updateSr, updateStudio, setType, typePrompt, polish, undoPolish, submit, registerPrompt,
+  update, setMode, swapFrames, updateSr, updateStudio, setType, typePrompt, polish, undoPolish, submit, registerPrompt,
   voiceName, voiceNote, togglePreview, setVoiceFilter, pickVoice, stopPreview,
 } from './state.ts';
 
@@ -110,7 +110,9 @@ function MediaBlock() {
         {frame('first', '首帧')}
         {!isGrok() && (
           <>
-            <span className="frames-arrow">→</span>
+            <button className="frames-swap" type="button" aria-label="互换首帧和尾帧" disabled={!form.frames.first && !form.frames.last} onClick={swapFrames} {...tip('互换首帧和尾帧')}>
+              ⇄
+            </button>
             {frame('last', '尾帧（可选）')}
           </>
         )}
@@ -204,7 +206,7 @@ function VideoToolbar() {
         label="生成方式"
         value={form.mode}
         options={modes.map((m) => ({ value: m.value, label: m.label, note: m.note }))}
-        onChange={(value) => update({ mode: value as VideoForm['mode'] })}
+        onChange={(value) => setMode(value as VideoForm['mode'])}
       />
       <Dropdown key="model" variant="tool" control="model" icon="cube" label="模型" value={form.model} options={models.map((m) => ({ value: m, label: m, note: modelNote(m) || undefined }))} onChange={(model) => update({ model })} />
       <PanelButton key="frame" name="frame" label="画面" ariaLabel={`画面：${ratio.label}，${form.resolution}`} className="frame-popover" panel={() => <FramePanel />}>

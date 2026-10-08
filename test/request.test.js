@@ -2,7 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildRequest, refsInUse, buildImageRequest, buildSpeechRequest, buildSfxRequest, buildMusicRequest } from '../web/src/request.ts';
+import { buildRequest, refsInUse, carryRefs, buildImageRequest, buildSpeechRequest, buildSfxRequest, buildMusicRequest } from '../web/src/request.ts';
 
 const baseForm = (patch = {}) => ({
   mode: 'text',
@@ -54,6 +54,35 @@ test('首尾帧：角色是 first_frame / last_frame，首帧必填', () => {
 
   const missing = buildRequest(baseForm({ mode: 'frames', frames: { first: null, last: frames.last } }));
   assert.deepEqual(missing.problems, ['请添加首帧图片']);
+});
+
+test('换生成方式：图片跟着走，不用重新添加', () => {
+  const [a, b, c] = ['a', 'b', 'c'].map((n) => ref('image', `https://a/${n}.jpg`));
+  const refs = { image: [a, b], video: [], audio: [] };
+
+  // 参考生成 → 首尾帧：第一张当首帧，其余留着
+  const toFrames = carryRefs(baseForm({ mode: 'reference', refs }), 'frames', 9);
+  assert.deepEqual(toFrames.frames, { first: a, last: null });
+  assert.deepEqual(toFrames.refs.image, [b]);
+  // 首帧已经有图就不动
+  const kept = carryRefs(baseForm({ mode: 'reference', refs, frames: { first: c, last: null } }), 'frames', 9);
+  assert.deepEqual(kept.frames, { first: c, last: null });
+  assert.deepEqual(kept.refs.image, [a, b]);
+
+  // 首尾帧 → 参考生成：首帧、尾帧排到最前面；只有尾帧也带回去
+  const back = carryRefs(baseForm({ mode: 'frames', frames: { first: a, last: c }, refs: { ...refs, image: [b] } }), 'reference', 9);
+  assert.deepEqual(back.frames, { first: null, last: null });
+  assert.deepEqual(back.refs.image, [a, c, b]);
+  assert.deepEqual(carryRefs(baseForm({ mode: 'frames', frames: { first: null, last: a } }), 'reference', 9).refs.image, [a]);
+  // 参考图里已经有同一张就不重复；放不下的留在首尾帧里
+  assert.deepEqual(carryRefs(baseForm({ frames: { first: a, last: null }, refs }), 'reference', 9).refs.image, [a, b]);
+  const full = carryRefs(baseForm({ frames: { first: c, last: null }, refs }), 'reference', 2);
+  assert.deepEqual(full.frames, { first: c, last: null });
+  assert.deepEqual(full.refs.image, [a, b]);
+
+  // 换成文生视频什么都不动
+  const text = carryRefs(baseForm({ mode: 'reference', refs }), 'text', 9);
+  assert.deepEqual([text.frames, text.refs.image], [{ first: null, last: null }, [a, b]]);
 });
 
 test('参考生成：图片、视频、音频各用自己的字段和角色', () => {

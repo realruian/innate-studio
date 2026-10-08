@@ -99,7 +99,7 @@ export function useStore(...events: StoreEvent[]) {
   );
 }
 
-// 切换页面。重复去同一页也算一次：点「新建创作」要回到顶部并把光标放回输入框。
+// 切换页面。重复去同一页也算一次：点「创作」要回到顶部并把光标放回输入框。
 export function goTo(view: ViewId) {
   state.view = view;
   emit('view');

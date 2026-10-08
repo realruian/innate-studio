@@ -419,7 +419,7 @@ if ((await text('.view-create .feed-head h2')).join('') !== '最近生成') prob
 if ((await count('.view-create h1')) !== 1) problems.push('创作页应该只有一个一级标题（首屏问句），「最近生成」是二级标题');
 const sideText = (await text('.sidebar')).join('');
 if ((await count('.side-list, .side-row')) || sideText.includes('最近生成')) problems.push('侧栏里不应该有「最近生成」列表');
-if ((await text('.sidebar .nav-item')).join('|') !== '新建创作|创作记录|素材库|真人档案|设置') problems.push(`侧栏的入口不对：${(await text('.sidebar .nav-item')).join('|')}`);
+if ((await text('.sidebar .nav-item')).join('|') !== '创作|创作记录|素材库|真人档案|设置') problems.push(`侧栏的入口不对：${(await text('.sidebar .nav-item')).join('|')}`);
 await audit('提交后');
 await shot('06-submitted');
 
@@ -658,7 +658,7 @@ if (await count('.view-create .feed-head .entry-action-btn:not([hidden])')) {
   await sleep(500);
   const landed = await pg.evaluate((v) => ({ active: document.querySelector(`${v} .filters .seg.active`)?.textContent, others: document.querySelectorAll(`${v} .card :is(.player, .audio-player)`).length }), V);
   if (landed.active !== '图片' || landed.others) problems.push(`从图片的「查看全部」进记录页，应该只看图片：${JSON.stringify(landed)}`);
-  await must('回到创作', clickText('.nav-item', '新建创作'));
+  await must('回到创作', clickText('.nav-item', '创作'));
   await sleep(300);
 }
 
@@ -672,6 +672,26 @@ if (fromImage.title !== '想生成什么视频？' || fromImage.mode !== '参考
 // 图片素材的汇总状态可能是失败，只要要用的模型能用就不该显示处理失败
 for (let i = 0; i < 30 && (await count('.ref-state')); i += 1) await sleep(500);
 if (await count('.ref-state')) problems.push(`图片素材没有变成可用：${(await text('.ref-state')).join('')}`);
+// 换成首尾帧：这张图自动变成首帧，不用重新添加；点互换去尾帧；换回参考生成，图还在
+const frameSlots = () => pg.evaluate(() => [...document.querySelectorAll('.frame-slot')].map((s) => (s.querySelector('.ref-tile:not(.ref-add)') ? '有' : '空')).join(''));
+await must('打开生成方式', click(control('mode')));
+await sleep(200);
+await must('选首尾帧', clickText('.menu .menu-item', '首尾帧'));
+await sleep(300);
+if ((await frameSlots()) !== '有空') problems.push(`参考生成换成首尾帧，参考图应该变成首帧：${await frameSlots()}`);
+await audit('首尾帧·带着参考图');
+await shot('frames-carried');
+await must('点互换', click('.frames-swap'));
+await sleep(200);
+if ((await frameSlots()) !== '空有') problems.push(`点互换后图应该在尾帧：${await frameSlots()}`);
+await must('再点互换', click('.frames-swap'));
+await sleep(200);
+if ((await frameSlots()) !== '有空') problems.push(`再点互换后图应该回到首帧：${await frameSlots()}`);
+await must('打开生成方式', click(control('mode')));
+await sleep(200);
+await must('选参考生成', clickText('.menu .menu-item', '参考生成'));
+await sleep(300);
+if ((await count('.ref-row .ref-tile:not(.ref-add)')) !== 1 || (await count('.frame-slot'))) problems.push('首尾帧换回参考生成，首帧应该回到参考图里');
 await must('移除参考图', click('.ref-row .ref-remove'));
 await must('打开生成方式', click(control('mode')));
 await sleep(200);
@@ -786,7 +806,7 @@ for (const [label, lead, keep] of [['延长', '向后延长视频1：', '镜头�
   await sleep(400);
 }
 // 收拾一下，免得影响后面的检查：移除视频素材，换回文生视频，清空提示词
-await must('回到创作', clickText('.nav-item', '新建创作'));
+await must('回到创作', clickText('.nav-item', '创作'));
 await sleep(300);
 await must('移除视频素材', click('.ref-row .ref-remove'));
 await must('打开生成方式', click(control('mode')));
@@ -966,9 +986,9 @@ await escape();
 await sleep(200);
 
 // 10. 回到创作页；窄窗口下不溢出
-await must('回到创作', clickText('.nav-item', '新建创作'));
+await must('回到创作', clickText('.nav-item', '创作'));
 await sleep(300);
-if (!(await pg.evaluate(() => document.activeElement === document.querySelector('textarea.prompt')))) problems.push('点「新建创作」后光标没有回到输入框');
+if (!(await pg.evaluate(() => document.activeElement === document.querySelector('textarea.prompt')))) problems.push('点「创作」后光标没有回到输入框');
 const narrow = await pg.evaluate(async () => {
   const out = [];
   for (const width of [900, 420]) {
