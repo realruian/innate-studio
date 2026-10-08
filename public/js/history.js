@@ -1,7 +1,8 @@
-// 创作记录：任务进度、播放、下载、复用参数、详情。
+// 生成记录：任务进度、播放、下载、复用参数、详情。
+// 有两处用到：创作页输入框下面的「最近生成」（只列最新几条），和单独的「创作记录」页（全部，带筛选和搜索）。
 
 import { h, toast, clear, openModal, confirmDialog, copyText, fmtTime, fmtDuration, fmtBytes, segmented, disclosure } from './dom.js';
-import { api, state, on, loadHistory, isPendingTask } from './store.js';
+import { api, state, on, loadHistory, isPendingTask, goTo } from './store.js';
 import { thumbEl } from './assets.js';
 import { setForm } from './composer.js';
 import { videoPlayer } from './player.js';
@@ -9,9 +10,7 @@ import { videoPlayer } from './player.js';
 const MODE_LABELS = { text: '文生视频', frames: '首尾帧', reference: '参考生成' };
 const STATUS_LABELS = { queued: '排队中', in_progress: '生成中', completed: '已完成', failed: '失败' };
 
-let filter = 'all';
-let query = '';
-const cards = new Map();
+const RECENT_COUNT = 6;
 
 function modeOf(item) {
   if (item.form?.mode) return item.form.mode;
@@ -59,6 +58,7 @@ function reuse(item) {
     const basics = { mode: 'text', prompt: item.prompt || '', model: item.model, resolution: p.resolution, ratio: p.ratio };
     setForm(Object.fromEntries(Object.entries(basics).filter(([, value]) => value != null)));
   }
+  goTo('create');
   toast('已把这次的参数填回创作面板', 'success');
 }
 
@@ -167,7 +167,7 @@ export function openDetail(id) {
   ].filter(([, value]) => value != null && value !== '' && value !== false);
 
   const done = item.status === 'completed' && item.videoUrl;
-  openModal({
+  const modal = openModal({
     title: '生成详情',
     size: 'lg',
     content: h(
@@ -188,7 +188,17 @@ export function openDetail(id) {
           { class: 'detail-actions' },
           done && downloadLink(item, '下载视频', 'btn btn-primary'),
           h('button', { class: 'btn', onClick: () => copyText(item.prompt || '', '已复制提示词') }, '复制提示词'),
-          h('button', { class: 'btn', onClick: () => reuse(item) }, '复用参数'),
+          h(
+            'button',
+            {
+              class: 'btn',
+              onClick: () => {
+                modal.close();
+                reuse(item);
+              },
+            },
+            '复用参数',
+          ),
           !item.savedLocally && item.status === 'completed' && h('button', { class: 'btn', onClick: () => refresh(item).then(() => toast('已重新尝试保存', 'info')) }, '重新保存到本机'),
         ),
         disclosure('查看发送的请求', h('pre', { class: 'code' }, JSON.stringify(p, null, 2))),
@@ -216,8 +226,74 @@ function describeSuperResolution(sr) {
 const mediaSignature = (i) => JSON.stringify([i.status, i.progress, Boolean(i.videoUrl), i.error?.message, i.pollError]);
 const bodySignature = (i) => JSON.stringify([i.videoUrl, i.savedLocally]);
 
-export function renderHistory(root) {
+// 把一组记录画成卡片网格。只重画有变化的卡片，正在播放的视频不会被打断。
+function cardGrid(emptyState) {
   const grid = h('div', { class: 'card-grid' });
+  const cards = new Map();
+
+  function draw(list) {
+    if (!list.length) {
+      cards.clear();
+      clear(grid).append(emptyState());
+      return;
+    }
+    const wanted = new Set(list.map((i) => i.id));
+    for (const [id, entry] of cards) {
+      if (!wanted.has(id)) {
+        entry.el.remove();
+        cards.delete(id);
+      }
+    }
+    grid.querySelector('.empty')?.remove();
+    let previous = null;
+    for (const item of list) {
+      const media = mediaSignature(item);
+      const body = bodySignature(item);
+      let entry = cards.get(item.id);
+      if (!entry || entry.media !== media) {
+        const el = buildCard(item);
+        if (entry) entry.el.replaceWith(el);
+        entry = { el, media, body };
+        cards.set(item.id, entry);
+      } else if (entry.body !== body) {
+        entry.el.querySelector('.card-body').replaceWith(cardBody(item));
+        entry.body = body;
+      }
+      const expectedNext = previous ? previous.nextSibling : grid.firstChild;
+      if (expectedNext !== entry.el) grid.insertBefore(entry.el, expectedNext);
+      previous = entry.el;
+    }
+  }
+
+  return { grid, draw };
+}
+
+// 创作页输入框下面：只列最新的几条，刚提交的任务在这里看进度。
+export function renderRecent(root) {
+  const allButton = h('button', { class: 'entry-action-btn', type: 'button', onClick: () => goTo('records') });
+  const { grid, draw } = cardGrid(() =>
+    h(
+      'div',
+      { class: 'empty' },
+      h('div', { class: 'empty-title' }, state.historyLoaded ? '还没有生成过视频' : '正在读取记录…'),
+      state.historyLoaded ? h('div', { class: 'muted' }, '在上面写下提示词，点右下角的发送键。生成的视频和参数都会保存下来。') : null,
+    ),
+  );
+  const update = () => {
+    allButton.textContent = `查看全部 ${state.history.length} 条`;
+    allButton.hidden = state.history.length <= RECENT_COUNT;
+    draw(state.history.slice(0, RECENT_COUNT));
+  };
+
+  root.append(h('section', { class: 'feed' }, h('header', { class: 'feed-head' }, h('h1', null, '最近生成'), allButton), grid));
+  update();
+  on('history', update);
+}
+
+// 「创作记录」页：全部记录，可以按状态筛选、按提示词搜索。
+export function renderRecords(root) {
+  let filter = 'all';
+  let query = '';
   const filterEl = h('div');
   const countEl = h('span', { class: 'muted small' });
   const search = h('input', {
@@ -230,6 +306,14 @@ export function renderHistory(root) {
       draw();
     },
   });
+  const { grid, draw: drawCards } = cardGrid(() =>
+    h(
+      'div',
+      { class: 'empty' },
+      h('div', { class: 'empty-title' }, !state.historyLoaded ? '正在读取记录…' : state.history.length ? '没有符合条件的记录' : '还没有生成过视频'),
+      state.historyLoaded && !state.history.length ? h('div', { class: 'muted' }, '点左边的「新建创作」开始。生成的视频和参数都会保存在这里。') : null,
+    ),
+  );
 
   function drawFilter() {
     const count = (fn) => state.history.filter(fn).length;
@@ -259,54 +343,15 @@ export function renderHistory(root) {
       return !query || (item.prompt || '').toLowerCase().includes(query);
     });
     countEl.textContent = query || filter !== 'all' ? `显示 ${list.length} 条` : '';
-
-    if (!list.length) {
-      cards.clear();
-      clear(grid).append(
-        h(
-          'div',
-          { class: 'empty' },
-          h('div', { class: 'empty-title' }, !state.historyLoaded ? '正在读取记录…' : state.history.length ? '没有符合条件的记录' : '还没有生成过视频'),
-          state.historyLoaded && !state.history.length ? h('div', { class: 'muted' }, '在左边写下提示词，点「生成视频」。生成的视频和参数都会保存在这里。') : null,
-        ),
-      );
-      return;
-    }
-
-    // 只重建有变化的卡片，正在播放的视频不会被打断。
-    const wanted = new Set(list.map((i) => i.id));
-    for (const [id, entry] of cards) {
-      if (!wanted.has(id)) {
-        entry.el.remove();
-        cards.delete(id);
-      }
-    }
-    grid.querySelector('.empty')?.remove();
-    let previous = null;
-    for (const item of list) {
-      const media = mediaSignature(item);
-      const body = bodySignature(item);
-      let entry = cards.get(item.id);
-      if (!entry || entry.media !== media) {
-        const el = buildCard(item);
-        if (entry) entry.el.replaceWith(el);
-        entry = { el, media, body };
-        cards.set(item.id, entry);
-      } else if (entry.body !== body) {
-        entry.el.querySelector('.card-body').replaceWith(cardBody(item));
-        entry.body = body;
-      }
-      const expectedNext = previous ? previous.nextSibling : grid.firstChild;
-      if (expectedNext !== entry.el) grid.insertBefore(entry.el, expectedNext);
-      previous = entry.el;
-    }
+    drawCards(list);
   }
 
   root.append(
     h(
-      'section',
-      { class: 'feed' },
-      h('header', { class: 'feed-head' }, h('h1', null, '创作记录'), h('div', { class: 'feed-tools' }, countEl, filterEl, search)),
+      'div',
+      { class: 'page' },
+      h('header', { class: 'page-head' }, h('div', null, h('h1', null, '创作记录'), h('p', { class: 'muted' }, '生成过的全部视频。点画面看详情，点「复用」把那次的参数填回创作面板。'))),
+      h('div', { class: 'page-tools' }, filterEl, h('div', { class: 'feed-tools' }, countEl, search)),
       grid,
     ),
   );

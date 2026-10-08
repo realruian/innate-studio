@@ -66,6 +66,13 @@ export function emit(event) {
   listeners[event]?.forEach((fn) => fn());
 }
 
+// 页面切换由 main.js 实现。其他模块通过 goTo 请求切换，比如在创作记录页点「复用」要回到创作页。
+let navigator = () => {};
+export const setNavigator = (fn) => {
+  navigator = fn;
+};
+export const goTo = (view) => navigator(view);
+
 export async function loadApp() {
   state.app = await api('GET', '/api/state');
   emit('app');

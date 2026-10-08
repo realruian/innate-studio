@@ -1,9 +1,9 @@
 // 入口：侧边栏（导航和设置）、页面切换、启动轮询。
 
 import { h, icon, clear, add, toast } from './dom.js';
-import { state, on, loadApp, loadModels, loadAssets, startHistoryLoop, startAssetLoop } from './store.js';
+import { state, on, loadApp, loadModels, loadAssets, startHistoryLoop, startAssetLoop, setNavigator } from './store.js';
 import { renderComposer, focusComposer } from './composer.js';
-import { renderHistory } from './history.js';
+import { renderRecent, renderRecords } from './history.js';
 import { renderLibrary } from './assets.js';
 import { renderPersons, enterPersons } from './persons.js';
 import { openSettings } from './settings.js';
@@ -11,6 +11,7 @@ import { openSettings } from './settings.js';
 // 「新建创作」是一个动作按钮，不是页签，所以始终是凸起的样子，不参与"当前页"高亮。
 const VIEWS = [
   { id: 'create', label: '新建创作', icon: 'plus', action: true },
+  { id: 'records', label: '创作记录', icon: 'history' },
   { id: 'library', label: '素材库', icon: 'folder' },
   { id: 'persons', label: '真人档案', icon: 'user' },
 ];
@@ -22,6 +23,7 @@ const nav = h('nav', { class: 'nav' });
 const settingsButton = h('button', { class: 'nav-item', type: 'button', onClick: openSettings });
 const views = {
   create: h('div', { class: 'view view-create' }),
+  records: h('div', { class: 'view', hidden: true }),
   library: h('div', { class: 'view', hidden: true }),
   persons: h('div', { class: 'view', hidden: true }),
 };
@@ -29,9 +31,14 @@ const rendered = new Set();
 
 function show(id) {
   state.view = id;
-  for (const [key, el] of Object.entries(views)) el.hidden = key !== id;
+  for (const [key, el] of Object.entries(views)) {
+    // 离开一个页面时停掉它里面正在放的视频，免得声音留在后台。
+    if (key !== id) for (const video of el.querySelectorAll('video')) video.pause();
+    el.hidden = key !== id;
+  }
   if (!rendered.has(id)) {
     rendered.add(id);
+    if (id === 'records') renderRecords(views.records);
     if (id === 'library') renderLibrary(views.library);
     if (id === 'persons') renderPersons(views.persons);
   }
@@ -75,9 +82,10 @@ app.append(
     nav,
     h('div', { class: 'sidebar-foot' }, settingsButton),
   ),
-  h('main', { class: 'main' }, views.create, views.library, views.persons),
+  h('main', { class: 'main' }, views.create, views.records, views.library, views.persons),
 );
 
+setNavigator(show);
 on('app', drawSettingsButton);
 drawNav();
 drawSettingsButton();
@@ -89,7 +97,7 @@ async function start() {
     toast(err.message, 'error', 8000);
   }
   renderComposer(views.create);
-  renderHistory(views.create);
+  renderRecent(views.create);
   rendered.add('create');
   startHistoryLoop();
   startAssetLoop();

@@ -319,15 +319,15 @@ await shot('05-reference');
 for (let i = 0; i < 30 && (await count('.ref-state')); i += 1) await sleep(500);
 if (await count('.ref-state')) problems.push('素材一直没有变成可用');
 
-// 5. 提交 → 创作记录里多出一张生成中的卡片；侧栏只有导航和设置，没有任务列表
-const cardsBefore = await count('.card');
+// 5. 提交 → 「最近生成」的第一张是刚提交的任务；创作页最多列 6 条；侧栏只有导航和设置
 await must('点生成', click('.send-btn'));
 await sleep(1800);
-if ((await count('.card')) !== cardsBefore + 1) problems.push('提交后创作记录里没有多出一条');
-if (!(await count('.card .card-state.is-pending'))) problems.push('提交后创作记录里没有显示生成中');
+if (!(await count('.view-create .card:first-child .card-state.is-pending'))) problems.push('提交后「最近生成」的第一张不是刚提交的任务');
+if ((await count('.view-create .card')) > 6) problems.push(`创作页的「最近生成」超过了 6 条：${await count('.view-create .card')}`);
+if ((await text('.view-create .feed-head h1')).join('') !== '最近生成') problems.push('创作页下方的标题应为「最近生成」');
 const sideText = (await text('.sidebar')).join('');
 if ((await count('.side-list, .side-row')) || sideText.includes('最近生成')) problems.push('侧栏里不应该有「最近生成」列表');
-if ((await text('.sidebar .nav-item')).join('|') !== '新建创作|素材库|真人档案|设置') problems.push(`侧栏的入口不对：${(await text('.sidebar .nav-item')).join('|')}`);
+if ((await text('.sidebar .nav-item')).join('|') !== '新建创作|创作记录|素材库|真人档案|设置') problems.push(`侧栏的入口不对：${(await text('.sidebar .nav-item')).join('|')}`);
 await audit('提交后');
 await shot('06-submitted');
 
@@ -369,8 +369,48 @@ await shot('08-confirm');
 await must('取消删除', clickText('.modal .btn', '取消'));
 await sleep(200);
 
+// 6b. 创作记录页：全部记录、筛选、搜索；点画面看详情；复用会回到创作页并填好参数
+const V = '.view:not([hidden])';
+await must('进入创作记录', clickText('.nav-item', '创作记录'));
+await sleep(500);
+if ((await text(`${V} .page-head h1`)).join('') !== '创作记录') problems.push('点「创作记录」没有进入记录页');
+if ((await pg.evaluate(() => document.querySelector('.nav-item[aria-current=page]')?.textContent.trim())) !== '创作记录') problems.push('侧栏没有高亮「创作记录」');
+if (await pg.evaluate(() => [...document.querySelectorAll('.view-create video')].some((v) => !v.paused))) problems.push('离开创作页后，那里的视频还在播放');
+const total = Number(((await text(`${V} .filters .seg`))[0] || '').replace(/\D/g, ''));
+if (!total || (await count(`${V} .card`)) !== total) problems.push(`记录页列出的数量不对：卡片 ${await count(`${V} .card`)}，应为 ${total}`);
+await audit('创作记录页');
+await shot('08b-records');
+const failedTotal = Number(((await text(`${V} .filters .seg`))[3] || '').replace(/\D/g, ''));
+await must('筛选失败', clickText(`${V} .filters .seg`, '失败'));
+await sleep(250);
+if ((await count(`${V} .card`)) !== failedTotal || (await count(`${V} .card:not(.status-failed)`))) problems.push(`按「失败」筛选的结果不对：应有 ${failedTotal} 条`);
+await must('筛选全部', clickText(`${V} .filters .seg`, '全部'));
+// 搜这次走查自己提交的那条，不依赖数据里碰巧有什么
+await pg.locator(`${V} input.search`).fill('工作室');
+await sleep(300);
+if (!(await count(`${V} .card`)) || (await text(`${V} .card .card-prompt`)).some((t) => !t.includes('工作室'))) problems.push('按提示词搜索的结果不对');
+await pg.locator(`${V} input.search`).fill('不存在的提示词');
+await sleep(300);
+if ((await count(`${V} .card`)) || !(await text(`${V} .empty`)).join('').includes('没有符合条件的记录')) problems.push('搜不到时没有显示空状态');
+await pg.locator(`${V} input.search`).fill('工作室');
+await sleep(300);
+// 先清空输入框，才能确认「复用」真的把提示词填了回去
+await pg.evaluate(() => {
+  const prompt = document.querySelector('textarea.prompt');
+  prompt.value = '';
+  prompt.dispatchEvent(new Event('input', { bubbles: true }));
+});
+await must('在记录页点卡片画面', click(`${V} .card .card-media`, 0));
+await sleep(500);
+if ((await text('.modal h2')).join('') !== '生成详情') problems.push('在记录页点卡片画面没有打开详情');
+await must('点复用参数', clickText('.modal .btn', '复用参数'));
+await sleep(400);
+if (await count('.modal')) problems.push('点「复用参数」后详情弹窗没有关闭');
+if (!(await count('.view-create:not([hidden])'))) problems.push('点「复用参数」后没有回到创作页');
+if (!(await pg.evaluate(() => document.querySelector('textarea.prompt').value.includes('工作室')))) problems.push('点「复用参数」后提示词没有填回输入框');
+
 // 7. 素材库
-await must('进入素材库', click('.nav-item', 1));
+await must('进入素材库', clickText('.nav-item', '素材库'));
 await sleep(500);
 if (!(await count('.asset-card'))) problems.push('素材库里没有刚上传的素材');
 await audit('素材库');
@@ -389,7 +429,7 @@ await must('取消', clickText('.modal .btn', '取消'));
 await sleep(200);
 
 // 8. 真人档案：新建 → 认证链接 → 列表与详情
-await must('进入真人档案', click('.nav-item', 2));
+await must('进入真人档案', clickText('.nav-item', '真人档案'));
 await sleep(900);
 await audit('真人档案');
 await must('打开新建档案', clickText('.page-head .btn', '新建档案'));
@@ -426,7 +466,7 @@ await escape();
 await sleep(200);
 
 // 10. 回到创作页；窄窗口下不溢出
-await must('回到创作', click('.nav-item', 0));
+await must('回到创作', clickText('.nav-item', '新建创作'));
 await sleep(300);
 if (!(await pg.evaluate(() => document.activeElement === document.querySelector('textarea.prompt')))) problems.push('点「新建创作」后光标没有回到输入框');
 const narrow = await pg.evaluate(async () => {

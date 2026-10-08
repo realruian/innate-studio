@@ -423,6 +423,7 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 .page { display: flex; flex-direction: column; gap: 18px; max-width: 1160px; margin: 0 auto; padding: 40px 32px 64px; }
 .page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
 .page-head p { margin-top: 4px; font-size: var(--fs-md); }
+.page-tools { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 
 .asset-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 16px; }
 .asset-card { display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-1); }
