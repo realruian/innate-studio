@@ -1,7 +1,7 @@
 // 生成记录：任务进度、播放、下载、复用参数、详情。
 // 有两处用到：创作页输入框下面的「最近生成」（只列最新几条），和单独的「创作记录」页（全部，带筛选和搜索）。
 
-import { h, toast, clear, openModal, confirmDialog, copyText, fmtTime, fmtDuration, fmtBytes, segmented, disclosure } from './dom.js';
+import { h, toast, clear, openModal, confirmDialog, copyText, fmtTime, fmtDuration, fmtBytes, segmented } from './dom.js';
 import { api, state, on, loadHistory, isPendingTask, goTo } from './store.js';
 import { thumbEl } from './assets.js';
 import { setForm } from './composer.js';
@@ -201,7 +201,6 @@ export function openDetail(id) {
           ),
           !item.savedLocally && item.status === 'completed' && h('button', { class: 'btn', onClick: () => refresh(item).then(() => toast('已重新尝试保存', 'info')) }, '重新保存到本机'),
         ),
-        disclosure('查看发送的请求', h('pre', { class: 'code' }, JSON.stringify(p, null, 2))),
       ),
     ),
   });

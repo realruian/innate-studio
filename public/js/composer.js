@@ -1,7 +1,7 @@
 // 创作输入框：参考素材、提示词、一排工具栏（生成方式、模型、画面、时长、更多），以及提交。
 // 把表单拼成 Seedance 请求的逻辑在 request.js。
 
-import { h, icon, add, toast, clear, segmented, toggle, dropdown, disclosure, formRow, openPopover, openMenu } from './dom.js';
+import { h, icon, add, toast, clear, segmented, toggle, dropdown, formRow, openPopover, openMenu } from './dom.js';
 import { api, state, on, KINDS, findAsset, assetReadiness, refreshAsset, startHistoryLoop } from './store.js';
 import { openAssetPicker, thumbEl } from './assets.js';
 import { openSettings } from './settings.js';
@@ -84,7 +84,6 @@ let els = null;
 let submitting = false;
 let submitError = '';
 let saveTimer = null;
-let previewOpen = false;
 let refSignature = '';
 const popovers = { frame: null, more: null };
 
@@ -304,10 +303,7 @@ function numberInput(value, onInput, attrs = {}) {
 
 // 「更多」面板：不常改的设置都收在这里。
 function drawMore() {
-  const refresh = () => {
-    drawSend();
-    drawPreview();
-  };
+  const refresh = () => drawSend();
   const live = () => {
     submitError = '';
     persist();
@@ -363,20 +359,8 @@ function drawMore() {
         formRow('超分模式', segmented([{ value: 'standard', label: '标准' }, { value: 'professional', label: '专业' }], sr.tool, (tool) => setSr({ tool }))),
         formRow('输出帧率', numberInput(sr.fps, (v) => setSr({ fps: v }, () => {}), { min: '1', max: '120', step: '1', placeholder: '不改（1 – 120）', 'aria-label': '输出帧率' })),
       ),
-    disclosure('查看将要发送的请求', (els.preview = h('pre', { class: 'code' })), {
-      open: previewOpen,
-      onToggle: (open) => {
-        previewOpen = open;
-        popovers.more?.place();
-      },
-    }),
   );
-  drawPreview();
   popovers.more?.place();
-}
-
-function drawPreview() {
-  if (els.preview) els.preview.textContent = JSON.stringify(buildRequest().payload, null, 2);
 }
 
 // 发送键：不能提交时变淡，鼠标停上去或点一下都会说明原因。
@@ -414,7 +398,6 @@ function autoGrow() {
 function drawDynamic() {
   drawMedia();
   drawSend();
-  drawPreview();
   syncWatches();
 }
 
@@ -490,7 +473,6 @@ export function renderComposer(root) {
     frame: h('div', { class: 'popover-body' }),
     more: h('div', { class: 'popover-body' }),
     moreDot: h('span', { class: 'more-dot', hidden: true }),
-    preview: null,
   };
   els.prompt = h('textarea', {
     class: 'prompt',
@@ -504,7 +486,6 @@ export function renderComposer(root) {
       autoGrow();
       persist();
       drawSend();
-      drawPreview();
     },
     onKeydown: (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {

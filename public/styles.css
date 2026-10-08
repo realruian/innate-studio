@@ -180,8 +180,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .btn-danger:hover:not(:disabled) { background: color-mix(in srgb, var(--danger) 12%, transparent); }
 .btn-sm { height: var(--h-sm); padding: 0 10px; }
 
-/* 无边框的小按钮：工具栏、卡片操作、展开开关都用这一种 */
-.entry-action-btn, .disclosure, .dropdown-tool {
+/* 无边框的小按钮：工具栏、卡片操作都用这一种 */
+.entry-action-btn, .dropdown-tool {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -198,16 +198,11 @@ button, input, select, textarea { font: inherit; color: inherit; }
   cursor: pointer;
   transition: background-color 120ms var(--ease), color 120ms var(--ease);
 }
-.entry-action-btn:hover, .disclosure:hover, .dropdown-tool:hover, .dropdown-tool[aria-expanded='true'] { background: var(--hover); color: var(--text); }
+.entry-action-btn:hover, .dropdown-tool:hover, .dropdown-tool[aria-expanded='true'] { background: var(--hover); color: var(--text); }
 .entry-action-btn.danger:hover { color: var(--danger); }
 
 .more-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
 
-.disclosure { margin-left: -8px; }
-.disclosure .icon { transform: rotate(-90deg); transition: transform 120ms var(--ease); }
-.disclosure[aria-expanded='true'] .icon { transform: none; }
-.disclosure-wrap { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
-.disclosure-body { align-self: stretch; }
 
 /* 输入框 */
 .input { width: 100%; height: var(--h-md); padding: 0 10px; border: 1px solid var(--border-strong); border-radius: var(--r-sm); background: var(--bg); color: var(--text); font-size: var(--fs-md); outline: 0; transition: border-color 120ms var(--ease); }
@@ -262,7 +257,6 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 .sub-panel { display: flex; flex-direction: column; margin: 2px 0 6px; padding: 2px 12px; border-radius: var(--r-sm); background: var(--hover); }
 .field-label { display: block; font-size: var(--fs-sm); color: var(--text-2); }
 .modal-body > .field-label, .tab-pane > .field-label { margin-top: 8px; }
-.code { margin: 0; padding: 12px; max-height: 260px; overflow: auto; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--bg); color: var(--text-2); font: var(--fs-sm)/1.6 var(--mono); white-space: pre-wrap; word-break: break-all; }
 
 /* ---------- 浮层：下拉菜单、气泡面板 ---------- */
 

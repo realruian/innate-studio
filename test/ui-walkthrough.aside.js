@@ -245,6 +245,7 @@ await sleep(200);
 await must('打开更多', click(control('more')));
 await sleep(300);
 if (!(await count('.more-popover'))) problems.push('更多面板没有出现');
+if (await pg.evaluate(() => /请求/.test(document.querySelector('.more-popover')?.textContent || '') || Boolean(document.querySelector('.more-popover pre')))) problems.push('更多面板里不应该出现请求预览');
 if ((await layout()) !== layoutBefore) problems.push(`打开面板后输入框或记录的位置变了：${layoutBefore} → ${await layout()}`);
 await audit('更多面板');
 await must('打开画质超分', click('.more-popover .switch input', 3));
@@ -331,7 +332,7 @@ if ((await text('.sidebar .nav-item')).join('|') !== '新建创作|创作记录|
 await audit('提交后');
 await shot('06-submitted');
 
-// 6. 点卡片画面打开详情（不是播放）；列表里正在放的视频要停下；展开请求、Esc 关闭；删除确认
+// 6. 点卡片画面打开详情（不是播放）；列表里正在放的视频要停下；详情里不出现请求内容；Esc 关闭；删除确认
 if (!(await count(P))) problems.push('做了记号的卡片不见了：它在中途被整张重建过');
 else await pg.locator(`${P} .player-btn`).first().click();
 await sleep(500);
@@ -354,9 +355,8 @@ if (await count('.modal')) problems.push('点控制条上的按钮不应该打�
 await must('取消静音', click(`${P} .player-btn`, 1));
 await must('再点已完成卡片的画面', click(`${P} video`, 0));
 await sleep(600);
-await must('展开请求内容', click('.modal .disclosure'));
-await sleep(200);
-if (!(await pg.evaluate(() => document.querySelector('.modal .code')?.textContent.includes('"model"')))) problems.push('详情里展开后看不到请求内容');
+// 界面上不展示发给接口的原始请求：那是给开发者看的，不是产品内容
+if (await pg.evaluate(() => /请求|"model"|"content"/.test(document.querySelector('.modal').textContent) || Boolean(document.querySelector('.modal pre')))) problems.push('详情里不应该出现请求内容');
 await audit('详情弹窗');
 await shot('07-detail');
 await escape();

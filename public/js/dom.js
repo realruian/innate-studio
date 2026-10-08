@@ -313,28 +313,6 @@ export function dropdown({ label, value, options, onChange, variant = 'field', i
   return button;
 }
 
-// 可展开的一段内容，代替原生的折叠标签。
-export function disclosure(label, content, { open = false, onToggle } = {}) {
-  const body = h('div', { class: 'disclosure-body', hidden: !open }, content);
-  const button = h(
-    'button',
-    {
-      type: 'button',
-      class: 'disclosure',
-      'aria-expanded': String(open),
-      onClick: () => {
-        open = !open;
-        body.hidden = !open;
-        button.setAttribute('aria-expanded', String(open));
-        onToggle?.(open);
-      },
-    },
-    icon('chevron', 12),
-    label,
-  );
-  return h('div', { class: 'disclosure-wrap' }, button, body);
-}
-
 // 设置项的一行：左边名称（可带一句说明），右边控件。
 export function formRow(label, control, desc) {
   return h('div', { class: 'form-row' }, h('div', { class: 'form-label' }, label, desc && h('span', { class: 'form-desc' }, desc)), h('div', { class: 'form-control' }, control));
