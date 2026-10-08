@@ -75,3 +75,7 @@ npm test
 - `DESIGN.md`：界面的视觉规范（对标 Antigravity 与 Codex 的深色工作台），改界面前先看它。
 
 接口文档：<https://docs.flatkey.ai/zh/guides/seedance>
+
+## 许可
+
+[MIT](LICENSE)
