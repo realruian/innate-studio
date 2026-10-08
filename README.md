@@ -2,17 +2,35 @@
 
 通过 Flatkey 调用 Seedance 生成视频的本地网页应用。
 
-## 启动
+## 第一次使用
 
-需要 Node.js 18 以上，不用安装任何依赖。
+1. **安装 Node.js**（18 或更高）。到 <https://nodejs.org> 下载 LTS 版本，一路下一步装好。除此之外不用安装任何东西。
+2. **双击启动**。Mac 双击 `start-mac.command`，Windows 双击 `start-windows.bat`。会弹出一个黑色窗口，并自动在浏览器里打开页面。
+3. **填 API Key**。第一次打开会弹出「设置」，把自己的 Flatkey API Key 粘贴进去保存。Key 在 [Flatkey 控制台](https://console.flatkey.ai/keys?lng=zh)创建。
+
+之后每次要用，双击启动文件就行。**那个黑色窗口开着，服务就在运行；关掉它，页面就打不开了。**
+
+Mac 第一次双击可能被系统拦住，提示"无法验证开发者"。这时在文件上点右键，选「打开」，再点一次「打开」；如果还不行，到「系统设置 → 隐私与安全性」里点「仍要打开」。只需要做一次。
+
+### 用命令行启动
+
+不想用启动文件的话，在终端里进入这个文件夹，运行：
 
 ```bash
 node server.js
 ```
 
-然后在浏览器打开 <http://127.0.0.1:5178>，第一次打开时在「设置」里填入 Flatkey API Key。
+然后在浏览器打开 <http://127.0.0.1:5178>。换端口：`PORT=5180 node server.js`。
 
-换端口：`PORT=5180 node server.js`。
+### 把这个项目发给别人
+
+不要直接压缩整个文件夹：里面的 `data/` 存着你的 API Key、创作记录和视频。在这个文件夹里运行下面的命令，会生成一个不含 `data/` 的干净压缩包 `dist/seedance-studio.zip`，发这个：
+
+```bash
+mkdir -p dist && git archive --format=zip --prefix=seedance-studio/ -o dist/seedance-studio.zip HEAD
+```
+
+对方解压后按上面"第一次使用"的三步走，用他自己的 Key。
 
 ## 功能
 
