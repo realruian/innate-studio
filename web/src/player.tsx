@@ -12,6 +12,9 @@ const clock = (seconds: number) => {
   return `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
 };
 
+// 卡片左下角的总时长，写成 00:05。
+const stamp = (seconds: number) => `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(Math.round(seconds % 60)).padStart(2, '0')}`;
+
 // 播放键、时间、进度条这一套的行为，视频和音频共用。root 是整个播放器，用来判断它还在不在页面上。
 // 进度和时间每一帧都在变，直接写到节点上，不走组件重画。
 function useMediaControls(media: RefObject<HTMLMediaElement | null>, root: RefObject<HTMLElement | null>) {
@@ -123,17 +126,20 @@ interface VideoPlayerProps {
   clickToPlay?: boolean;
   // 画框是固定比例时传它（记录卡片是 16:9）。
   frameRatio?: number | null;
+  // 在左下角标出总时长。记录卡片用：不用点开就知道这条多长。鼠标移上来、控制条出现时它让开。
+  showLength?: boolean;
   // 给视频配的那段音乐的地址。传了它，视频自己的声音关掉，播放、暂停、拖动时这段音乐跟着画面走，静音键管的也是它。
   soundtrack?: string | null;
 }
 
-export function VideoPlayer({ src, autoplay = false, label = '视频', clickToPlay = true, frameRatio = null, soundtrack = null }: VideoPlayerProps) {
+export function VideoPlayer({ src, autoplay = false, label = '视频', clickToPlay = true, frameRatio = null, showLength = false, soundtrack = null }: VideoPlayerProps) {
   const root = useRef<HTMLDivElement>(null);
   const video = useRef<HTMLVideoElement>(null);
   const music = useRef<HTMLAudioElement>(null);
   const { playing, toggle, time, fill, rail, trackProps } = useMediaControls(video, root);
   const [muted, setMutedState] = useState(false);
   const [cover, setCover] = useState(false);
+  const [length, setLength] = useState(0);
 
   function setMuted(next: boolean) {
     (music.current || video.current!).muted = next;
@@ -182,10 +188,15 @@ export function VideoPlayer({ src, autoplay = false, label = '视频', clickToPl
         muted={Boolean(soundtrack)}
         disablePictureInPicture
         onClick={clickToPlay ? toggle : undefined}
-        // 视频比例和画框差不多就铺满画框，不然边上会露出一线黑底；
-        // 差得多（比如竖屏视频）就完整显示、两边留黑，不去裁画面。
-        onLoadedMetadata={frameRatio ? (e) => setCover(Math.abs(e.currentTarget.videoWidth / e.currentTarget.videoHeight / frameRatio - 1) < 0.03) : undefined}
+        onLoadedMetadata={(e) => {
+          const el = e.currentTarget;
+          // 视频比例和画框差不多就铺满画框，不然边上会露出一线底色；
+          // 差得多（比如竖屏视频）就完整显示、两边留出底色，不去裁画面。
+          if (frameRatio) setCover(Math.abs(el.videoWidth / el.videoHeight / frameRatio - 1) < 0.03);
+          if (Number.isFinite(el.duration)) setLength(el.duration);
+        }}
       />
+      {showLength && length > 0 && <span className="player-length">{stamp(length)}</span>}
       {soundtrack && <audio ref={music} src={soundtrack} preload="auto" />}
       <div className="player-bar">
         <button className="player-btn" type="button" aria-label={playing ? '暂停' : '播放'} onClick={toggle}>

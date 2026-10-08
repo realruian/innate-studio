@@ -280,7 +280,7 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 .segmented[data-ready] .seg-thumb { transition: transform 450ms var(--spring), width 240ms var(--ease-out); }
 .seg:disabled { opacity: 0.4; cursor: not-allowed; }
 .modal .segmented, .popover .segmented { background: var(--bg); }
-.feed-tools .segmented, .form-control .segmented { align-self: center; }
+.form-control .segmented { align-self: center; }
 .tabs { margin-bottom: var(--sp-4); }
 
 /* 开关 */
@@ -388,15 +388,25 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 .feed { max-width: 1160px; margin: var(--sp-48) auto 0; }
 .feed-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-16); flex-wrap: wrap; margin-bottom: var(--sp-16); }
 .feed-head h2 { font-weight: var(--fw-medium); color: var(--text-2); }
-.feed-tools { display: flex; align-items: center; gap: var(--sp-12); flex-wrap: wrap; }
-.search { width: 180px; background: var(--surface-1); border-color: var(--border); }
+/* 只有图标的按钮 */
+.icon-btn { display: grid; place-items: center; flex: none; width: var(--h-md); height: var(--h-md); padding: 0; border: 0; border-radius: var(--r-sm); background: none; color: var(--text-2); cursor: pointer; transition: background-color 120ms var(--ease), color 120ms var(--ease); }
+.icon-btn:hover { background: var(--hover); color: var(--text); }
+/* 搜索平时只是一个图标，点了才展开成输入框，从右边长出来 */
+.search-field { position: relative; display: flex; align-items: center; transform-origin: right center; }
+.search-field .icon { position: absolute; left: var(--sp-8); color: var(--text-3); pointer-events: none; }
+.search { width: 200px; background: var(--surface-1); border-color: var(--border); }
+.search-field .search { padding-left: var(--sp-32); }
 
 .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: var(--sp-20); align-items: start; }
 .card { min-width: 0; }
 .card-media { position: relative; display: grid; overflow: hidden; cursor: pointer; aspect-ratio: 16 / 9; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-1); }
 /* 视频播放器：控制条固定用半透明黑底白字，不随主题变。鼠标移到画面上才显示；用键盘操作时也显示。 */
-.player { position: relative; display: grid; width: 100%; height: 100%; min-height: 0; overflow: hidden; background: #000; }
-.player-video { display: block; width: 100%; height: 100%; min-height: 0; object-fit: contain; background: #000; cursor: pointer; }
+.player { position: relative; display: grid; width: 100%; height: 100%; min-height: 0; overflow: hidden; background: var(--surface-2); }
+.player-video { display: block; width: 100%; height: 100%; min-height: 0; object-fit: contain; background: var(--surface-2); cursor: pointer; }
+.player:fullscreen, .player:fullscreen .player-video { background: #000; }
+/* 卡片左下角的总时长。鼠标移上来、控制条出现时让开 */
+.player-length { position: absolute; left: var(--sp-8); bottom: var(--sp-8); padding: var(--sp-2) var(--sp-8); border-radius: var(--r-xs); background: rgba(0, 0, 0, 0.55); color: #fff; font-size: var(--text-caption); line-height: var(--lh-body); font-variant-numeric: tabular-nums; pointer-events: none; transition: opacity 120ms var(--ease); }
+.player:hover .player-length, .card-media:hover .player-length, .player:has(:focus-visible) .player-length { opacity: 0; }
 .player-video.cover { object-fit: cover; }
 .player-bar { position: absolute; left: 0; right: 0; bottom: 0; display: flex; align-items: center; gap: var(--sp-2); height: 36px; padding: 0 var(--sp-4); background: rgba(0, 0, 0, 0.55); color: #fff; opacity: 0; transition: opacity 120ms var(--ease); }
 .player:hover .player-bar, .card-media:hover .player-bar, .player:has(:focus-visible) .player-bar { opacity: 1; }
@@ -433,8 +443,12 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 .card-state { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--sp-8); padding: var(--sp-16) var(--sp-24); background: var(--surface-1); color: var(--text-3); font-size: var(--text-caption); text-align: center; }
 .state-title { display: inline-flex; align-items: center; gap: var(--sp-8); color: var(--text); font-size: var(--text-body); }
 .card-state.is-pending .state-title::before { content: ""; width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid var(--text-3); border-top-color: var(--text); animation: spin 0.8s linear infinite; }
-.card-state.is-failed .state-title, .state-text { color: var(--danger); }
-.state-text { max-height: 3em; overflow: hidden; }
+/* 生成失败：一个淡红底的提示图标，下面是标题、原因（最多两行）和一句说明。只有图标是红的，文字用正常的字色，读起来不刺眼 */
+.card-state.is-failed { gap: var(--sp-4); }
+.state-mark { display: grid; place-items: center; width: var(--h-md); height: var(--h-md); margin-bottom: var(--sp-8); border-radius: 50%; background: color-mix(in srgb, var(--danger) 12%, transparent); color: var(--danger); }
+.card-state.is-failed .state-title { font-weight: var(--fw-medium); }
+.state-text { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; max-width: min(100%, 36em); color: var(--text-2); line-height: var(--lh-body); overflow-wrap: anywhere; }
+.state-note { margin-top: var(--sp-4); }
 .bar { height: 3px; overflow: hidden; border-radius: 3px; background: var(--surface-3); }
 .bar.wide { width: 56%; }
 .bar-fill { width: 0; height: 100%; border-radius: 3px; background: var(--text); transition: width 480ms var(--ease); }

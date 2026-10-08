@@ -229,14 +229,19 @@ export function findAsset(id?: string) {
 }
 
 // 素材能不能用于某个模型。虚拟素材看 available_models，真人素材只看 status。
+// status 是这个 Key 下所有相关模型的汇总：只要有一个模型没准备好，它就是 Processing 甚至 Failed，
+// 但已经列在 available_models 里的模型照样能用（Flatkey 文档的说法，2026-10-09 用一段视频素材实测过：
+// 汇总状态是 Failed，Seedance 2.0 的几个型号都在列表里，提交能成功）。所以先看目标模型在不在列表里。
 export function assetReadiness(asset: Asset | null, model?: string): Required<RefStatus> {
   if (!asset) return { ready: false, tone: 'pending', label: '查询中' };
   const status = asset.status || '';
-  if (status === 'Failed') return { ready: false, tone: 'error', label: '处理失败' };
+  const usable = asset.available_models || [];
   if (status === 'Expired') return { ready: false, tone: 'error', label: '已过期' };
   if (status === 'Deleting' || status === 'Deleted') return { ready: false, tone: 'error', label: '已删除' };
   if (status === 'Active') return { ready: true, tone: 'ok', label: '可用' };
-  if (model && (asset.available_models || []).includes(model)) return { ready: true, tone: 'ok', label: '可用' };
+  if (model && usable.includes(model)) return { ready: true, tone: 'ok', label: '可用' };
+  // 没指定模型时（素材库页面）：有模型能用就不算失败，具体哪些能用看下面列出的「可用模型」。
+  if (status === 'Failed') return !model && usable.length ? { ready: true, tone: 'ok', label: '部分模型可用' } : { ready: false, tone: 'error', label: '处理失败' };
   if (status === 'Creating') return { ready: false, tone: 'pending', label: '上传中' };
   return { ready: false, tone: 'pending', label: '处理中' };
 }

@@ -1,7 +1,7 @@
 // 生成记录：任务进度、播放、下载、复用参数、详情。视频、图片、音频（语音、音效、配乐）都在这里。
 // 有两处用到：创作页输入框下面的「最近生成」（只列最新几条），和单独的「创作记录」页（全部，带筛选和搜索）。
 
-import { memo, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { memo, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { api, state, emit, useStore, loadHistory, isPendingTask, isTimedOutTask, goTo } from './store.ts';
 import { fmtTime, fmtDuration, fmtBytes } from './format.ts';
 import { videoFamily } from './request.ts';
@@ -9,10 +9,11 @@ import { stopPlaying } from './playback.ts';
 import { VideoPlayer, AudioPlayer } from './player.tsx';
 import { Thumb } from './assets.tsx';
 import { Icon } from './ui/Icon.tsx';
-import { Segmented, Dropdown, tip } from './ui/controls.tsx';
+import { Segmented, tip, clipTip } from './ui/controls.tsx';
 import { toast, openModal, openMenu, confirmDialog, copyText } from './ui/layers.tsx';
 import { enter } from './ui/motion.ts';
-import { setForm, setStudio, useImageAsFirstFrame, useVideoForMusic } from './composer/state.ts';
+import { setForm, setStudio, useImageForVideo, useVideoForMusic, useVideoAsSource } from './composer/state.ts';
+import { VIDEO_TASKS, videoFamilyOf, type VideoTask } from '../../shared/models.ts';
 import type { CreateType, HistoryItem, Ref } from './types.ts';
 
 const MODE_LABELS: Record<string, string> = { text: '文生视频', frames: '首尾帧', reference: '参考生成' };
@@ -108,11 +109,23 @@ async function recheck(item: HistoryItem) {
   }
 }
 
-// 把一张生成的图片拿去当视频的首帧。Seedance 要先把图传进素材库，会等一小会儿。
+// 把一张生成的图片拿去生成视频。Seedance 要先把图传进素材库，会等一小会儿。
 async function animate(item: HistoryItem) {
   try {
-    await useImageAsFirstFrame(item);
-    toast('已把这张图设为首帧，写下提示词就可以生成视频', 'success');
+    await useImageForVideo(item);
+    toast('已选好这张图，写下提示词就可以生成视频', 'success');
+  } catch (err) {
+    toast(message(err), 'error', 6000);
+  }
+}
+
+// 延长或修改一条视频。只有 Seedance 能做，账号里没有 Seedance 型号时不出现这两个入口。
+const canRework = (item: HistoryItem) => done(item) && item.kind === 'video' && state.models.some((id) => videoFamilyOf(id) === 'seedance');
+async function rework(item: HistoryItem, task: VideoTask) {
+  if (!item.savedLocally) return toast('这条视频还没保存到本机，稍后再试', 'info');
+  try {
+    await useVideoAsSource(item, task);
+    toast(`已选好这段视频，${VIDEO_TASKS[task].hint}`, 'success');
   } catch (err) {
     toast(message(err), 'error', 6000);
   }
@@ -147,6 +160,8 @@ function openCardMenu(button: HTMLElement, id: string) {
     recheck: () => recheck(item),
     reuse: () => reuse(item),
     score: () => score(item),
+    extend: () => rework(item, 'extend'),
+    edit: () => rework(item, 'edit'),
     animate: () => animate(item),
     detail: () => openDetail(item.id),
     remove: () => removeItem(item),
@@ -160,6 +175,8 @@ function openCardMenu(button: HTMLElement, id: string) {
       isPendingTask(item) && !item.direct && { value: 'refresh', label: '刷新' },
       isTimedOutTask(item) && { value: 'recheck', label: '再查一次' },
       { value: 'reuse', label: '复用' },
+      canRework(item) && { value: 'extend', label: VIDEO_TASKS.extend.label },
+      canRework(item) && { value: 'edit', label: VIDEO_TASKS.edit.label },
       done(item) && item.kind === 'video' && state.catalog.audio.music && { value: 'score', label: '配乐' },
       done(item) && item.kind === 'image' && { value: 'animate', label: '生成视频' },
       { value: 'detail', label: '详情' },
@@ -197,18 +214,33 @@ function AudioView({ item, large }: { item: HistoryItem; large: boolean }) {
   return <AudioPlayer src={item.mediaUrl} kind={voice ? `${typeLabel(item)} · ${voice}` : typeLabel(item)} text={text} label={nameOf(item)} />;
 }
 
+// 平台返回的失败原因是英文的。认识的换成人话，并说一句可以怎么办；不认识的原样显示，只去掉末尾的请求编号。
+// 只登记实际遇到过的。
+const KNOWN_FAILURES: [RegExp, string][] = [[/output audio .*copyright/i, '生成的声音可能涉及版权，被平台拦下了。可以关掉「更多」里的「同步音频」再试一次。']];
+function explainFailure(message?: string) {
+  if (!message) return '未知错误';
+  return KNOWN_FAILURES.find(([pattern]) => pattern.test(message))?.[1] || message.replace(/\s*Request id:.*$/i, '').trim();
+}
+
 function MediaBox({ item, large = false }: { item: HistoryItem; large?: boolean }) {
   if (done(item)) {
     if (item.kind === 'image') return <ImageView item={item} large={large} />;
     if (item.kind === 'audio') return <AudioView item={item} large={large} />;
-    return <VideoPlayer src={item.videoUrl} autoplay={large} clickToPlay={large} frameRatio={large ? null : 16 / 9} label={item.prompt || '生成的视频'} />;
+    return <VideoPlayer src={item.videoUrl} autoplay={large} clickToPlay={large} frameRatio={large ? null : 16 / 9} showLength={!large} label={item.prompt || '生成的视频'} />;
   }
   if (item.status === 'failed') {
+    const reason = explainFailure(item.error?.message);
     return (
       <div className="card-state is-failed">
+        <span className="state-mark">
+          <Icon name="alert" size={18} />
+        </span>
         <div className="state-title">{isTimedOutTask(item) ? '查询超时' : '生成失败'}</div>
-        <div className="state-text">{item.error?.message || '未知错误'}</div>
-        {item.kind === 'video' && !isTimedOutTask(item) && <div className="small muted">预扣的余额会自动退还</div>}
+        {/* 原因最多两行，放不下的悬停看全文，点开详情也有。 */}
+        <div className="state-text" {...clipTip(reason)}>
+          {reason}
+        </div>
+        {item.kind === 'video' && !isTimedOutTask(item) && <div className="state-note">预扣的余额会自动退还</div>}
       </div>
     );
   }
@@ -374,6 +406,8 @@ function Detail({ item, close }: { item: HistoryItem; close: () => void }) {
             </a>
           )}
           {leaveTo('复用参数', reuse)}
+          {canRework(item) && leaveTo(VIDEO_TASKS.extend.label, (it) => rework(it, 'extend'))}
+          {canRework(item) && leaveTo(VIDEO_TASKS.edit.label, (it) => rework(it, 'edit'))}
           {done(item) && item.kind === 'video' && state.catalog.audio.music && leaveTo('配乐', score)}
           {done(item) && item.kind === 'image' && leaveTo('生成视频', animate)}
           {isTimedOutTask(item) && leaveTo('再查一次', recheck)}
@@ -481,26 +515,53 @@ export function Recent() {
   );
 }
 
-// 记录页的两种筛选。类型和创作页输入框上方的切换是同一组，摆成分段；状态用得少，收在下拉里。
+// 记录页的类型筛选，和创作页输入框上方的切换是同一组。
 const TYPE_FILTERS = [{ value: 'all' as const, label: '全部' }, ...(Object.keys(TYPE_LABELS) as CreateType[]).map((value) => ({ value, label: TYPE_LABELS[value] }))];
-const STATUS_FILTERS: { value: string; label: string; test: (item: HistoryItem) => boolean }[] = [
-  { value: 'all', label: '全部状态', test: () => true },
-  { value: 'pending', label: '生成中', test: isPendingTask },
-  { value: 'completed', label: '已完成', test: (item) => item.status === 'completed' },
-  { value: 'failed', label: '失败', test: (item) => item.status === 'failed' },
-];
 
-// 「创作记录」页：全部记录，可以按类型和状态筛选、按提示词搜索。
+// 搜索用得少，平时只是一个图标，点了才展开成输入框；清空并离开后收回去。
+function SearchBox({ onQuery }: { onQuery: (query: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const field = useRef<HTMLDivElement>(null);
+  const input = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    enter(field.current, { y: 0, scale: 0.96, duration: 150 });
+    input.current?.focus();
+  }, [open]);
+  if (!open) {
+    return (
+      <button className="icon-btn" type="button" aria-label="搜索提示词" {...tip('搜索提示词')} onClick={() => setOpen(true)}>
+        <Icon name="search" />
+      </button>
+    );
+  }
+  const close = () => {
+    onQuery('');
+    setOpen(false);
+  };
+  return (
+    <div ref={field} className="search-field">
+      <Icon name="search" />
+      <input
+        ref={input}
+        className="input search"
+        type="search"
+        placeholder="搜索提示词"
+        aria-label="搜索提示词"
+        onInput={(e) => onQuery(e.currentTarget.value.trim().toLowerCase())}
+        onBlur={(e) => !e.currentTarget.value.trim() && close()}
+        onKeyDown={(e) => e.key === 'Escape' && close()}
+      />
+    </div>
+  );
+}
+
+// 「创作记录」页：全部记录，可以按类型筛选、按提示词搜索。
 export function Records() {
   useStore('history', 'recordsType');
-  const [status, setStatus] = useState('all');
   const [query, setQuery] = useState('');
   const type = state.recordsType;
-  const ofType = (item: HistoryItem) => type === 'all' || typeOf(item) === type;
-  const ofStatus = STATUS_FILTERS.find((s) => s.value === status)!.test;
-  // 状态旁边的数字跟着类型走：选了「图片」，数的就只是图片。
-  const pool = state.history.filter(ofType);
-  const list = pool.filter((item) => ofStatus(item) && (!query || (item.prompt || '').toLowerCase().includes(query)));
+  const list = state.history.filter((item) => (type === 'all' || typeOf(item) === type) && (!query || (item.prompt || '').toLowerCase().includes(query)));
   return (
     <div className="page">
       <header className="page-head">
@@ -521,13 +582,7 @@ export function Records() {
             className="filters"
           />
         </div>
-        <div className="feed-tools">
-          <span className="muted small">{state.historyLoaded ? `${list.length} 条` : ''}</span>
-          <div>
-            <Dropdown label="状态" value={status} options={STATUS_FILTERS.map((s) => ({ value: s.value, label: s.label, note: String(pool.filter(s.test).length) }))} onChange={setStatus} />
-          </div>
-          <input className="input search" type="search" placeholder="搜索提示词" aria-label="搜索提示词" onInput={(e) => setQuery(e.currentTarget.value.trim().toLowerCase())} />
-        </div>
+        <SearchBox onQuery={setQuery} />
       </div>
       <CardGrid
         list={list}

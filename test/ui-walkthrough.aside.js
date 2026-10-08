@@ -218,6 +218,9 @@ if (pinned) {
       return {
         bar: getComputedStyle(card.querySelector('.player-bar')).opacity,
         more: getComputedStyle(card.querySelector('.card-more')).opacity,
+        length: card.querySelector('.player-length')?.textContent || '',
+        lengthShown: getComputedStyle(card.querySelector('.player-length') || card).opacity,
+        frame: getComputedStyle(card.querySelector('.player')).backgroundColor,
         parts: card.children.length,
         textBelow: card.innerText.replace(card.querySelector('.card-media').innerText, '').trim(),
         named: Boolean(card.getAttribute('aria-label')),
@@ -228,6 +231,9 @@ if (pinned) {
   const away = await cardLook();
   if (away.bar !== '0' || away.more !== '0') problems.push(`鼠标不在卡片上时，控制条和「更多」应该隐藏：${JSON.stringify(away)}`);
   if (away.parts !== 1 || away.textBelow || !away.named) problems.push(`卡片应该只有画面，下面没有文字和按钮：${JSON.stringify(away)}`);
+  // 视频卡片左下角标着时长（00:05 这样），鼠标移上来、控制条出现时让开；画框空出来的地方是灰色底，不是黑色
+  if (!/^\d\d:\d\d$/.test(away.length) || away.lengthShown !== '1') problems.push(`视频卡片左下角应该标着时长：${JSON.stringify(away)}`);
+  if (away.frame === 'rgb(0, 0, 0)') problems.push('视频卡片的画框底色不应该是黑色');
   // 视频比例和画框差不多时要铺满，四边都不露出播放器的黑底；差得多（比如竖屏）才完整显示
   const fit = await pg.evaluate((sel) => {
     const video = document.querySelector(`${sel} video`);
@@ -243,6 +249,7 @@ if (pinned) {
   await sleep(350);
   const over = await cardLook();
   if (over.bar !== '1' || over.more !== '1') problems.push(`鼠标移到画面上时，控制条和「更多」应该出现：${JSON.stringify(over)}`);
+  if (over.lengthShown !== '0') problems.push('控制条出现时，左下角的时长应该让开');
   await pg.locator(`${P} .card-more`).click();
   await sleep(300);
   const cardMenu = await pg.evaluate((sel) => {
@@ -252,7 +259,7 @@ if (pinned) {
   }, P);
   if (!cardMenu) problems.push('点卡片的「更多」没有打开菜单');
   else {
-    if (cardMenu.items !== '下载|复用|配乐|详情|删除') problems.push(`已完成视频卡片的菜单项不对：${cardMenu.items}`);
+    if (cardMenu.items !== '下载|复用|延长|修改|配乐|详情|删除') problems.push(`已完成视频卡片的菜单项不对：${cardMenu.items}`);
     if (!cardMenu.aligned) problems.push('「更多」的菜单没有和按钮右对齐');
   }
   if (await count('.modal')) problems.push('点「更多」不应该打开详情');
@@ -465,7 +472,7 @@ const detail = await pg.evaluate(() => {
 });
 // 「参考素材」这一组只有用了素材的记录才有。
 if (!['提示词|参考素材|生成参数|任务信息', '提示词|生成参数|任务信息'].includes(detail.titles)) problems.push(`详情右侧的分组不对：${detail.titles}`);
-if (detail.actions !== '下载视频|复用参数|配乐' || detail.buttonsInSide) problems.push(`详情的操作应该在画面下方：${detail.actions}，右侧按钮 ${detail.buttonsInSide} 个`);
+if (detail.actions !== '下载视频|复用参数|延长|修改|配乐' || detail.buttonsInSide) problems.push(`详情的操作应该在画面下方：${detail.actions}，右侧按钮 ${detail.buttonsInSide} 个`);
 if (!detail.copy) problems.push('提示词这一组的标题旁边应该有「复制」');
 if (detail.params < 4 || !detail.facts.startsWith('状态|任务 ID')) problems.push(`详情里的参数或任务信息不全：${detail.params} 项，${detail.facts}`);
 if (detail.between.some((gap) => gap < 24) || detail.within.some((gap) => gap * 2 > Math.min(...detail.between))) problems.push(`详情分组的间距不对：组间 ${detail.between.join('/')}，组内 ${detail.within.join('/')}`);
@@ -495,10 +502,22 @@ if ((await text(`${V} .page-head h1`)).join('') !== '创作记录') problems.pus
 if ((await pg.evaluate(() => document.querySelector('.nav-item[aria-current=page]')?.textContent.trim())) !== '创作记录') problems.push('侧栏没有高亮「创作记录」');
 if (await pg.evaluate(() => [...document.querySelectorAll('.view-create video')].some((v) => !v.paused))) problems.push('离开创作页后，那里的视频还在播放');
 // 筛选这一行：左边是类型的分段（和创作页是同一组），右边是条数、状态下拉、搜索
-const shown = async () => Number(((await text(`${V} .feed-tools .muted`))[0] || '').replace(/\D/g, ''));
-const statusMenu = `${V} .feed-tools .dropdown`;
-const total = await shown();
-if (!total || (await count(`${V} .card`)) !== total) problems.push(`记录页列出的数量不对：卡片 ${await count(`${V} .card`)}，应为 ${total}`);
+const total = await count(`${V} .card`);
+if (!total) problems.push('记录页没有列出记录');
+// 筛选这一行：左边是类型的分段，右边只有一个搜索图标。没有条数、没有状态筛选，搜索框平时不展开
+const tools = await pg.evaluate((v) => ({ dropdowns: document.querySelectorAll(`${v} .page-tools .dropdown`).length, inputs: document.querySelectorAll(`${v} .page-tools input`).length, icon: document.querySelectorAll(`${v} .page-tools .icon-btn svg`).length, words: document.querySelector(`${v} .page-tools`).innerText.replace(/\s+/g, '') }), V);
+if (tools.dropdowns || tools.inputs || tools.icon !== 1 || tools.words !== '全部视频图片语音音效配乐') problems.push(`记录页的筛选行不对：${JSON.stringify(tools)}`);
+// 点搜索图标展开输入框并把光标放进去；words 为空且没展开时不用管
+const searchFor = async (words) => {
+  if (!(await count(`${V} input.search`))) {
+    if (!words) return;
+    await must('点搜索图标', click(`${V} .page-tools .icon-btn`));
+    await sleep(300);
+    if (!(await pg.evaluate((v) => document.activeElement === document.querySelector(`${v} input.search`), V))) problems.push('点搜索图标后光标没有进输入框');
+  }
+  await pg.locator(`${V} input.search`).fill(words);
+  await sleep(300);
+};
 if ((await text(`${V} .filters .seg`)).join('|') !== '全部|视频|图片|语音|音效|配乐') problems.push(`记录页的类型切换不对：${(await text(`${V} .filters .seg`)).join('|')}`);
 await audit('创作记录页');
 await shot('08b-records');
@@ -522,28 +541,14 @@ else {
   else if (!after.first?.paused || after.first.time !== 0 || after.second?.paused !== false) problems.push(`播放另一条时，前一条没有停下并回到开头：${JSON.stringify(after)}`);
   await pg.evaluate((s) => document.querySelector(`${s} :is(video, audio)`)?.pause(), solo(1));
 }
-await must('打开状态筛选', click(statusMenu));
-await sleep(250);
-if ((await text('.menu .menu-item .menu-item-label')).join('|') !== '全部状态|生成中|已完成|失败') problems.push(`状态筛选的选项不对：${(await text('.menu .menu-item .menu-item-label')).join('|')}`);
-const failedTotal = Number(((await text('.menu .menu-item')).find((t) => t.startsWith('失败')) || '').replace(/\D/g, ''));
-await audit('创作记录页·状态菜单');
-await must('筛选失败', clickText('.menu .menu-item', '失败'));
-await sleep(250);
-if ((await count(`${V} .card`)) !== failedTotal || (await count(`${V} .card:not(.status-failed)`)) || (await shown()) !== failedTotal) problems.push(`按「失败」筛选的结果不对：应有 ${failedTotal} 条`);
-await must('打开状态筛选', click(statusMenu));
-await sleep(250);
-await must('看全部状态', clickText('.menu .menu-item', '全部状态'));
-await sleep(250);
 // 搜这次走查自己提交的那条，不依赖数据里碰巧有什么
-await pg.locator(`${V} input.search`).fill('工作室');
-await sleep(300);
+await searchFor('工作室');
+await audit('创作记录页·搜索展开');
 const found = await pg.evaluate((v) => [...document.querySelectorAll(`${v} .card`)].map((c) => c.getAttribute('aria-label') || ''), V);
 if (!found.length || found.some((t) => !t.includes('工作室'))) problems.push('按提示词搜索的结果不对');
-await pg.locator(`${V} input.search`).fill('不存在的提示词');
-await sleep(300);
+await searchFor('不存在的提示词');
 if ((await count(`${V} .card`)) || !(await text(`${V} .empty`)).join('').includes('没有符合条件的记录')) problems.push('搜不到时没有显示空状态');
-await pg.locator(`${V} input.search`).fill('工作室');
-await sleep(300);
+await searchFor('工作室');
 // 先清空输入框，才能确认「复用」真的把提示词填了回去
 await pg.evaluate(() => {
   const prompt = document.querySelector('textarea.prompt');
@@ -657,6 +662,22 @@ if (await count('.view-create .feed-head .entry-action-btn:not([hidden])')) {
   await sleep(300);
 }
 
+// 图片拿去生成视频：Seedance 下是参考生成，图片作为「图1」，不是首尾帧的首帧
+await must('打开图片卡片的更多', click('.view-create .card .card-more', 0));
+await sleep(300);
+await must('点生成视频', clickText('.menu .menu-item', '生成视频'));
+for (let i = 0; i < 30 && !(await count('.view-create .ref-row .ref-tile:not(.ref-add)')); i += 1) await sleep(500);
+const fromImage = await pg.evaluate(() => ({ title: document.querySelector('.composer-title').textContent, mode: document.querySelector('[data-control=mode]')?.textContent.trim(), tiles: document.querySelectorAll('.ref-row .ref-tile:not(.ref-add)').length, index: document.querySelector('.ref-row .ref-index')?.textContent, frames: document.querySelectorAll('.frame-slot').length }));
+if (fromImage.title !== '想生成什么视频？' || fromImage.mode !== '参考生成' || fromImage.tiles !== 1 || fromImage.index !== '图1' || fromImage.frames) problems.push(`图片点「生成视频」后应该是参考生成、带着这张图：${JSON.stringify(fromImage)}`);
+// 图片素材的汇总状态可能是失败，只要要用的模型能用就不该显示处理失败
+for (let i = 0; i < 30 && (await count('.ref-state')); i += 1) await sleep(500);
+if (await count('.ref-state')) problems.push(`图片素材没有变成可用：${(await text('.ref-state')).join('')}`);
+await must('移除参考图', click('.ref-row .ref-remove'));
+await must('打开生成方式', click(control('mode')));
+await sleep(200);
+await must('选文生视频', clickText('.menu .menu-item', '文生视频'));
+await sleep(200);
+
 // 语音：一个入口（音色）；面板里能筛语言、能试听；没有润色
 await must('切到语音', typeSeg('语音'));
 await sleep(900);
@@ -736,11 +757,49 @@ await must('生成音效', click('.send-btn'));
 await sleep(700);
 await waitNew('audio-player', '音效没有生成出来');
 
+// 延长和修改：从视频卡片的菜单进来。视频先传进素材库，然后切到参考生成，提示词填好开头的句式和结尾的约束，光标停在两者之间
+await must('进入创作记录', clickText('.nav-item', '创作记录'));
+await sleep(500);
+await searchFor('');
+await must('看全部类型', clickText(`${V} .filters .seg`, '全部'));
+await sleep(300);
+for (const [label, lead, keep] of [['延长', '向后延长视频1：', '镜头和景别保持不变。'], ['修改', '严格编辑视频1，', '其他内容、动作和运镜保持不变。']]) {
+  const at = await pg.evaluate((v) => [...document.querySelectorAll(`${v} .card`)].findIndex((c) => c.querySelector('.player')), V);
+  await must(`打开视频卡片的更多（${label}）`, click(`${V} .card .card-more`, at));
+  await sleep(300);
+  await must(`点${label}`, clickText('.menu .menu-item', label));
+  const arrived = () => pg.evaluate((want) => Boolean(document.querySelector('.view-create:not([hidden]) .ref-row .ref-tile:not(.ref-add)')) && document.querySelector('textarea.prompt').value.startsWith(want), lead);
+  for (let i = 0; i < 30 && !(await arrived()); i += 1) await sleep(500);
+  await sleep(300);
+  const reworked = await pg.evaluate(() => {
+    const prompt = document.querySelector('textarea.prompt');
+    return { prompt: prompt.value, caret: prompt.selectionStart, focused: document.activeElement === prompt, mode: document.querySelector('[data-control=mode]')?.textContent.trim(), videos: document.querySelectorAll('.ref-row .ref-tile:not(.ref-add)').length, index: document.querySelector('.ref-row .ref-index')?.textContent };
+  });
+  if (reworked.prompt !== `${lead}\n${keep}` || reworked.caret !== lead.length || !reworked.focused || reworked.mode !== '参考生成' || reworked.videos !== 1 || reworked.index !== '视频1') problems.push(`从视频卡片点「${label}」后输入框不对：${JSON.stringify(reworked)}`);
+  // 视频素材的汇总状态是「失败」，但要用的模型在可用列表里：不能显示成处理失败，等它处理完就能提交
+  for (let i = 0; i < 30 && (await count('.ref-state')); i += 1) await sleep(500);
+  if (await count('.ref-state')) problems.push(`${label}：视频素材没有变成可用：${(await text('.ref-state')).join('')}`);
+  if ((await pg.evaluate(() => document.querySelector('.send-btn').dataset.tip)) !== '生成视频（⌘ Enter）') problems.push(`${label}：素材可用后还是不能提交：${await pg.evaluate(() => document.querySelector('.send-btn').dataset.tip)}`);
+  await audit(`${label}视频`);
+  if (label === '延长') await shot('20-extend');
+  await must('回到创作记录', clickText('.nav-item', '创作记录'));
+  await sleep(400);
+}
+// 收拾一下，免得影响后面的检查：移除视频素材，换回文生视频，清空提示词
+await must('回到创作', clickText('.nav-item', '新建创作'));
+await sleep(300);
+await must('移除视频素材', click('.ref-row .ref-remove'));
+await must('打开生成方式', click(control('mode')));
+await sleep(200);
+await must('选文生视频', clickText('.menu .menu-item', '文生视频'));
+await sleep(200);
+await pg.locator('textarea.prompt').fill('');
+
 // 配乐：从视频卡片的菜单进来，视频已经选好；没有提示词输入框
 // 这时创作页最新的几条已经是图片和音频了，视频到记录页里找。
 await must('进入创作记录', clickText('.nav-item', '创作记录'));
 await sleep(500);
-await pg.locator(`${V} input.search`).fill('');
+await searchFor('');
 await must('看全部类型', clickText(`${V} .filters .seg`, '全部'));
 await sleep(300);
 const videoIndex = await pg.evaluate((v) => [...document.querySelectorAll(`${v} .card`)].findIndex((c) => c.querySelector('.player')), V);
@@ -818,7 +877,7 @@ if ((await composer()).tools.length !== 5) problems.push('换回 Seedance 后工
 // 记录页：按类型筛选（先清掉前面留在搜索框里的字）
 await must('进入创作记录', clickText('.nav-item', '创作记录'));
 await sleep(500);
-await pg.locator(`${V} input.search`).fill('');
+await searchFor('');
 await sleep(300);
 for (const [label, mark] of [['图片', '.image-view'], ['语音', '.audio-kind'], ['配乐', '.audio-kind']]) {
   await must(`只看${label}`, clickText(`${V} .filters .seg`, label));
@@ -829,13 +888,23 @@ for (const [label, mark] of [['图片', '.image-view'], ['语音', '.audio-kind'
     const wrong = cards.filter((c) => !c.querySelector('.card-state') && !(c.querySelector(m) && (m !== '.audio-kind' || c.querySelector(m).textContent.startsWith(l)))).length;
     return { cards: cards.length, wrong };
   }, [V, mark, label]);
-  if (!only.cards || only.wrong || only.cards !== (await shown())) problems.push(`按「${label}」筛选的结果不对：${JSON.stringify(only)}，显示 ${await shown()} 条`);
+  if (!only.cards || only.wrong) problems.push(`按「${label}」筛选的结果不对：${JSON.stringify(only)}`);
 }
 await audit('创作记录·只看配乐');
 await shot('19-records-type');
 await must('看全部类型', clickText(`${V} .filters .seg`, '全部'));
 await sleep(300);
-if ((await shown()) !== (await count(`${V} .card`)) || (await shown()) < total) problems.push('切回「全部」后记录没有列全');
+if ((await count(`${V} .card`)) < total) problems.push('切回「全部」后记录没有列全');
+// 生成失败的卡片：一个提示图标、标题、原因，文字都在画框里面，不被截掉
+const failed = await pg.evaluate((v) => {
+  const card = document.querySelector(`${v} .card-state.is-failed`);
+  if (!card) return null;
+  const box = card.getBoundingClientRect();
+  const inside = [...card.children].every((el) => { const r = el.getBoundingClientRect(); return r.left >= box.left - 0.5 && r.right <= box.right + 0.5 && r.top >= box.top - 0.5 && r.bottom <= box.bottom + 0.5; });
+  return { mark: card.querySelectorAll('.state-mark svg').length, title: card.querySelector('.state-title')?.textContent, reason: Boolean(card.querySelector('.state-text')?.textContent), inside, titleColour: getComputedStyle(card.querySelector('.state-title')).color, markColour: getComputedStyle(card.querySelector('.state-mark')).color };
+}, V);
+if (!failed) problems.push('记录里没有失败的任务，失败卡片的样子没有测到');
+else if (failed.mark !== 1 || !failed.title || !failed.reason || !failed.inside || failed.titleColour === failed.markColour) problems.push(`失败卡片不对：${JSON.stringify(failed)}`);
 
 // 7. 素材库
 await must('进入素材库', clickText('.nav-item', '素材库'));

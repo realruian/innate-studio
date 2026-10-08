@@ -68,6 +68,8 @@ export function startMock({ port = 0, taskSeconds = 14, assetSeconds = 9, sample
     const view = { id: a.id, object: 'asset', asset_type: a.asset_type, asset_url: `asset://${a.id}`, created_at: Math.floor(a.start / 1000) };
     if (a.person) return { ...view, name: a.name, asset_uri: view.asset_url, status: age < assetSeconds * 0.6 ? 'Processing' : 'Active' };
     if (age < assetSeconds * 0.4) return { ...view, status: 'Processing', available_models: [] };
+    // 和真实接口一样：视频素材的汇总状态会是 Failed（有的模型没准备好），但列在 available_models 里的模型照样能用。
+    if (a.asset_type === 'Video' || /汇总失败/.test(a.name || '')) return { ...view, status: 'Failed', available_models: ['seedance-2.0', 'seedance-2.0-fast'] };
     if (age < assetSeconds) return { ...view, status: 'Processing', available_models: ['seedance-2.0-fast'] };
     return { ...view, status: 'Active', available_models: ['seedance-2.0', 'seedance-2.0-fast'] };
   }

@@ -376,6 +376,8 @@ test('提示词润色：按要用的生成模型选规则', async () => {
   const reference = await guideFor('video', { model: 'seedance-2.0', mode: 'reference', refs: { image: 2, video: 0, audio: 1 } });
   assert.match(reference, /图片 2 张、音频 1 段/);
   assert.doesNotMatch(reference, /视频 \d+ 段/);
+  // 延长和修改视频也是参考生成，句式不能被改写成普通的参考。
+  assert.match(reference, /不要改成"参考视频1"/);
 
   const grok = await guideFor('video', { model: 'grok-imagine-video-1.5', mode: 'text' });
   assert.match(grok, /Grok Imagine 视频/);
@@ -398,7 +400,7 @@ test('删除记录：同时删掉本机的视频文件', async () => {
   assert.equal((await call('GET', '/api/history')).data.items.some((i) => i.id === created.data.id), false);
 });
 
-test('素材：用链接创建，轮询到可用', async () => {
+test('素材：用链接创建，轮询到目标模型可用', async () => {
   assert.equal((await call('POST', '/api/assets', { url: 'http://not-https/a.png', asset_type: 'Image' })).status, 400);
 
   const created = await call('POST', '/api/assets', { url: 'https://cdn.example.com/a.mp4', asset_type: 'Video', name: '背景视频' });
@@ -407,12 +409,14 @@ test('素材：用链接创建，轮询到可用', async () => {
   assert.equal(created.data.asset_url, `asset://${created.data.id}`);
   assert.equal(created.data.name, '背景视频');
 
-  const active = await waitFor(async () => {
+  // 能不能用看的是目标模型在不在 available_models 里。视频素材的汇总状态会停在 Failed，但列出来的模型照样能用。
+  const usable = await waitFor(async () => {
     const { data } = await call('GET', `/api/assets/${created.data.id}`);
-    return data.status === 'Active' ? data : null;
-  }, '素材变成 Active');
-  assert.deepEqual(active.available_models, ['seedance-2.0', 'seedance-2.0-fast']);
-  assert.equal(active.name, '背景视频');
+    return data.available_models?.includes('seedance-2.0') ? data : null;
+  }, '素材可以用于 seedance-2.0');
+  assert.deepEqual(usable.available_models, ['seedance-2.0', 'seedance-2.0-fast']);
+  assert.equal(usable.status, 'Failed');
+  assert.equal(usable.name, '背景视频');
 });
 
 test('素材：超过大小上限的上传返回 413 和说明，而不是断开连接', async () => {

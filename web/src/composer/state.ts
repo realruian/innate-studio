@@ -3,11 +3,11 @@
 
 import { api, state, on, emit, findAsset, assetReadiness, refreshAsset, startHistoryLoop, loadVoices, polishModel, goTo } from '../store.ts';
 import { exclusive } from '../playback.ts';
-import { refFromAsset, refFromRecord, assetFromRecord } from '../media.ts';
+import { refFromAsset, refFromRecord, assetFromRecord, readVideo } from '../media.ts';
 import { toast } from '../ui/layers.tsx';
 import { buildRequest as buildVideoRequest, buildImageRequest, buildSpeechRequest, buildSfxRequest, buildMusicRequest, refsInUse, videoFamily, RES_RANK } from '../request.ts';
-import { ALL_RESOLUTIONS, videoCapabilities } from '../../../shared/models.ts';
-import type { BuiltRequest, CreateType, HistoryItem, Ref, RefStatus, Studio, VideoForm, Voice } from '../types.ts';
+import { ALL_RESOLUTIONS, VIDEO_TASKS, videoCapabilities, videoFamilyOf, type VideoTask } from '../../../shared/models.ts';
+import type { Asset, BuiltRequest, CreateType, HistoryItem, Ref, RefStatus, Studio, VideoForm, Voice } from '../types.ts';
 
 // 视频的表单单独存一份（生成记录里存的也是它）；当前选的类型和其余几种的表单存在另一份里。
 const FORM_KEY = 'seedance-studio.form.v1';
@@ -245,16 +245,53 @@ export function setStudio(type: 'image' | 'speech' | 'sfx' | 'music', next: Reco
   setType(type);
 }
 
-// 用一张生成的图片当首帧去生成视频。Grok 直接用本机的文件；Seedance 只认素材库，所以先传上去。
-export async function useImageAsFirstFrame(item: HistoryItem) {
-  let first: Ref;
+// 拿一张生成的图片去生成视频。
+// Seedance：当作参考图（参考生成）。模型照着图里的人和物另拍一段，不要求视频从这张图原样开始；
+// 想让视频严格从这张图开始，再手动改成首尾帧。Seedance 只认素材库，所以先把图传上去。
+// Grok：它只有「图生视频」一种用法，就是把图当首帧，直接用本机的文件。
+export async function useImageForVideo(item: HistoryItem) {
   if (isGrok()) {
-    first = await refFromRecord(item);
+    Object.assign(composer.form, { mode: 'frames', frames: { first: await refFromRecord(item), last: null } });
   } else {
     toast('正在把图片传到素材库…', 'info');
-    first = refFromAsset(await assetFromRecord(item), 'image');
+    const ref = refFromAsset(await assetFromRecord(item), 'image');
+    Object.assign(composer.form, { mode: 'reference', refs: { image: [ref], video: [], audio: [] } });
   }
-  Object.assign(composer.form, { mode: 'frames', frames: { first, last: null } });
+  setType('video');
+  goTo('create');
+}
+
+// 延长或修改一条已经存到本机的视频。Seedance 把这两件事都当成参考生成来做：视频作为参考素材，提示词用固定的句式开头。
+// 这里把视频传进素材库、切到参考生成、填好开头和结尾的约束，用户只要在中间写上内容。
+const sourceAssets = new Map<string, Asset>();
+export async function useVideoAsSource(item: HistoryItem, task: VideoTask) {
+  // 只有 Seedance 能做。当前选的不是，就换成账号里的第一个 Seedance 型号。
+  const model = [composer.form.model, item.model, ...state.models].find((id) => videoFamilyOf(id) === 'seedance' && state.models.includes(id));
+  if (!model) throw new Error('账号里没有 Seedance 模型，延长和修改用不了');
+  // 同一条视频这次打开页面期间传过，就接着用那份素材，不重复上传。
+  let asset = sourceAssets.get(item.id);
+  if (!asset || !findAsset(asset.id)) {
+    toast('正在把视频传到素材库…', 'info');
+    asset = await assetFromRecord(item);
+    sourceAssets.set(item.id, asset);
+  }
+  const { lead, keep } = VIDEO_TASKS[task];
+  const p = item.payload || {};
+  const able = videoCapabilities(model);
+  const ratio = p.ratio || p.aspect_ratio;
+  const next: Partial<VideoForm> = { model, mode: 'reference', prompt: `${lead}\n${keep}`, refs: { image: [], video: [refFromAsset(asset, 'video')], audio: [] } };
+  // 画面比例和分辨率跟原视频一致，接起来或者对比着看才不会变样。
+  if (able.ratios.includes(ratio)) next.ratio = ratio;
+  if (able.resolutions.includes(p.resolution)) next.resolution = p.resolution;
+  // 修改出来的视频和原视频一样长。
+  if (task === 'edit') {
+    const seconds = Math.round(p.duration > 0 ? p.duration : (await readVideo(item.mediaUrl!).catch(() => ({ duration: 0 }))).duration);
+    if (able.durations.includes(seconds)) Object.assign(next, { duration: seconds, durationAuto: false });
+  }
+  Object.assign(composer.form, next);
+  fitModel();
+  // 光标放在开头那句的后面，用户直接接着写。
+  caretAfterFocus = lead.length;
   setType('video');
   goTo('create');
 }
@@ -414,8 +451,13 @@ let promptEl: HTMLTextAreaElement | null = null;
 export const registerPrompt = (el: HTMLTextAreaElement | null) => {
   promptEl = el;
 };
+// 下一次把光标放回文本框时，放在第几个字后面。用完就清掉。
+let caretAfterFocus: number | null = null;
 export function focusComposer() {
-  if (promptEl && !promptEl.hidden) promptEl.focus();
+  if (!promptEl || promptEl.hidden) return;
+  promptEl.focus();
+  if (caretAfterFocus !== null) promptEl.setSelectionRange(caretAfterFocus, caretAfterFocus);
+  caretAfterFocus = null;
 }
 
 // 读到 Key 的状态之后调一次，然后才画输入框。
