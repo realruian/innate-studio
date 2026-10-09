@@ -1,5 +1,5 @@
 #!/bin/bash
-# 双击启动 Seedance Studio（macOS）。
+# 双击启动 Innate Studio（macOS）。
 # 这个窗口开着，服务就在运行；关掉窗口，服务就停了。
 
 cd "$(dirname "$0")" || exit 1
@@ -24,7 +24,7 @@ fi
 
 # 已经在运行就不再启动第二份，直接打开页面。
 if curl -s -o /dev/null --max-time 2 "$URL"; then
-  echo "Seedance Studio 已经在运行，正在打开页面：$URL"
+  echo "Innate Studio 已经在运行，正在打开页面：$URL"
   open "$URL"
   exit 0
 fi
@@ -39,7 +39,7 @@ if [ ! -d node_modules ]; then
   fi
 fi
 
-echo "正在启动 Seedance Studio…（要停止服务，关掉这个窗口即可）"
+echo "正在启动 Innate Studio…（要停止服务，关掉这个窗口即可）"
 # 等服务起来之后再打开页面。
 (
   for _ in $(seq 1 40); do

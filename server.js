@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-// Seedance Studio 本地服务：托管页面、保管 API Key、转发请求给模型平台、轮询任务并保存历史。
+// Innate Studio 本地服务：托管页面、保管 API Key、转发请求给模型平台、轮询任务并保存历史。
 // 平台有两个，在设置里切换：Flatkey 能生成视频（Seedance、Grok）、图片、音频（语音、音效、配乐）；OpenRouter 能生成视频、图片和语音。两边都能润色提示词。
 // 服务本身不依赖第三方包。页面是 web/ 里的 React 源码，用 npm run build 构建到 web/dist 之后由这里托管。
 
@@ -1257,7 +1257,7 @@ server.on('error', (err) => {
 });
 
 server.listen(PORT, HOST, () => {
-  console.log(`Seedance Studio 已启动：http://${HOST}:${PORT}`);
+  console.log(`Innate Studio 已启动：http://${HOST}:${PORT}`);
   console.log(`数据目录：${DATA_DIR}`);
   if (!fs.existsSync(path.join(PUBLIC_DIR, 'index.html'))) console.log('还没有构建页面，打开会是空的。先运行 npm run build（npm start 会自动构建）。');
   console.log(`当前平台：${labelOf(currentProvider())}`);

@@ -1,4 +1,4 @@
-# Seedance Studio
+# Innate Studio
 
 通过 Flatkey 或 OpenRouter 生成视频、图片和音频的本地网页应用。视频用 Seedance 和 Grok，图片用 Grok，语音和音效用 ElevenLabs，还能给视频配乐、让模型帮忙润色提示词。两个平台在「设置」里切换，见下面的[两个平台](#两个平台)。
 

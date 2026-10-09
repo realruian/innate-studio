@@ -1,6 +1,6 @@
 @echo off
 chcp 65001 >nul
-rem 双击启动 Seedance Studio（Windows）。
+rem 双击启动 Innate Studio（Windows）。
 rem 这个窗口开着，服务就在运行；关掉窗口，服务就停了。
 cd /d "%~dp0"
 
@@ -14,7 +14,7 @@ call npm install
 if errorlevel 1 goto noinstall
 
 :run
-echo 正在启动 Seedance Studio…（要停止服务，关掉这个窗口即可）
+echo 正在启动 Innate Studio…（要停止服务，关掉这个窗口即可）
 rem 等两秒左右，服务起来之后再打开页面。
 start "" /b cmd /c "ping -n 3 127.0.0.1 >nul & start http://127.0.0.1:5178"
 rem npm start 会先把页面构建一遍，再启动服务。

@@ -1,4 +1,4 @@
-# DESIGN.md — Seedance Studio
+# DESIGN.md — Innate Studio
 
 > 对标 **Google Antigravity 2.0** 和 **OpenAI Codex 应用**：中性灰黑的智能体工作台。侧栏只放导航，主区正中是一个圆角输入框，参数嵌在输入框里，下面是一张张生成记录。
 >
