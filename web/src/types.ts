@@ -117,6 +117,8 @@ export interface HistoryItem {
   completedAt?: number;
   // 平台返回的用量：视频是 token，图片是张数和大小，语音是计费字符数，音效和配乐是秒数；以前别的平台留下的记录直接给美元。
   usage?: { total_tokens?: number; completion_tokens?: number; cost_usd?: number; generated_images?: number; size?: string; text_words?: number; audio_seconds?: number };
+  // 多人模式下这一条的积分：quote 是提交时预扣的，charged 是现在实际扣着的（完成后按用量结算，失败了是 0）。
+  credits?: { quote: number; charged: number };
 }
 
 // 一个角色：名字、描述和几张参考图。images 是本机图片的地址。
@@ -153,6 +155,7 @@ export interface KeyInfo {
 // 最外面的几项说的是火山方舟的 Key。
 export interface AppInfo extends KeyInfo {
   // 多人模式：要登录才能用，Key 和成员由管理员管。user 是登录着的账号，没登录是 null。
+  // 这时成员只拿得到 hasKey（服务能不能用），下面各个平台的 Key 状态只有管理员有。
   hosted: boolean;
   user: { id: string; name: string; role: 'admin' | 'member' } | null;
   // MiniMax、AiHubMix 那两个 Key 的状态。

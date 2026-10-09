@@ -1,22 +1,11 @@
-// 多人模式下才有的界面：登录页，和设置里的「账号」「成员」两组。
+// 多人模式下才有的界面：登录页，和设置里的「账号」。成员的管理在 admin.tsx。
 
-import { useEffect, useRef, useState } from 'react';
-import { api, state, useStore, isAdmin } from './store.ts';
-import { fmtTime, fmtCost } from './format.ts';
+import { useRef, useState } from 'react';
+import { api, state } from './store.ts';
 import { FormRow } from './ui/controls.tsx';
-import { toast, openMenu, openModal, confirmDialog, copyText } from './ui/layers.tsx';
+import { toast, openModal } from './ui/layers.tsx';
 
 const message = (err: unknown) => (err as Error).message;
-
-interface Member {
-  id: string;
-  name: string;
-  role: 'admin' | 'member';
-  disabled: boolean;
-  lastSeenAt: number | null;
-  // 这个月大约花了多少元。
-  monthSpend: number;
-}
 
 // ---------- 登录 ----------
 
@@ -115,131 +104,6 @@ export function AccountSection() {
             退出登录
           </button>
         </FormRow>
-      </div>
-    </section>
-  );
-}
-
-// ---------- 设置里的「成员」（管理员才有） ----------
-
-// 新建账号、重置密码之后，密码只在这里出现一次。
-function showPassword(name: string, password: string) {
-  const modal = openModal({
-    title: `${name} 的初始密码`,
-    size: 'sm',
-    content: (
-      <>
-        <p className="mono confirm-text">{password}</p>
-        <p className="muted small">仅显示一次。成员登录后可在「设置」中修改。</p>
-        <div className="modal-actions">
-          <button
-            className="btn btn-primary"
-            onClick={() => {
-              copyText(password, '已复制');
-              modal.close();
-            }}
-          >
-            复制并关闭
-          </button>
-        </div>
-      </>
-    ),
-  });
-}
-
-export function MembersSection() {
-  useStore('app');
-  const [members, setMembers] = useState<Member[] | null>(null);
-  const [adding, setAdding] = useState(false);
-  const name = useRef<HTMLInputElement>(null);
-  const me = state.app.user!;
-  const load = () =>
-    api<{ items: Member[] }>('GET', '/api/users')
-      .then((data) => setMembers(data.items))
-      .catch((err) => toast(message(err), 'error', 6000));
-  useEffect(() => {
-    load();
-  }, []);
-  if (!isAdmin()) return null;
-
-  async function add() {
-    const value = name.current!.value.trim();
-    if (!value) return;
-    setAdding(true);
-    try {
-      const { user, password } = await api('POST', '/api/users', { name: value });
-      name.current!.value = '';
-      showPassword(user.name, password);
-      await load();
-    } catch (err) {
-      toast(message(err), 'error', 6000);
-    } finally {
-      setAdding(false);
-    }
-  }
-
-  const change = async (member: Member, body: Record<string, unknown>, done?: string) => {
-    try {
-      const { password } = await api('PUT', `/api/users/${member.id}`, body);
-      if (password) showPassword(member.name, password);
-      else if (done) toast(done, 'success');
-      await load();
-    } catch (err) {
-      toast(message(err), 'error', 6000);
-    }
-  };
-
-  async function remove(member: Member) {
-    const ok = await confirmDialog({ title: `删除成员「${member.name}」？`, message: '账号将无法登录。该成员的生成记录和文件保留在服务器上。', okText: '删除', danger: true });
-    if (!ok) return;
-    try {
-      await api('DELETE', `/api/users/${member.id}`);
-      await load();
-    } catch (err) {
-      toast(message(err), 'error', 6000);
-    }
-  }
-
-  function more(button: HTMLElement, member: Member) {
-    const acts: Record<string, () => void> = {
-      reset: () => change(member, { resetPassword: true }),
-      role: () => change(member, { role: member.role === 'admin' ? 'member' : 'admin' }, '已更新'),
-      toggle: () => change(member, { disabled: !member.disabled }, member.disabled ? '已启用' : '已停用'),
-      remove: () => remove(member),
-    };
-    openMenu(button, {
-      label: '成员操作',
-      align: 'end',
-      items: [
-        { value: 'reset', label: '重置密码' },
-        { value: 'role', label: member.role === 'admin' ? '设为成员' : '设为管理员' },
-        { value: 'toggle', label: member.disabled ? '启用' : '停用' },
-        ...(member.id === me.id ? [] : [{ value: 'remove', label: '删除', danger: true }]),
-      ],
-      onSelect: (value) => acts[value](),
-    });
-  }
-
-  return (
-    <section className="settings-group">
-      <h3>成员</h3>
-      <div className="settings-card">
-        {(members || []).map((member) => (
-          <FormRow key={member.id} label={member.name} desc={[member.role === 'admin' ? '管理员' : '成员', member.disabled ? '已停用' : member.lastSeenAt ? `最近使用 ${fmtTime(member.lastSeenAt)}` : '尚未登录'].join(' · ')}>
-            <span className="muted amount">{`本月 ${fmtCost(member.monthSpend)}`}</span>
-            <button className="btn btn-sm" type="button" aria-haspopup="menu" aria-expanded="false" onClick={(e) => more(e.currentTarget, member)}>
-              管理
-            </button>
-          </FormRow>
-        ))}
-        <div className="form-row">
-          <div className="form-control key-edit">
-            <input ref={name} className="input" type="text" placeholder="新成员的名称" maxLength={30} aria-label="新成员的名称" onKeyDown={(e) => e.key === 'Enter' && add()} />
-            <button className="btn btn-primary" type="button" disabled={adding} onClick={add}>
-              添加成员
-            </button>
-          </div>
-        </div>
       </div>
     </section>
   );

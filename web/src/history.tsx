@@ -2,8 +2,8 @@
 // 有两处用到：创作页输入框下面的「最近生成」（只列最新几条），和单独的「创作记录」页（全部，带筛选和搜索）。
 
 import { memo, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { api, state, emit, useStore, loadHistory, isPendingTask, isTimedOutTask, goTo } from './store.ts';
-import { fmtTime, fmtDuration, fmtBytes, fmtCost } from './format.ts';
+import { api, state, emit, useStore, loadHistory, isPendingTask, isTimedOutTask, goTo, usesCredits } from './store.ts';
+import { fmtTime, fmtDuration, fmtBytes, fmtCost, fmtCredits } from './format.ts';
 import { stopPlaying } from './playback.ts';
 import { VideoPlayer, AudioPlayer } from './player.tsx';
 import { Thumb } from './assets.tsx';
@@ -412,9 +412,14 @@ function Detail({ item, close, nav }: { item: HistoryItem; close: () => void; na
       ],
       ['提交时间', fmtTime(item.createdAt)],
       ['生成耗时', item.completedAt && item.createdAt ? fmtDuration(item.completedAt - item.createdAt) : null],
-      ['Token 用量', item.usage?.total_tokens != null ? String(item.usage.total_tokens) : null],
-      ['计费字符', item.usage?.text_words != null ? String(item.usage.text_words) : null],
-      ['费用', item.usage?.cost_usd != null ? `约 $${item.usage.cost_usd.toFixed(2)}` : fmtCost(estimateCost(item))],
+      // 成员看到的是这一条扣了多少积分，用量和折成元的费用只给管理员。
+      ...(usesCredits()
+        ? ([['积分', item.credits ? fmtCredits(item.credits.charged) : null]] as Entry[])
+        : ([ 
+            ['Token 用量', item.usage?.total_tokens != null ? String(item.usage.total_tokens) : null],
+            ['计费字符', item.usage?.text_words != null ? String(item.usage.text_words) : null],
+            ['费用', item.usage?.cost_usd != null ? `约 $${item.usage.cost_usd.toFixed(2)}` : fmtCost(estimateCost(item))],
+          ] as Entry[])),
       [`${kindLabel}文件`, item.status !== 'completed' ? null : item.savedLocally ? `已保存${item.fileSize ? `（${fmtBytes(item.fileSize)}）` : ''}` : item.downloadError ? `保存失败：${item.downloadError}` : '保存中…'],
     ] as Entry[]
   ).filter(present);

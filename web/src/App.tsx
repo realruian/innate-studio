@@ -1,7 +1,7 @@
 // 整个页面：侧边栏（导航和设置）和五个页面。多人模式下没登录时只有登录页。页面第一次打开时才画，之后切走只是藏起来。
 
 import { useEffect, useRef } from 'react';
-import { state, useStore, goTo, needsLogin } from './store.ts';
+import { state, useStore, goTo, needsLogin, canManage } from './store.ts';
 import { Login } from './account.tsx';
 import { Icon, type IconName } from './ui/Icon.tsx';
 import { LayerHosts } from './ui/layers.tsx';
@@ -12,7 +12,7 @@ import { Recent, Records } from './history.tsx';
 import { Projects } from './canvas/Projects.tsx';
 import { Characters } from './characters.tsx';
 import { Skills } from './skills.tsx';
-import { openSettings } from './settings.tsx';
+import { openSettings, openAdmin } from './settings.tsx';
 import { SpendButton } from './spend.tsx';
 import type { ViewId } from './types.ts';
 
@@ -72,11 +72,17 @@ function Workbench() {
           })}
         </nav>
         <div className="sidebar-foot">
-          {/* 设置入口只在缺少 API Key 时带一个提醒点；Key 的具体内容放在设置里看。 */}
+          {/* 管理入口：Key、余额、成员和积分。多人模式下只有管理员有。缺少 API Key 时带一个提醒点。 */}
+          {canManage() && (
+            <button className="nav-item" type="button" onClick={openAdmin}>
+              <Icon name="sliders" stroke={NAV_STROKE} />
+              <span>管理</span>
+              {!state.app.hasKey && <span className="dot dot-warn nav-dot" {...tip(NO_KEY)} aria-label={NO_KEY} />}
+            </button>
+          )}
           <button className="nav-item" type="button" onClick={openSettings}>
             <Icon name="gear" stroke={NAV_STROKE} />
             <span>设置</span>
-            {!state.app.hasKey && <span className="dot dot-warn nav-dot" {...tip(NO_KEY)} aria-label={NO_KEY} />}
           </button>
         </div>
       </aside>

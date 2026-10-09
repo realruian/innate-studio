@@ -23,7 +23,7 @@ export function fmtBytes(n?: number) {
 
 // 金额。不到一毛的多留一位小数，不然语音这种几厘钱的会显示成 0.00。
 export const fmtYuan = (yuan: number) => `¥${yuan.toFixed(yuan > 0 && yuan < 0.1 ? 3 : 2)}`;
-// MiniMax 的积分。
+// 积分：成员的余额和花费，以及 MiniMax 订阅 Key 的余额。
 export const fmtCredits = (credits: number) => `${Math.round(credits).toLocaleString('zh-CN')} 积分`;
 export const fmtUsd = (usd: number) => `$${usd.toFixed(2)}`;
 // 估算的费用，算不出来就不显示。

@@ -2,7 +2,7 @@
 // 状态和动作在 state.ts。
 
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { state, useStore, KINDS, goTo, loadCharacters, canManage } from '../store.ts';
+import { state, useStore, KINDS, goTo, loadCharacters, canManage, usesCredits } from '../store.ts';
 import { IMAGE_QUALITY_LABELS, modelLabel, modelNote, REFERENCE_MODE_LABEL, SPEECH_MODEL, AUDIO_MODEL } from '../../../shared/models.ts';
 import { musicSeconds } from '../request.ts';
 import { Icon, type IconName } from '../ui/Icon.tsx';
@@ -11,12 +11,13 @@ import { openPopover, openMenu, toast } from '../ui/layers.tsx';
 import { enter, enterEach, reducedMotion, useOnChange, EASE_OUT } from '../ui/motion.ts';
 import { Thumb, openAssetPicker } from '../assets.tsx';
 import { MediaTile, AddTile } from '../ui/tiles.tsx';
-import { openSettings } from '../settings.tsx';
+import { openAdmin } from '../settings.tsx';
+import { fmtCredits } from '../format.ts';
 import { SkillPanel } from '../skills.tsx';
 import type { Kind, Ref, VideoForm } from '../types.ts';
 import {
   composer, RATIOS,
-  TYPES, typeOf, draftPrompt, specOf, hasLastFrame, imageRatios, imageSizes, imageQualities, imageRefLimit, currentRequest,
+  TYPES, typeOf, draftPrompt, specOf, hasLastFrame, imageRatios, imageSizes, imageQualities, imageRefLimit, currentRequest, currentCredits,
   update, setMode, swapFrames, updateStudio, setType, typePrompt, polish, undoPolish, submit, registerPrompt,
   voiceName, voiceNote, togglePreview, setVoiceFilter, pickVoice, stopPreview, useCharacter, activeSkill, setSkill,
   addableKinds, mediaRoom, usedMediaUrls, addMedia, addFiles,
@@ -603,9 +604,9 @@ async function pickCharacter(button: HTMLElement, type: 'image' | 'video') {
 function SendArea() {
   if (!state.app.hasKey) {
     // 多人模式下 Key 由管理员配，成员只能等。
-    if (!canManage()) return <span className="composer-hint">管理员尚未配置 API Key</span>;
+    if (!canManage()) return <span className="composer-hint">服务暂未开通</span>;
     return (
-      <button className="btn btn-primary btn-sm" type="button" onClick={openSettings}>
+      <button className="btn btn-primary btn-sm" type="button" onClick={openAdmin}>
         设置 API Key
       </button>
     );
@@ -615,6 +616,7 @@ function SendArea() {
   const { beforePolish, polishing, submitting, submitError } = composer;
   const canSkill = type.value === 'image' || type.value === 'video';
   const skill = activeSkill();
+  const credits = currentCredits();
   return (
     <>
       {(type.value === 'image' || type.value === 'video') && (
@@ -652,6 +654,7 @@ function SendArea() {
             润色
           </button>
         ))}
+      {usesCredits() && credits != null && !blocked && <span key="credits" className="composer-hint">{`${type.value === 'video' ? '约 ' : ''}${fmtCredits(credits)}`}</span>}
       <button key="send" className={`send-btn ${blocked ? 'blocked' : ''}`} type="button" {...tip(blocked || submitError || `${type.action}（⌘ Enter）`)} aria-label={type.action} aria-disabled={blocked ? 'true' : undefined} disabled={submitting} onClick={submit}>
         <span className="icon-swap">
           <Icon name="arrowUp" size={18} shown={!submitting} />

@@ -4,8 +4,8 @@
 // 每次生成的费用平台不返回，是按用量和按量单价估算的（shared/models.ts 的 estimateCost）。
 
 import { useEffect } from 'react';
-import { state, useStore, loadBalance } from './store.ts';
-import { openSettings } from './settings.tsx';
+import { state, useStore, loadBalance, usesCredits } from './store.ts';
+import { openAdmin } from './settings.tsx';
 import { openPopover } from './ui/layers.tsx';
 import { openDetail } from './history.tsx';
 import { fmtCredits, fmtTime, fmtUsd, fmtYuan } from './format.ts';
@@ -89,7 +89,7 @@ function SpendPanel({ close }: { close: () => void }) {
           type="button"
           onClick={() => {
             close();
-            openSettings();
+            openAdmin();
           }}
         >
           {accounts.length ? '配置其他账户余额' : '配置账户余额'}
@@ -99,7 +99,88 @@ function SpendPanel({ close }: { close: () => void }) {
   );
 }
 
+// 成员看到的：剩多少积分、今日和本月花了多少、每条记录扣了多少。
+const creditCharges = () =>
+  state.history
+    .filter((item) => (item.credits?.charged || 0) > 0)
+    .map((item) => ({ item, cost: item.credits!.charged, at: item.createdAt || 0 }))
+    .sort((a, b) => b.at - a.at);
+
+function CreditsPanel({ close }: { close: () => void }) {
+  useStore('history', 'balance');
+  const list = creditCharges();
+  const totals = [
+    ['剩余', fmtCredits(state.credits || 0)],
+    ['今日', fmtCredits(sumSince(list, startOfDay()))],
+    ['本月', fmtCredits(sumSince(list, startOfMonth()))],
+  ];
+  return (
+    <div className="spend">
+      <dl className="spend-totals">
+        {totals.map(([label, value]) => (
+          <div key={label}>
+            <dt>{label}</dt>
+            <dd>{value}</dd>
+          </div>
+        ))}
+      </dl>
+      {list.length ? (
+        <ul className="spend-list">
+          {list.map(({ item, cost, at }) => (
+            <li key={item.id}>
+              <button
+                className="spend-row"
+                type="button"
+                onClick={() => {
+                  close();
+                  openDetail(item.id);
+                }}
+              >
+                <span className="spend-what">
+                  <span className="spend-prompt">{item.prompt || KIND_LABELS[item.kind]}</span>
+                  <span className="spend-meta">
+                    {KIND_LABELS[item.kind]} · {modelLabel(item.model)} · {fmtTime(at)}
+                  </span>
+                </span>
+                <span className="spend-cost">{fmtCredits(cost)}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="spend-empty">暂无消费记录</p>
+      )}
+      <p className="spend-note">提交时预扣，完成后按实际用量结算，失败全额退回</p>
+    </div>
+  );
+}
+
+function CreditsButton() {
+  useStore('balance');
+  return (
+    <button
+      className="spend-btn"
+      type="button"
+      aria-haspopup="dialog"
+      aria-expanded="false"
+      onClick={(e) => {
+        const layer = openPopover(e.currentTarget, <CreditsPanel close={() => layer?.close()} />, { className: 'spend-popover', label: '积分明细', align: 'end' });
+      }}
+    >
+      <span className="spend-btn-item">
+        <span className="spend-btn-label">积分</span>
+        {(state.credits || 0).toLocaleString('zh-CN')}
+      </span>
+    </button>
+  );
+}
+
 export function SpendButton() {
+  useStore('app');
+  return usesCredits() ? <CreditsButton /> : <PlatformSpendButton />;
+}
+
+function PlatformSpendButton() {
   useStore('history', 'app', 'balance');
   const list = charges();
   // 打开页面、换了 Access Key、又生成完一条，都重新查一次余额。

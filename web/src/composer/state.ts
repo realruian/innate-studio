@@ -6,7 +6,7 @@ import { exclusive } from '../playback.ts';
 import { refFromRecord, kindOfFile, uploadLocalFile } from '../media.ts';
 import { toast } from '../ui/layers.tsx';
 import { buildVideoRequest, buildImageRequest, buildSpeechRequest, buildSfxRequest, buildMusicRequest, refsInUse, carryRefs } from '../request.ts';
-import type { VideoSpec } from '../../../shared/models.ts';
+import { quoteCost, toCredits, type VideoSpec } from '../../../shared/models.ts';
 import type { BuiltRequest, Character, CreateType, HistoryItem, Kind, Ref, SkillRef, Studio, VideoForm, Voice } from '../types.ts';
 
 // 视频的表单单独存一份（生成记录里存的也是它）；当前选的类型和其余几种的表单存在另一份里。
@@ -146,6 +146,18 @@ export function currentRequest(prompt?: string): BuiltRequest {
   if (studio.type === 'music') return buildMusicRequest(studio.music);
   const form = prompt === undefined ? composer.form : { ...composer.form, prompt };
   return buildVideoRequest(form, specOf(form.model));
+}
+
+// 这次生成大约要多少积分，写在发送键旁边。和服务端预扣用的是同一个算法（shared/models.ts 的 quoteCost）。估不出来是 null。
+export function currentCredits(): number | null {
+  const { type } = composer.studio;
+  const { payload, body } = currentRequest();
+  if (type === 'video' || type === 'image') {
+    const yuan = quoteCost({ kind: type, model: String(payload?.model || ''), payload });
+    return yuan == null ? null : toCredits(yuan) * (type === 'image' ? Number(payload?.n) || 1 : 1);
+  }
+  const yuan = quoteCost({ tool: type, prompt: String(body?.text || ''), payload: { duration_seconds: body?.duration } });
+  return yuan == null ? null : toCredits(yuan);
 }
 
 // ---------- 技能 ----------

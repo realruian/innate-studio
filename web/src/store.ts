@@ -79,6 +79,8 @@ export const state = {
   // 角色和技能。null 是还没读过。
   characters: null as Character[] | null,
   skills: null as Skill[] | null,
+  // 多人模式下自己剩多少积分，随生成记录一起读回来。本机模式是 null。
+  credits: null as number | null,
   // 账户余额（元），查不到是 null。
   balance: null as number | null,
   // 另外两个账户的余额，没配就是 null。MiniMax 的是手动填的数减去之后估算的花费，amount 是填的那个数，unit 是它的单位（cny 是元，credits 是积分）；AiHubMix 的（美元）是用 Manage Key 查的，查不到时 remaining 是 null。
@@ -134,6 +136,8 @@ export const needsLogin = () => state.app.hosted && !state.app.user;
 export const isAdmin = () => state.app.user?.role === 'admin';
 // 能不能管 Key：本机模式谁都能，多人模式只有管理员能。
 export const canManage = () => !state.app.hosted || isAdmin();
+// 多人模式下的成员：看到的是积分，看不到元和各平台的余额。
+export const usesCredits = () => state.app.hosted && !isAdmin();
 
 export async function loadApp() {
   state.app = { ...state.app, ...(await api('GET', '/api/state')) };
@@ -199,9 +203,13 @@ export function setPolishModel(model: string) {
 let historySignature = '';
 
 export async function loadHistory() {
-  const data = await api<{ items: HistoryItem[] }>('GET', '/api/history');
+  const data = await api<{ items: HistoryItem[]; credits?: number }>('GET', '/api/history');
   const signature = JSON.stringify(data.items.map((i) => [i.id, i.status, i.progress, i.mediaUrl, i.thumbUrl, i.pollError, i.downloadError, i.error?.message]));
   state.history = data.items;
+  if (data.credits !== undefined && data.credits !== state.credits) {
+    state.credits = data.credits;
+    emit('balance');
+  }
   if (signature !== historySignature || !state.historyLoaded) {
     historySignature = signature;
     state.historyLoaded = true;

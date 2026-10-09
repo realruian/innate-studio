@@ -2,7 +2,7 @@
 // 结果是一条普通的生成记录，节点只记它的 id，进度跟着「创作记录」的轮询走。
 
 import type { Edge, Node, ReactFlowInstance } from '@xyflow/react';
-import { api, state, KINDS, startHistoryLoop, loadHistory, polishModel } from '../store.ts';
+import { api, state, KINDS, startHistoryLoop, loadHistory, polishModel, canManage } from '../store.ts';
 import { defaults, fitImageQuality, fitImageSize, hasLastFrame, imageRefLimit, specOf } from '../composer/state.ts';
 import { buildVideoRequest, buildImageRequest, buildSpeechRequest, buildSfxRequest } from '../request.ts';
 import { recordName } from '../media.ts';
@@ -127,7 +127,7 @@ export async function generate(flow: Flow, id: string, snap: () => void = () => 
   const node = flow.getNode(id);
   if (!node || (node.data as AnyData).busy) return;
   if (node.type === 'text') return write(flow, id, snap);
-  if (!state.app.hasKey) return toast('请先在「设置」中配置 API Key', 'info');
+  if (!state.app.hasKey) return toast(canManage() ? '请先在「管理」中配置 API Key' : '服务暂未开通', 'info');
   const say = (busy: string) => flow.updateNodeData(id, { busy });
   flow.updateNodeData(id, { busy: '准备中', error: '' });
   try {
