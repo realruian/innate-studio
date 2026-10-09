@@ -531,3 +531,64 @@ test('文本节点：让文本模型写一段文字，参考内容和要求一�
   assert.equal((await call('POST', '/api/text', { prompt: '', model: 'claude-haiku-5-5' })).status, 400);
   assert.equal((await call('POST', '/api/text', { prompt: '写点什么', model: 'not-a-model' })).status, 400);
 });
+
+test('角色：新建、从生成记录选的图会复制一份、改、删', async () => {
+  const shot = await upload(PNG, 'image/png');
+  // 生成一张图，拿它当角色的参考图。
+  const made = await call('POST', '/api/images', { payload: { model: 'grok-imagine-image-2.0', prompt: '穿风衣的女人，正面全身', n: 1 } });
+  const image = await waitItem(made.data.items[0].id, (item) => item.status === 'completed', '图片生成完成');
+
+  const created = await call('POST', '/api/characters', { name: '  林晚  ', description: '二十多岁，黑色长发，米色风衣', images: [shot.data.url, image.mediaUrl] });
+  assert.equal(created.status, 200);
+  assert.match(created.data.id, /^ch_/);
+  assert.equal(created.data.name, '林晚');
+  // 上传来的图原样用；生成记录里的图复制到 uploads，记录删了角色的图还在。
+  assert.equal(created.data.images[0], shot.data.url);
+  assert.match(created.data.images[1], /^\/media\/uploads\/up_[0-9a-f]+\.\w+$/);
+  await call('DELETE', `/api/history/${image.id}`);
+  assert.equal((await fetch(base + image.mediaUrl)).status, 404);
+  assert.equal((await fetch(base + created.data.images[1])).status, 200);
+
+  const { id } = created.data;
+  const renamed = await call('PUT', `/api/characters/${id}`, { name: '', images: [created.data.images[1]] });
+  assert.equal(renamed.data.name, '未命名角色');
+  assert.deepEqual(renamed.data.images, [created.data.images[1]]);
+  assert.equal(renamed.data.description, '二十多岁，黑色长发，米色风衣');
+
+  // 不在本机的图、不是图片的文件、太多张都不收。
+  assert.equal((await call('PUT', `/api/characters/${id}`, { images: ['/media/uploads/up_none.png'] })).status, 400);
+  assert.equal((await call('PUT', `/api/characters/${id}`, { images: ['https://example.com/a.png'] })).status, 400);
+  const clip = await upload(Buffer.from('not really a video'), 'video/mp4');
+  assert.equal((await call('PUT', `/api/characters/${id}`, { images: [clip.data.url] })).status, 400);
+  assert.equal((await call('PUT', `/api/characters/${id}`, { images: Array(7).fill(shot.data.url) })).status, 400);
+
+  assert.equal((await call('GET', '/api/characters')).data.items.find((c) => c.id === id).images.length, 1);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(dataDir, 'characters.json'), 'utf8')).length, 1);
+  assert.equal((await call('DELETE', `/api/characters/${id}`)).status, 204);
+  assert.equal((await call('DELETE', `/api/characters/${id}`)).status, 404);
+});
+
+test('模板：存下一份表单、改名、删；不认识的类型和过大的封面不收', async () => {
+  const cover = `data:image/jpeg;base64,${PNG.toString('base64')}`;
+  const form = { prompt: '雨夜街头，霓虹倒影', model: 'seedance-2.0', resolution: '720p', ratio: '16:9', duration: 5 };
+  const created = await call('POST', '/api/templates', { name: '', type: 'video', form, cover });
+  assert.equal(created.status, 200);
+  assert.match(created.data.id, /^tp_/);
+  assert.equal(created.data.name, '未命名模板');
+  assert.deepEqual(created.data.form, form);
+  assert.equal(created.data.cover, cover);
+
+  assert.equal((await call('POST', '/api/templates', { name: 'x', type: 'music', form })).status, 400);
+  assert.equal((await call('POST', '/api/templates', { name: 'x', type: 'image', form: 'x' })).status, 400);
+  // 封面不是图片或者太大，就当没有封面。
+  const plain = await call('POST', '/api/templates', { name: '无封面', type: 'image', form: { prompt: '一只猫' }, cover: `data:image/jpeg;base64,${'A'.repeat(400 * 1024)}` });
+  assert.equal(plain.data.cover, null);
+
+  const { id } = created.data;
+  assert.equal((await call('PUT', `/api/templates/${id}`, { name: ' 雨夜 ' })).data.name, '雨夜');
+  const list = await call('GET', '/api/templates');
+  assert.deepEqual(list.data.items.map((t) => t.name).sort(), ['无封面', '雨夜']);
+  assert.equal((await call('DELETE', `/api/templates/${id}`)).status, 204);
+  assert.equal((await call('GET', '/api/templates')).data.items.length, 1);
+  assert.equal((await call('PUT', `/api/templates/${id}`, { name: 'x' })).status, 404);
+});

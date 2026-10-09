@@ -72,11 +72,15 @@ const config = readJson('config.json', {});
 const history = readJson('history.json', []);
 const assets = readJson('assets.json', {});
 const canvases = readJson('canvases.json', []);
+const characters = readJson('characters.json', []);
+const templates = readJson('templates.json', []);
 
 const saveConfig = () => writeJson('config.json', config, 0o600);
 const saveHistory = () => writeJson('history.json', history);
 const saveAssets = () => writeJson('assets.json', assets);
 const saveCanvases = () => writeJson('canvases.json', canvases);
+const saveCharacters = () => writeJson('characters.json', characters);
+const saveTemplates = () => writeJson('templates.json', templates);
 
 // Key 要放进 HTTP 请求头，只能由可见的 ASCII 字符组成。
 const isUsableKey = (value) => /^[\x21-\x7e]+$/.test(value);
@@ -1041,6 +1045,109 @@ route('PUT', /^\/api\/canvases\/([\w-]+)$/, async ({ req, params }) => {
 route('DELETE', /^\/api\/canvases\/([\w-]+)$/, async ({ params }) => {
   canvases.splice(canvases.indexOf(findCanvas(params[0])), 1);
   saveCanvases();
+  return null;
+});
+
+// ---------- 角色 ----------
+// 一个角色是一个名字、一段描述和几张参考图。生成图片或视频时把这些图当参考图带上，同一个角色才能反复出现。
+// 参考图只存本机的图片地址，都在 data/uploads 里：从生成记录里选的图会复制一份过来，免得那条记录删掉之后角色的图也没了。
+
+const MAX_CHARACTER_IMAGES = 6;
+const CHARACTER_IMAGE_EXTS = ['jpg', 'jpeg', 'png', 'webp'];
+const characterName = (name) => String(name || '').trim().slice(0, 60) || '未命名角色';
+function findCharacter(id) {
+  const character = characters.find((c) => c.id === id);
+  if (!character) throw new HttpError(404, 'not_found', '没有这个角色');
+  return character;
+}
+function characterImages(urls) {
+  if (!Array.isArray(urls)) throw new HttpError(400, 'invalid_request', 'images 需要是数组');
+  if (urls.length > MAX_CHARACTER_IMAGES) throw new HttpError(400, 'invalid_request', `一个角色最多放 ${MAX_CHARACTER_IMAGES} 张参考图`);
+  return urls.map((url) => {
+    const file = localMediaFile(url);
+    const ext = path.extname(file).slice(1).toLowerCase();
+    if (!CHARACTER_IMAGE_EXTS.includes(ext)) throw new HttpError(400, 'invalid_request', '角色的参考图只能是图片');
+    if (path.dirname(file) === mediaDir('uploads')) return `/media/uploads/${path.basename(file)}`;
+    const copy = `${newId('up')}.${ext}`;
+    fs.copyFileSync(file, path.join(mediaDir('uploads'), copy));
+    return `/media/uploads/${copy}`;
+  });
+}
+
+route('GET', /^\/api\/characters$/, async () => ({ items: [...characters].sort((a, b) => b.updatedAt - a.updatedAt) }));
+
+route('POST', /^\/api\/characters$/, async ({ req }) => {
+  const { name, description, images } = await readJsonBody(req);
+  const now = Date.now();
+  const character = { id: newId('ch'), name: characterName(name), description: String(description || '').trim().slice(0, 2000), images: characterImages(images || []), createdAt: now, updatedAt: now };
+  characters.push(character);
+  saveCharacters();
+  return character;
+});
+
+route('PUT', /^\/api\/characters\/([\w-]+)$/, async ({ req, params }) => {
+  const character = findCharacter(params[0]);
+  const body = await readJsonBody(req);
+  if (body.images !== undefined) character.images = characterImages(body.images);
+  if (body.name !== undefined) character.name = characterName(body.name);
+  if (body.description !== undefined) character.description = String(body.description || '').trim().slice(0, 2000);
+  character.updatedAt = Date.now();
+  saveCharacters();
+  return character;
+});
+
+route('DELETE', /^\/api\/characters\/([\w-]+)$/, async ({ params }) => {
+  characters.splice(characters.indexOf(findCharacter(params[0])), 1);
+  saveCharacters();
+  return null;
+});
+
+// ---------- 模板 ----------
+// 一份模板是一次创作的提示词和参数（创作面板里的那份表单），存下来以后一键填回去。
+// 参考素材不跟着模板走，由页面在存之前去掉。封面是页面缩好的一张小图，直接存在模板里，不依赖别的文件。
+
+const TEMPLATE_TYPES = ['video', 'image', 'speech', 'sfx'];
+const MAX_COVER_CHARS = 300 * 1024;
+const templateName = (name) => String(name || '').trim().slice(0, 60) || '未命名模板';
+function findTemplate(id) {
+  const template = templates.find((t) => t.id === id);
+  if (!template) throw new HttpError(404, 'not_found', '没有这份模板');
+  return template;
+}
+
+route('GET', /^\/api\/templates$/, async () => ({ items: [...templates].sort((a, b) => b.updatedAt - a.updatedAt) }));
+
+route('POST', /^\/api\/templates$/, async ({ req }) => {
+  const { name, type, form, cover } = await readJsonBody(req);
+  if (!TEMPLATE_TYPES.includes(type)) throw new HttpError(400, 'invalid_request', '这种内容存不了模板');
+  if (!form || typeof form !== 'object' || Array.isArray(form)) throw new HttpError(400, 'invalid_request', '模板缺少参数');
+  const now = Date.now();
+  const template = {
+    id: newId('tp'),
+    name: templateName(name),
+    type,
+    form,
+    cover: typeof cover === 'string' && cover.startsWith('data:image/') && cover.length <= MAX_COVER_CHARS ? cover : null,
+    createdAt: now,
+    updatedAt: now,
+  };
+  templates.push(template);
+  saveTemplates();
+  return template;
+});
+
+route('PUT', /^\/api\/templates\/([\w-]+)$/, async ({ req, params }) => {
+  const template = findTemplate(params[0]);
+  const body = await readJsonBody(req);
+  if (body.name !== undefined) template.name = templateName(body.name);
+  template.updatedAt = Date.now();
+  saveTemplates();
+  return template;
+});
+
+route('DELETE', /^\/api\/templates\/([\w-]+)$/, async ({ params }) => {
+  templates.splice(templates.indexOf(findTemplate(params[0])), 1);
+  saveTemplates();
   return null;
 });
 

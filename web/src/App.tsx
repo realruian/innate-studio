@@ -1,4 +1,4 @@
-// 整个页面：侧边栏（导航和设置）和五个页面。页面第一次打开时才画，之后切走只是藏起来。
+// 整个页面：侧边栏（导航和设置）和七个页面。页面第一次打开时才画，之后切走只是藏起来。
 
 import { useEffect, useRef } from 'react';
 import { state, useStore, goTo, loadPersons } from './store.ts';
@@ -11,16 +11,20 @@ import { Recent, Records } from './history.tsx';
 import { Library } from './assets.tsx';
 import { Persons } from './persons.tsx';
 import { Projects } from './canvas/Projects.tsx';
+import { Characters } from './characters.tsx';
+import { Templates } from './templates.tsx';
 import { openSettings } from './settings.tsx';
 import type { ViewId } from './types.ts';
 
-// 五项是同一层的页签。「创作」是首页，在首页再点一次会回到顶部并把光标放回输入框。
+// 七项是同一层的页签。「创作」是首页，在首页再点一次会回到顶部并把光标放回输入框。
 // 素材库和真人档案是 Flatkey 才有的，feature 写着它们各自要平台支持哪一项，平台不支持就不显示。
 // Sparkle 在库里画得比别的图标小一圈（只占画布中间六成），所以放大到 22 显示，线条相应调细，看上去和其他几项一样大、一样粗。
 const VIEWS: { id: ViewId; label: string; icon: IconName; size?: number; stroke?: number; feature?: 'library' | 'persons' }[] = [
   { id: 'create', label: '创作', icon: 'sparkle', size: 22, stroke: 1.1 },
   { id: 'canvas', label: '画布', icon: 'workflow' },
   { id: 'records', label: '创作记录', icon: 'history' },
+  { id: 'characters', label: '角色', icon: 'mask' },
+  { id: 'templates', label: '模板', icon: 'grid' },
   { id: 'library', label: '素材库', icon: 'folder', feature: 'library' },
   { id: 'persons', label: '真人档案', icon: 'user', feature: 'persons' },
 ];
@@ -89,6 +93,12 @@ export function App() {
         </div>
         <div className="view" hidden={view !== 'records'}>
           {opened.has('records') && <Records />}
+        </div>
+        <div className="view" hidden={view !== 'characters'}>
+          {opened.has('characters') && <Characters />}
+        </div>
+        <div className="view" hidden={view !== 'templates'}>
+          {opened.has('templates') && <Templates />}
         </div>
         <div className="view" hidden={view !== 'library'}>
           {opened.has('library') && <Library />}

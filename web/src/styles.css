@@ -618,6 +618,11 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 @media (hover: hover) { .project-media:hover .project-more { opacity: 1; } }
 @media (hover: none) { .project-more { opacity: 1; } }
 
+/* 角色库和模板的列表沿用项目卡片。角色的封面是人像，用竖的画框，卡片也窄一些 */
+.character-grid { grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); }
+.character-grid .project-cover { aspect-ratio: 3 / 4; }
+.character-images { flex-wrap: wrap; }
+
 /* 进了一张画布：侧栏收起，整个窗口都是画布。画布自己管平移和缩放，这一页不滚动，也不用给滚动条留位置 */
 #app:has(> .sidebar[hidden]) { grid-template-columns: minmax(0, 1fr); }
 #app:has(> .sidebar[hidden]) .main { border-left: 0; }
@@ -748,7 +753,7 @@ button.clink-tag { cursor: pointer; transition: border-color 120ms var(--ease), 
   #app { grid-template-columns: 1fr; height: auto; min-height: 100vh; }
   .sidebar { flex-direction: row; flex-wrap: wrap; align-items: center; gap: var(--sp-4); padding: var(--sp-8) var(--sp-12); border-bottom: 1px solid var(--border); }
   .brand { padding: var(--sp-4) var(--sp-12); }
-  .nav { flex-direction: row; }
+  .nav { flex-direction: row; flex-wrap: wrap; }
   .nav-item { width: auto; }
   .sidebar-foot { margin: 0 0 0 auto; padding-top: 0; }
   .main, .view { height: auto; overflow: visible; }

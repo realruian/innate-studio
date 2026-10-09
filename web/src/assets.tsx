@@ -1,11 +1,12 @@
 // 素材的界面：缩略图、上传面板、选择素材的弹窗、素材库页面。文件处理在 media.ts。
 
 import { useEffect, useRef, useState } from 'react';
-import { api, state, useStore, KINDS, kindOfType, loadAssets, rememberAsset, refreshAsset, loadPersons, loadPersonAssets, assetReadiness } from './store.ts';
+import { api, state, useStore, KINDS, kindOfType, loadAssets, rememberAsset, refreshAsset, loadPersons, loadPersonAssets, loadCharacters, assetReadiness } from './store.ts';
 import { kindOfFile, uploadVirtualAsset, uploadLocalFile, refFromAsset, refFromRecord, assetFromRecord, recordName, type Progress } from './media.ts';
 import { fmtTime, fmtBytes } from './format.ts';
 import { toast, openModal, copyText } from './ui/layers.tsx';
 import { Segmented, Dropdown, tip, clipTip } from './ui/controls.tsx';
+import { refsFromCharacter } from './composer/state.ts';
 import type { Asset, HistoryItem, Kind, Ref } from './types.ts';
 
 const message = (err: unknown) => (err as Error).message;
@@ -125,8 +126,8 @@ export function UploadPane<T>({ kind, limit = 1, upload, onUploaded, onAllDone, 
 
 // ---------- 选择素材的弹窗（创作页用） ----------
 
-type Source = 'upload' | 'url' | 'library' | 'person' | 'records';
-const SOURCE_LABELS: Record<Source, string> = { upload: '本地上传', url: '粘贴链接', library: '素材库', person: '真人素材', records: '生成记录' };
+type Source = 'upload' | 'url' | 'library' | 'person' | 'records' | 'character';
+const SOURCE_LABELS: Record<Source, string> = { upload: '本地上传', url: '粘贴链接', library: '素材库', person: '真人素材', records: '生成记录', character: '角色' };
 
 interface PickerOptions {
   kind: Kind;
@@ -185,6 +186,29 @@ function RecordGrid({ kind, local, onPick }: { kind: Kind; local: boolean; onPic
           <div className="pick-thumb">{kind === 'video' ? <video className="thumb-img" src={item.mediaUrl} preload="metadata" muted playsInline /> : <Thumb thumb={kind === 'image' ? item.mediaUrl : null} kind={kind} />}</div>
           <div className="pick-name ellipsis">{recordName(item)}</div>
           <span className="badge badge-pending">{busy === item.id ? (local ? '读取中' : '上传中') : fmtTime(item.createdAt)}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// 角色库里的角色。选中一个，把它的参考图都加进来，放不下的不加。
+function CharacterGrid({ remaining, onPick }: { remaining: number; onPick: (refs: Ref[]) => void }) {
+  useStore('characters');
+  useEffect(() => {
+    if (!state.characters) loadCharacters().catch((err) => toast(message(err), 'error', 6000));
+  }, []);
+  const list = (state.characters || []).filter((c) => c.images.length);
+  if (!list.length) return <div className="empty small-empty">{state.characters ? '角色库里还没有带参考图的角色。可以到「角色」里新建。' : '正在读取…'}</div>;
+  return (
+    <div className="pick-grid">
+      {list.map((character) => (
+        <button key={character.id} className="pick-card" type="button" {...tip(character.description)} onClick={() => onPick(refsFromCharacter(character).slice(0, remaining))}>
+          <div className="pick-thumb">
+            <Thumb thumb={character.images[0]} kind="image" />
+          </div>
+          <div className="pick-name ellipsis">{character.name}</div>
+          <span className="badge badge-pending">{character.images.length} 张图</span>
         </button>
       ))}
     </div>
@@ -302,13 +326,23 @@ function AssetPicker({ kind, remaining = 1, usedIds = [], onPick, local = false,
         {tab === 'library' && <AssetGrid list={state.assets} kind={kind} used={used} emptyText={`素材库里还没有${KINDS[kind].label}素材。可以切到「本地上传」添加。`} onPick={pickAsset} />}
         {tab === 'records' && <RecordGrid kind={kind} local={local} onPick={pickAndClose} />}
         {tab === 'person' && <PersonAssets kind={kind} used={used} onPick={pickAsset} />}
+        {tab === 'character' && (
+          <CharacterGrid
+            remaining={left.current}
+            onPick={(refs) => {
+              refs.forEach(pick);
+              close();
+            }}
+          />
+        )}
       </div>
     </>
   );
 }
 
 export function openAssetPicker(options: PickerOptions) {
-  const sources: Source[] = options.sources ?? (options.local ? ['upload', 'url', 'records'] : ['upload', 'url', 'library', 'person', 'records']);
+  // 角色的参考图是本机的图片，所以只在选本机图片时出现。
+  const sources: Source[] = options.sources ?? (options.local ? ['upload', 'url', 'records', ...(options.kind === 'image' ? (['character'] as const) : [])] : ['upload', 'url', 'library', 'person', 'records']);
   const modal = openModal({ title: `添加${KINDS[options.kind].label}`, size: 'md', content: <AssetPicker {...options} sources={sources} close={() => modal.close()} /> });
 }
 

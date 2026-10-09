@@ -7,7 +7,7 @@ import { refFromAsset, refFromRecord, assetFromRecord, readVideo } from '../medi
 import { toast } from '../ui/layers.tsx';
 import { buildRequest as buildVideoRequest, buildOpenRouterRequest, buildImageRequest, buildSpeechRequest, buildSfxRequest, buildMusicRequest, refsInUse, carryRefs, videoFamily, RES_RANK } from '../request.ts';
 import { ALL_RESOLUTIONS, VIDEO_TASKS, videoCapabilities, videoFamilyOf, type VideoCapabilities, type VideoSpec, type VideoTask } from '../../../shared/models.ts';
-import type { Asset, BuiltRequest, CreateType, HistoryItem, Kind, Ref, RefStatus, Studio, VideoForm, Voice } from '../types.ts';
+import type { Asset, BuiltRequest, Character, CreateType, HistoryItem, Kind, Ref, RefStatus, Studio, VideoForm, Voice } from '../types.ts';
 
 // 视频的表单单独存一份（生成记录里存的也是它）；当前选的类型和其余几种的表单存在另一份里。
 const FORM_KEY = 'seedance-studio.form.v1';
@@ -329,6 +329,33 @@ export async function useImageForVideo(item: HistoryItem) {
     Object.assign(composer.form, { mode: 'reference', refs: { image: [ref], video: [], audio: [] } });
   }
   setType('video');
+  goTo('create');
+}
+
+// 把角色的参考图变成一组本机的参考素材。
+export const refsFromCharacter = (character: Character): Ref[] => character.images.map((url) => ({ uid: crypto.randomUUID(), kind: 'image', source: 'local', url, name: character.name, thumb: url }));
+
+// 拿一个角色去生成图片或视频：把它的参考图放进输入框；提示词空着的话，先填上角色的描述。
+// 图片：当参考图（图生图），当前模型不收参考图就换成第一个收的。
+// 视频：OpenRouter 上当参考图；Flatkey 上的 Grok 只能给一张首帧；Flatkey 上的 Seedance 只认素材库，本机的图用不了。
+export function useCharacter(character: Character, type: 'image' | 'video') {
+  const refs = refsFromCharacter(character);
+  if (!refs.length) throw new Error('这个角色还没有参考图，先给它加一张');
+  const { form, studio } = composer;
+  if (type === 'image') {
+    const model = [studio.image.model, ...state.catalog.image].find((id) => imageRefLimit(id) > 0);
+    if (!model) throw new Error(isOpenRouter() ? '账号里没有能带参考图的图片模型' : '带参考图生成图片只在 OpenRouter 上可用');
+    Object.assign(studio.image, { model, refs: refs.slice(0, imageRefLimit(model)) });
+    if (!studio.image.prompt.trim()) studio.image.prompt = character.description;
+    fitImage();
+  } else {
+    if (isOpenRouter()) Object.assign(form, { mode: 'reference', refs: { image: refs.slice(0, KINDS.image.max), video: [], audio: [] } });
+    else if (isGrok()) Object.assign(form, { mode: 'frames', frames: { first: refs[0], last: null } });
+    else throw new Error('Flatkey 上的 Seedance 只认素材库里的素材，角色的图用不了。换到 OpenRouter，或者换成 Grok 的视频模型');
+    if (!form.prompt.trim()) form.prompt = character.description;
+    fitModel();
+  }
+  setType(type);
   goTo('create');
 }
 

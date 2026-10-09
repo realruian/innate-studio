@@ -258,7 +258,7 @@ if (pinned) {
   }, P);
   if (!cardMenu) problems.push('点卡片的「更多」没有打开菜单');
   else {
-    if (cardMenu.items !== '下载|复用|延长|编辑|配乐|详情|删除') problems.push(`已完成视频卡片的菜单项不对：${cardMenu.items}`);
+    if (cardMenu.items !== '下载|复用|延长|编辑|配乐|存为模板|详情|删除') problems.push(`已完成视频卡片的菜单项不对：${cardMenu.items}`);
     if (!cardMenu.aligned) problems.push('「更多」的菜单没有和按钮右对齐');
   }
   if (await count('.modal')) problems.push('点「更多」不应该打开详情');
@@ -418,7 +418,7 @@ if ((await text('.view-create .feed-head h2')).join('') !== '最近生成') prob
 if ((await count('.view-create h1')) !== 1) problems.push('创作页应该只有一个一级标题（首屏问句），「最近生成」是二级标题');
 const sideText = (await text('.sidebar')).join('');
 if ((await count('.side-list, .side-row')) || sideText.includes('最近生成')) problems.push('侧栏里不应该有「最近生成」列表');
-if ((await text('.sidebar .nav-item')).join('|') !== '创作|创作记录|素材库|真人档案|设置') problems.push(`侧栏的入口不对：${(await text('.sidebar .nav-item')).join('|')}`);
+if ((await text('.sidebar .nav-item')).join('|') !== '创作|画布|创作记录|角色|模板|素材库|真人档案|设置') problems.push(`侧栏的入口不对：${(await text('.sidebar .nav-item')).join('|')}`);
 await audit('提交后');
 await shot('06-submitted');
 
@@ -436,7 +436,7 @@ await escape();
 await sleep(200);
 await must('打开生成中卡片的更多', click('.view-create .card:first-child .card-more', 0));
 await sleep(300);
-if ((await text('.menu .menu-item')).join('|') !== '刷新|复用|详情|删除') problems.push(`生成中卡片的菜单项不对：${(await text('.menu .menu-item')).join('|')}`);
+if ((await text('.menu .menu-item')).join('|') !== '刷新|复用|存为模板|详情|删除') problems.push(`生成中卡片的菜单项不对：${(await text('.menu .menu-item')).join('|')}`);
 await escape();
 await sleep(200);
 await must('点生成中卡片的画面', click('.card .card-state.is-pending', 0));
@@ -658,7 +658,7 @@ await pg.locator('.view-create .card .card-media').first().hover();
 await sleep(350);
 await must('打开图片卡片的更多', click('.view-create .card .card-more', 0));
 await sleep(300);
-if ((await text('.menu .menu-item')).join('|') !== '下载|复用|生成视频|详情|删除') problems.push(`图片卡片的菜单项不对：${(await text('.menu .menu-item')).join('|')}`);
+if ((await text('.menu .menu-item')).join('|') !== '下载|复用|生成视频|存为角色|存为模板|详情|删除') problems.push(`图片卡片的菜单项不对：${(await text('.menu .menu-item')).join('|')}`);
 await escape();
 await sleep(200);
 await openFirstCard();
@@ -883,7 +883,7 @@ await sleep(300);
 if ((await count('.frame-slot')) !== 1) problems.push('Grok 的图生视频应该只有首帧一个格子');
 await must('点添加首帧', click('.frame-slot .ref-add'));
 await sleep(300);
-if ((await text('.modal .tabs .seg')).join('|') !== '本地上传|粘贴链接|生成记录') problems.push(`Grok 选首帧的来源不对：${(await text('.modal .tabs .seg')).join('|')}`);
+if ((await text('.modal .tabs .seg')).join('|') !== '本地上传|粘贴链接|生成记录|角色') problems.push(`Grok 选首帧的来源不对：${(await text('.modal .tabs .seg')).join('|')}`);
 await must('切到生成记录', clickText('.modal .tabs .seg', '生成记录'));
 await sleep(300);
 await audit('选首帧·生成记录');

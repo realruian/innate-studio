@@ -13,6 +13,9 @@ import { Segmented, tip, clipTip } from './ui/controls.tsx';
 import { toast, openModal, openMenu, confirmDialog, copyText } from './ui/layers.tsx';
 import { enter } from './ui/motion.ts';
 import { setForm, setStudio, useImageForVideo, useVideoForMusic, useVideoAsSource } from './composer/state.ts';
+import { openCharacterEditor } from './characters.tsx';
+import { openSaveTemplate } from './templates.tsx';
+import { thumbOf } from './media.ts';
 import { VIDEO_TASKS, videoFamilyOf, referenceModeLabel, type VideoTask } from '../../shared/models.ts';
 import type { CreateType, HistoryItem, Ref } from './types.ts';
 
@@ -138,6 +141,14 @@ async function score(item: HistoryItem) {
   toast('已选好这段视频，点右下角的发送键生成配乐', 'success');
 }
 
+// 把一条记录的提示词和参数存成模板。封面用它生成的图或视频缩一张小图；配乐没有参数，不能存。
+const canTemplate = (item: HistoryItem) => typeOf(item) !== 'music' && Boolean(item.form || item.prompt);
+async function saveAsTemplate(item: HistoryItem) {
+  const type = typeOf(item) as Exclude<CreateType, 'music'>;
+  const cover = done(item) && item.savedLocally && item.kind !== 'audio' ? await thumbOf(item.mediaUrl!, item.kind) : null;
+  openSaveTemplate({ type, form: item.form || { prompt: item.prompt, model: item.model }, cover });
+}
+
 // 已经存到本机的直接下载，还没存下来的在新标签页打开原地址。
 const downloadProps = (item: HistoryItem): { href?: string; download?: string; target?: string } => (item.savedLocally ? { href: `${item.mediaUrl}?download=1`, download: '' } : { href: item.mediaUrl, target: '_blank' });
 
@@ -151,7 +162,7 @@ function download(item: HistoryItem) {
 }
 
 // 卡片右上角的「更多」。菜单内容按点开那一刻的状态来定：生成中的可以刷新，查询超时的可以再查一次，已完成的可以下载。
-// 已完成的视频可以拿去配乐，已完成的图片可以拿去生成视频。
+// 已完成的视频可以拿去配乐，已完成的图片可以拿去生成视频、存为角色；带着参数的记录可以存为模板。
 function openCardMenu(button: HTMLElement, id: string, scope: Scope) {
   const item = state.history.find((i) => i.id === id);
   if (!item) return;
@@ -164,6 +175,8 @@ function openCardMenu(button: HTMLElement, id: string, scope: Scope) {
     extend: () => rework(item, 'extend'),
     edit: () => rework(item, 'edit'),
     animate: () => animate(item),
+    character: () => openCharacterEditor({ images: [item.mediaUrl!] }),
+    template: () => saveAsTemplate(item),
     detail: () => openDetail(item.id, scope),
     remove: () => removeItem(item),
   };
@@ -180,6 +193,8 @@ function openCardMenu(button: HTMLElement, id: string, scope: Scope) {
       canRework(item) && { value: 'edit', label: VIDEO_TASKS.edit.label },
       done(item) && item.kind === 'video' && state.catalog.audio.music && { value: 'score', label: '配乐' },
       done(item) && item.kind === 'image' && { value: 'animate', label: '生成视频' },
+      done(item) && item.kind === 'image' && item.savedLocally && { value: 'character', label: '存为角色' },
+      canTemplate(item) && { value: 'template', label: '存为模板' },
       { value: 'detail', label: '详情' },
       { value: 'remove', label: '删除', danger: true },
     ].filter((entry) => Boolean(entry)) as { value: string; label: string; danger?: boolean }[],

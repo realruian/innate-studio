@@ -4,7 +4,7 @@ import type { Features, ProviderId } from '../../shared/models.ts';
 
 export type Kind = 'image' | 'video' | 'audio';
 export type CreateType = 'video' | 'image' | 'speech' | 'sfx' | 'music';
-export type ViewId = 'create' | 'canvas' | 'records' | 'library' | 'persons';
+export type ViewId = 'create' | 'canvas' | 'records' | 'characters' | 'templates' | 'library' | 'persons';
 export type Tone = 'ok' | 'pending' | 'error';
 
 // 一份参考素材：素材库里的、公网链接，或者只存在本机的文件。
@@ -140,6 +140,25 @@ export interface Person {
   status?: string;
   created_at?: number;
   verification_url?: string;
+}
+
+// 一个角色：名字、描述和几张参考图。images 是本机图片的地址。
+export interface Character {
+  id: string;
+  name: string;
+  description: string;
+  images: string[];
+  updatedAt: number;
+}
+
+// 一份模板：一次创作的提示词和参数。form 是创作面板里那种内容的表单，不带参考素材；cover 是一张缩好的小图。
+export interface Template {
+  id: string;
+  name: string;
+  type: Exclude<CreateType, 'music'>;
+  form: Record<string, any>;
+  cover: string | null;
+  updatedAt: number;
 }
 
 export interface Voice {
