@@ -168,7 +168,7 @@ export function Projects() {
                   <Icon name="image" size={32} stroke={1.2} />
                 )}
               </button>
-              <button className="project-more" type="button" {...tip('更多')} aria-label="更多操作" aria-haspopup="menu" aria-expanded="false" onClick={(e) => more(e.currentTarget, project)}>
+              <button className="icon-btn icon-btn-sm on-media project-more" type="button" {...tip('更多')} aria-label="更多操作" aria-haspopup="menu" aria-expanded="false" onClick={(e) => more(e.currentTarget, project)}>
                 <Icon name="more" size={16} />
               </button>
             </div>

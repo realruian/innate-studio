@@ -150,7 +150,7 @@ export function Characters() {
               <button className="project-cover" type="button" aria-label={`用「${character.name}」生成图片`} {...tip('用这个角色生成图片')} onClick={() => generate(character, 'image')}>
                 {character.images[0] ? <img src={character.images[0]} alt="" loading="lazy" draggable={false} /> : <Icon name="mask" size={32} stroke={1.2} />}
               </button>
-              <button className="project-more" type="button" {...tip('更多')} aria-label="更多操作" aria-haspopup="menu" aria-expanded="false" onClick={(e) => more(e.currentTarget, character)}>
+              <button className="icon-btn icon-btn-sm on-media project-more" type="button" {...tip('更多')} aria-label="更多操作" aria-haspopup="menu" aria-expanded="false" onClick={(e) => more(e.currentTarget, character)}>
                 <Icon name="more" size={16} />
               </button>
             </div>

@@ -1107,7 +1107,7 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
               <Icon name="arrowLeft" />
             </button>
             <input className="canvas-name" value={name} aria-label="项目名称" maxLength={60} spellCheck={false} onChange={(e) => setName(e.target.value)} onBlur={() => !name.trim() && setName('未命名画布')} />
-            <button className="icon-btn canvas-switch" type="button" {...tip('切换画布')} aria-label="切换画布" aria-haspopup="listbox" aria-expanded="false" onClick={(e) => switchCanvas(e.currentTarget)}>
+            <button className="icon-btn icon-btn-sm canvas-switch" type="button" {...tip('切换画布')} aria-label="切换画布" aria-haspopup="listbox" aria-expanded="false" onClick={(e) => switchCanvas(e.currentTarget)}>
               <Icon name="chevron" size={14} />
             </button>
             {PINS.filter((pin) => pinned[pin].length).map((pin) => (
@@ -1173,7 +1173,7 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
             <button className="icon-btn" type="button" {...tip('重做（⇧ ⌘ Z）')} aria-label="重做" disabled={!future.current.length} onClick={redo}>
               <Icon name="redo" />
             </button>
-            <button className={`icon-btn ${hand ? 'active' : ''}`} type="button" {...tip(hand ? '抓手：拖动是平移画布。再点一下或按 V 回到选择' : '抓手（H）')} aria-label="抓手" aria-pressed={hand} onClick={() => setHand((on) => !on)}>
+            <button className={`icon-btn ${hand ? 'active' : ''}`} type="button" {...tip(hand ? '回到选择（V）' : '抓手（H）')} aria-label="抓手" aria-pressed={hand} onClick={() => setHand((on) => !on)}>
               <Icon name="hand" />
             </button>
             <button className="icon-btn" type="button" {...tip('整理节点')} aria-label="整理节点" disabled={nodes.length < 2} onClick={arrange}>

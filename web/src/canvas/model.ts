@@ -48,6 +48,8 @@ export interface ImageData extends Generated {
   prompt: string;
   model: string;
   ratio: string;
+  // 分辨率档位（1K、2K 这样）。不写就用模型默认的那一档。
+  resolution?: string;
   // 一次生成几张。不写就是一张。
   count?: number;
   // 节点里那张图实际的宽高比，图片读出来之后记下，节点的框按它定宽度。

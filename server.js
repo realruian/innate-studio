@@ -708,12 +708,15 @@ route('PUT', /^\/api\/provider$/, async ({ req }) => {
 async function arkModels() {
   const imageRatios = {};
   const imageRefs = {};
-  for (const [id, { refs, sizes }] of Object.entries(ARK_IMAGE_MODELS)) {
-    imageRatios[id] = Object.keys(sizes);
+  const imageSizes = {};
+  for (const [id, { refs, sizes, size }] of Object.entries(ARK_IMAGE_MODELS)) {
+    imageRatios[id] = Object.keys(sizes[size]);
     imageRefs[id] = refs;
+    // 这个模型能选的各档分辨率，默认的那一档排在 default 里。
+    imageSizes[id] = { options: Object.keys(sizes), default: size };
   }
   // 语音一直列着：它用的是豆包语音的 Key，没填的话生成时会提示去设置里填。
-  const rest = { imageModels: Object.keys(ARK_IMAGE_MODELS), imageRatios, imageRefs, audio: { speech: true, sfx: false, music: false } };
+  const rest = { imageModels: Object.keys(ARK_IMAGE_MODELS), imageRatios, imageRefs, imageSizes, audio: { speech: true, sfx: false, music: false } };
   try {
     await callUpstream('GET', `${VIDEO_TASKS_PATH.ark}?page_num=1&page_size=1`, { timeoutMs: 20000, provider: 'ark' });
     polishAvailable = POLISH_MODELS.ark;
@@ -852,6 +855,8 @@ route('POST', /^\/api\/images$/, async ({ req }) => {
   const count = Math.min(MAX_IMAGES, Math.max(1, Math.round(Number(payload.n)) || 1));
   const request = { model, prompt, n: count, response_format: 'b64_json' };
   if (payload.aspect_ratio) request.aspect_ratio = String(payload.aspect_ratio);
+  // 分辨率档位（1K、2K 这样）。只有火山方舟的 Seedream 分档，别的平台不发。
+  if (payload.resolution && currentProvider() === 'ark') request.resolution = String(payload.resolution);
   // 参考图（图生图）。火山方舟的 Seedream 收，每个型号收几张登记在 shared/models.ts；Flatkey 的不收。
   const refs = Array.isArray(payload.input_references) ? payload.input_references.filter((entry) => typeof entry?.image_url?.url === 'string') : [];
   if (refs.length) {
@@ -864,7 +869,7 @@ route('POST', /^\/api\/images$/, async ({ req }) => {
 
   // 一次请求出几张，就建几条记录，每张图各自一条。
   const items = Array.from({ length: count }, () =>
-    newItem({ id: newId('img'), kind: 'image', model, prompt, payload: { model, prompt, aspect_ratio: request.aspect_ratio, ...(refs.length ? { input_references: refs } : {}) }, form: form || null }),
+    newItem({ id: newId('img'), kind: 'image', model, prompt, payload: { model, prompt, aspect_ratio: request.aspect_ratio, ...(request.resolution ? { resolution: request.resolution } : {}), ...(refs.length ? { input_references: refs } : {}) }, form: form || null }),
   );
   const provider = currentProvider();
   runDirect(items, async () => {
@@ -902,12 +907,14 @@ async function flatkeyImages(request) {
 }
 
 // 火山方舟的生图接口（Seedream）。5.0 pro 和 5.0 flash 一次只出一张，所以要几张就发几次、同时进行，各出一张；有一次失败了，其余成功的照样留下。
-// 图片大小写成「宽x高」，按画面比例查登记好的像素值；参考图放在 image 数组里，本机的图已经换成内嵌数据。
+// 图片大小写成「宽x高」，按分辨率档位和画面比例查登记好的像素值，没指定档位就用这个模型默认的那一档；参考图放在 image 数组里，本机的图已经换成内嵌数据。
 // 返回的用量只有张数和 token，没有金额，所以不记费用。
-async function arkImages({ model, prompt, n, aspect_ratio, input_references }) {
+async function arkImages({ model, prompt, n, aspect_ratio, resolution, input_references }) {
   const spec = ARK_IMAGE_MODELS[model];
   if (!spec) throw new HttpError(400, 'invalid_request', `火山方舟上没有 ${model} 这个图片模型`);
-  const request = { model, prompt, size: spec.sizes[aspect_ratio] || spec.sizes['1:1'], response_format: 'b64_json', watermark: false };
+  if (resolution && !spec.sizes[resolution]) throw new HttpError(400, 'invalid_request', `${model} 没有 ${resolution} 这一档分辨率，能选的是 ${Object.keys(spec.sizes).join('、')}`);
+  const sizes = spec.sizes[resolution || spec.size];
+  const request = { model, prompt, size: sizes[aspect_ratio] || sizes['1:1'], response_format: 'b64_json', watermark: false };
   if (input_references) request.image = input_references.map((ref) => ref.image_url.url);
   const results = await Promise.allSettled(Array.from({ length: n }, () => callUpstream('POST', '/images/generations', { json: request, timeoutMs: 5 * 60 * 1000, provider: 'ark' })));
   const done = results.filter((r) => r.status === 'fulfilled').map((r) => r.value.data);

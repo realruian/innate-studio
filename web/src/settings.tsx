@@ -15,9 +15,8 @@ function Settings() {
   const [theme, setThemeState] = useState(themeChoice());
   const [polish, setPolish] = useState(polishModel());
   const [credits, setCredits] = useState('—');
-  const [test, setTest] = useState({ tone: '', text: '' });
   const [switching, setSwitching] = useState(false);
-  const { hasKey, keyHint, keySource, baseUrl, provider } = state.app;
+  const { hasKey, keyHint, keySource, provider } = state.app;
   const { label: platform, keyPrefix, keysUrl } = PROVIDERS[provider];
   const models = state.catalog.polish;
 
@@ -41,7 +40,6 @@ function Settings() {
   async function changeProvider(next: ProviderId) {
     if (next === provider || switching) return;
     setSwitching(true);
-    setTest({ tone: '', text: '' });
     try {
       await switchProvider(next);
       setPolish(polishModel());
@@ -51,21 +49,6 @@ function Settings() {
     } finally {
       setSwitching(false);
       readCredits();
-    }
-  }
-
-  async function testConnection() {
-    setTest({ tone: 'muted', text: `正在连接 ${platform}…` });
-    await loadModels();
-    const info = state.modelsInfo;
-    if (info.source === 'remote') {
-      const { image, audio } = state.catalog;
-      const extras = [image.length && '图片', audio.speech && '语音', audio.sfx && '音效', audio.music && '配乐'].filter(Boolean);
-      setTest({ tone: 'ok-text', text: `连接正常。可用的视频模型：${state.models.join('、')}${extras.length ? `；还可以生成${extras.join('、')}` : ''}` });
-    } else if (info.error) {
-      setTest({ tone: 'error-text', text: `连接失败：${info.error}` });
-    } else {
-      setTest({ tone: 'warn-text', text: info.note || '连接正常，但没有读到视频模型。' });
     }
   }
 
@@ -79,7 +62,8 @@ function Settings() {
       await loadApp();
       readCredits();
       toast('API Key 已保存', 'success');
-      testConnection();
+      // 换了 Key，可用的模型要重新读一遍。
+      loadModels();
       return true;
     } catch (err) {
       toast(message(err), 'error', 6000);
@@ -94,7 +78,6 @@ function Settings() {
       await api('DELETE', `/api/key?provider=${provider}`);
       await loadApp();
       readCredits();
-      setTest({ tone: '', text: '' });
       toast('已清除', 'success');
     } catch (err) {
       toast(message(err), 'error');
@@ -168,25 +151,11 @@ function Settings() {
             onSave={save}
             onRemove={remove}
           />
-          <FormRow label="接口地址">
-            <span className="mono">{baseUrl}</span>
-          </FormRow>
           {credits && (
             <FormRow label="账户余额">
               <span className="muted amount">{credits}</span>
             </FormRow>
           )}
-          <div className="form-row">
-            <div className="form-label">
-              连接
-              {test.text && <span className={`form-desc ${test.tone}`}>{test.text}</span>}
-            </div>
-            <div className="form-control">
-              <button className="btn btn-sm" type="button" onClick={testConnection}>
-                测试连接
-              </button>
-            </div>
-          </div>
         </div>
         <p className="settings-hint">
           Key 只保存在这台电脑上，在{' '}
@@ -279,7 +248,6 @@ function SpeechKey() {
   useStore('app');
   const { hasKey, keyHint, keySource } = state.app.speech;
   const { label, keysUrl } = DOUBAO_SPEECH;
-
   async function save(value: string) {
     try {
       state.app = await api('PUT', '/api/key', { apiKey: value, service: 'speech' });

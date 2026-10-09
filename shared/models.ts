@@ -126,17 +126,22 @@ export const ARK_VIDEO_MODELS: Record<string, VideoSpec> = {
 };
 
 // 图片的大小要写成「宽x高」。下面是文档里各档分辨率对应每种画面比例的像素值。
+const SEEDREAM_PRO_1K = { '1:1': '1024x1024', '4:3': '1152x864', '3:4': '864x1152', '16:9': '1424x800', '9:16': '800x1424', '3:2': '1248x832', '2:3': '832x1248', '21:9': '1568x672' };
 const SEEDREAM_PRO_1_5K = { '1:1': '1536x1536', '4:3': '1792x1344', '3:4': '1344x1792', '16:9': '2048x1152', '9:16': '1152x2048', '3:2': '1872x1248', '2:3': '1248x1872', '21:9': '2352x1008' };
 const SEEDREAM_PRO_2K = { '1:1': '2048x2048', '4:3': '2368x1776', '3:4': '1776x2368', '16:9': '2816x1584', '9:16': '1584x2816', '3:2': '2496x1664', '2:3': '1664x2496', '21:9': '3136x1344' };
 const SEEDREAM_2K = { '1:1': '2048x2048', '4:3': '2304x1728', '3:4': '1728x2304', '16:9': '2848x1600', '9:16': '1600x2848', '3:2': '2496x1664', '2:3': '1664x2496', '21:9': '3136x1344' };
+const SEEDREAM_3K = { '1:1': '3072x3072', '4:3': '3456x2592', '3:4': '2592x3456', '16:9': '4096x2304', '9:16': '2304x4096', '3:2': '3744x2496', '2:3': '2496x3744', '21:9': '4704x2016' };
+const SEEDREAM_4K = { '1:1': '4096x4096', '4:3': '4704x3520', '3:4': '3520x4704', '16:9': '5504x3040', '9:16': '3040x5504', '3:2': '4992x3328', '2:3': '3328x4992', '21:9': '6240x2656' };
+const SEEDREAM_PRO_TIERS = { '1K': SEEDREAM_PRO_1K, '1.5K': SEEDREAM_PRO_1_5K, '2K': SEEDREAM_PRO_2K };
 
-// refs 是最多收几张参考图；sizes 是每种画面比例发什么大小。
-// 5.0 pro 用 1.5K 这一档：按文档它和 1K 同价（0.30 元一张），效果更好；2K 是 0.60 元一张。
-// 5.0 flash 不分档计价，用 2K；5.0（原来叫 5.0 lite）最小就是 2K。即将下线的 4.5 和 4.0 不列。
-export const ARK_IMAGE_MODELS: Record<string, { refs: number; sizes: Record<string, string> }> = {
-  'doubao-seedream-5-0-pro-260628': { refs: 10, sizes: SEEDREAM_PRO_1_5K },
-  'doubao-seedream-5-0-flash-260915': { refs: 10, sizes: SEEDREAM_PRO_2K },
-  'doubao-seedream-5-0-260128': { refs: 14, sizes: SEEDREAM_2K },
+// refs 是最多收几张参考图；sizes 是能选的各档分辨率，每档里是每种画面比例发什么大小；size 是默认的那一档。
+// 5.0 pro 默认 1.5K：按文档它和 1K 同价（0.30 元一张），效果更好；2K 是 0.60 元一张。
+// 5.0 flash 的像素表文档里没有单列，用的是 5.0 pro 的，三档都实际发过请求（2026-10-09），出来的图就是这个大小；默认 2K。
+// 5.0（原来叫 5.0 lite）最小就是 2K，3K、4K 也实际发过。即将下线的 4.5 和 4.0 不列。
+export const ARK_IMAGE_MODELS: Record<string, { refs: number; sizes: Record<string, Record<string, string>>; size: string }> = {
+  'doubao-seedream-5-0-pro-260628': { refs: 10, sizes: SEEDREAM_PRO_TIERS, size: '1.5K' },
+  'doubao-seedream-5-0-flash-260915': { refs: 10, sizes: SEEDREAM_PRO_TIERS, size: '2K' },
+  'doubao-seedream-5-0-260128': { refs: 14, sizes: { '2K': SEEDREAM_2K, '3K': SEEDREAM_3K, '4K': SEEDREAM_4K }, size: '2K' },
 };
 
 // 润色用的豆包文本模型：先便宜快的，再效果好的。

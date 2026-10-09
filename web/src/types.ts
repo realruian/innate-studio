@@ -55,6 +55,8 @@ export interface ImageForm {
   prompt: string;
   model: string;
   ratio: string;
+  // 分辨率档位（1K、2K 这样）。只有火山方舟的图片模型分档；不写就用模型默认的那一档。
+  resolution?: string;
   count: number;
   // 参考图（图生图）。只有火山方舟的图片模型收。
   refs?: Ref[];

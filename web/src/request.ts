@@ -184,6 +184,7 @@ export function buildImageRequest(form: ImageForm, refLimit = 0): BuiltRequest {
   const refs = form.refs || [];
   const problems: string[] = [];
   const payload: Record<string, unknown> = { model: form.model, prompt, n: Number(form.count) || 1, aspect_ratio: form.ratio };
+  if (form.resolution) payload.resolution = form.resolution;
   if (!prompt) problems.push(refs.length ? '请写下想怎么改这张图' : '请填写提示词');
   if (refs.length) {
     if (!refLimit) problems.push(`${form.model} 不收参考图，请移除参考图或换一个模型`);

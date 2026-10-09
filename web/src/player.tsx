@@ -1,9 +1,9 @@
 // 视频和音频的播放器。不用浏览器自带的播放控件（它的样式和菜单由浏览器决定，和界面不是一套）。
 // 视频：控制条有播放/暂停、时间、进度、静音、全屏，鼠标移到画面上才出现。下载在卡片的「更多」里，不放进播放器。
-// clickToPlay 为 false 时点画面不播放：创作记录的卡片里，点画面是打开详情，播放只走播放键。
+// hoverPlay 是记录卡片的用法：没有控制条，鼠标移到卡片上就静音播放，移开停下并回到开头；点画面是打开详情。
 // 音频：没有画面，所以是一块写着内容的面板，下面一行播放键、时间和进度，一直显示。
 
-import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type RefObject } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent, type RefObject } from 'react';
 import { Icon, IconSwap } from './ui/Icon.tsx';
 import { exclusive } from './playback.ts';
 
@@ -124,15 +124,19 @@ interface VideoPlayerProps {
   autoplay?: boolean;
   label?: string;
   clickToPlay?: boolean;
+  // 鼠标移上来就播放、移开就停，不显示控制条。记录卡片用。
+  hoverPlay?: boolean;
   // 画框是固定比例时传它（记录卡片是 16:9）。
   frameRatio?: number | null;
-  // 在左下角标出总时长。记录卡片用：不用点开就知道这条多长。鼠标移上来、控制条出现时它让开。
+  // 播放器自己缩成视频的比例，四周不留底色。详情里的大画面用。
+  fit?: boolean;
+  // 在左下角标出总时长。记录卡片用：不用点开就知道这条多长。有控制条时，鼠标移上来、控制条出现它就让开。
   showLength?: boolean;
   // 给视频配的那段音乐的地址。传了它，视频自己的声音关掉，播放、暂停、拖动时这段音乐跟着画面走，静音键管的也是它。
   soundtrack?: string | null;
 }
 
-export function VideoPlayer({ src, autoplay = false, label = '视频', clickToPlay = true, frameRatio = null, showLength = false, soundtrack = null }: VideoPlayerProps) {
+export function VideoPlayer({ src, autoplay = false, label = '视频', clickToPlay = true, hoverPlay = false, frameRatio = null, fit = false, showLength = false, soundtrack = null }: VideoPlayerProps) {
   const root = useRef<HTMLDivElement>(null);
   const video = useRef<HTMLVideoElement>(null);
   const music = useRef<HTMLAudioElement>(null);
@@ -140,6 +144,7 @@ export function VideoPlayer({ src, autoplay = false, label = '视频', clickToPl
   const [muted, setMutedState] = useState(false);
   const [cover, setCover] = useState(false);
   const [length, setLength] = useState(0);
+  const [ratio, setRatio] = useState(0);
 
   function setMuted(next: boolean) {
     (music.current || video.current!).muted = next;
@@ -150,6 +155,24 @@ export function VideoPlayer({ src, autoplay = false, label = '视频', clickToPl
     if (document.fullscreenElement === root.current) document.exitFullscreen?.();
     else root.current?.requestFullscreen?.().catch(() => {});
   }
+
+  useEffect(() => {
+    if (!hoverPlay) return;
+    const picture = video.current!;
+    // 听的是外面那一层（卡片的画面区）：右上角的「更多」盖在画面上，鼠标移到它上面不该算离开。
+    const zone = root.current!.parentElement || root.current!;
+    const start = () => picture.play().catch(() => {});
+    const stop = () => {
+      picture.pause();
+      picture.currentTime = 0;
+    };
+    zone.addEventListener('mouseenter', start);
+    zone.addEventListener('mouseleave', stop);
+    return () => {
+      zone.removeEventListener('mouseenter', start);
+      zone.removeEventListener('mouseleave', stop);
+    };
+  }, [hoverPlay]);
 
   useEffect(() => {
     const picture = video.current!;
@@ -176,7 +199,7 @@ export function VideoPlayer({ src, autoplay = false, label = '视频', clickToPl
   }, [soundtrack]);
 
   return (
-    <div ref={root} className="player" role="group" aria-label={label}>
+    <div ref={root} className={`player${fit && ratio ? ' fit' : ''}`} style={fit && ratio ? ({ '--ratio': ratio } as CSSProperties) : undefined} role="group" aria-label={label}>
       <video
         ref={video}
         className={`player-video${cover ? ' cover' : ''}`}
@@ -185,38 +208,41 @@ export function VideoPlayer({ src, autoplay = false, label = '视频', clickToPl
         playsInline
         loop
         autoPlay={autoplay}
-        muted={Boolean(soundtrack)}
+        muted={hoverPlay || Boolean(soundtrack)}
         disablePictureInPicture
-        onClick={clickToPlay ? toggle : undefined}
+        onClick={clickToPlay && !hoverPlay ? toggle : undefined}
         onLoadedMetadata={(e) => {
           const el = e.currentTarget;
           // 视频比例和画框差不多就铺满画框，不然边上会露出一线底色；
           // 差得多（比如竖屏视频）就完整显示、两边留出底色，不去裁画面。
           if (frameRatio) setCover(Math.abs(el.videoWidth / el.videoHeight / frameRatio - 1) < 0.03);
+          if (el.videoWidth && el.videoHeight) setRatio(el.videoWidth / el.videoHeight);
           if (Number.isFinite(el.duration)) setLength(el.duration);
         }}
       />
       {showLength && length > 0 && <span className="player-length">{stamp(length)}</span>}
       {soundtrack && <audio ref={music} src={soundtrack} preload="auto" />}
-      <div className="player-bar">
-        <button className="player-btn" type="button" aria-label={playing ? '暂停' : '播放'} onClick={toggle}>
-          <IconSwap icons={['play', 'pause']} show={playing ? 'pause' : 'play'} />
-        </button>
-        <span ref={time} className="player-time">
-          0:00 / 0:00
-        </span>
-        <div className="player-track" {...trackProps}>
-          <div ref={rail} className="player-rail">
-            <div ref={fill} className="player-fill" />
+      {!hoverPlay && (
+        <div className="player-bar">
+          <button className="icon-btn icon-btn-sm player-btn" type="button" aria-label={playing ? '暂停' : '播放'} onClick={toggle}>
+            <IconSwap icons={['play', 'pause']} show={playing ? 'pause' : 'play'} />
+          </button>
+          <span ref={time} className="player-time">
+            0:00 / 0:00
+          </span>
+          <div className="player-track" {...trackProps}>
+            <div ref={rail} className="player-rail">
+              <div ref={fill} className="player-fill" />
+            </div>
           </div>
+          <button className="icon-btn icon-btn-sm player-btn" type="button" aria-label={muted ? '取消静音' : '静音'} onClick={() => setMuted(!muted)}>
+            <IconSwap icons={['volume', 'mute']} show={muted ? 'mute' : 'volume'} />
+          </button>
+          <button className="icon-btn icon-btn-sm player-btn" type="button" aria-label="全屏" onClick={toggleFullscreen}>
+            <Icon name="expand" size={16} />
+          </button>
         </div>
-        <button className="player-btn" type="button" aria-label={muted ? '取消静音' : '静音'} onClick={() => setMuted(!muted)}>
-          <IconSwap icons={['volume', 'mute']} show={muted ? 'mute' : 'volume'} />
-        </button>
-        <button className="player-btn" type="button" aria-label="全屏" onClick={toggleFullscreen}>
-          <Icon name="expand" size={16} />
-        </button>
-      </div>
+      )}
     </div>
   );
 }

@@ -3,7 +3,7 @@
 
 import type { Edge, Node, ReactFlowInstance } from '@xyflow/react';
 import { api, state, KINDS, findAsset, refreshAsset, assetReadiness, startHistoryLoop, loadHistory, polishModel } from '../store.ts';
-import { capabilities, defaults, imageRefLimit, platformLabel, specDriven, specOf, traits } from '../composer/state.ts';
+import { capabilities, defaults, fitImageSize, imageRefLimit, platformLabel, specDriven, specOf, traits } from '../composer/state.ts';
 import { buildRequest as buildVideoRequest, buildSpecRequest, buildImageRequest, buildSpeechRequest, buildSfxRequest } from '../request.ts';
 import { recordName, refFromAsset, uploadVirtualAsset } from '../media.ts';
 import { toast } from '../ui/layers.tsx';
@@ -84,8 +84,11 @@ async function submitVideo(flow: Flow, node: Node, sources: { link: LinkData; no
   const problem = problems[0] || request.problems[0];
   if (problem) throw new Error(problem);
   say('正在提交');
-  return (await api<HistoryItem>('POST', '/api/videos', { payload: request.payload, form })).id;
+  return (await api<HistoryItem>('POST', '/api/videos', { payload: request.payload, form: { ...form, ...FROM_CANVAS } })).id;
 }
+
+// 画布上提交的记录带着这个记号：创作页的「最近生成」不列它们，记录页里切到「画布」才看。
+const FROM_CANVAS = { from: 'canvas' };
 
 async function submitImage(node: Node, sources: { link: LinkData; node: Node }[], prompt: string, given?: { url: string; name: string }[]) {
   const data = node.data as unknown as ImageData;
@@ -99,10 +102,10 @@ async function submitImage(node: Node, sources: { link: LinkData; node: Node }[]
       if (!output) throw new Error('连进来的图片节点还没有结果，先让它生成完');
       return output.asset ? { ...output.asset, uid: crypto.randomUUID() } : { uid: crypto.randomUUID(), kind: 'image' as const, source: 'local' as const, url: output.url, name: output.name, thumb: null };
     });
-  const form = { prompt, model: data.model, ratio: data.ratio, count: data.count || 1, refs };
+  const form = { prompt, model: data.model, ratio: data.ratio, resolution: fitImageSize(data.model, data.resolution), count: data.count || 1, refs };
   const request = buildImageRequest(form, imageRefLimit(data.model));
   if (request.problems.length) throw new Error(request.problems[0]);
-  return (await api<{ items: HistoryItem[] }>('POST', '/api/images', { payload: request.payload, form: { type: 'image', ...form } })).items.map((item) => item.id);
+  return (await api<{ items: HistoryItem[] }>('POST', '/api/images', { payload: request.payload, form: { type: 'image', ...form, ...FROM_CANVAS } })).items.map((item) => item.id);
 }
 
 async function submitAudio(node: Node, prompt: string) {
@@ -111,12 +114,12 @@ async function submitAudio(node: Node, prompt: string) {
     const form = { prompt, duration: 'auto', influence: '0.3' };
     const request = buildSfxRequest(form);
     if (request.problems.length) throw new Error(request.problems[0]);
-    return (await api<HistoryItem>('POST', '/api/audio/sfx', { ...request.body, form: { type: 'sfx', ...form } })).id;
+    return (await api<HistoryItem>('POST', '/api/audio/sfx', { ...request.body, form: { type: 'sfx', ...form, ...FROM_CANVAS } })).id;
   }
   const form = { prompt, voiceId: data.voiceId, voiceName: data.voiceName };
   const request = buildSpeechRequest(form);
   if (request.problems.length) throw new Error(request.problems[0]);
-  return (await api<HistoryItem>('POST', '/api/audio/speech', { ...request.body, form: { type: 'speech', ...form } })).id;
+  return (await api<HistoryItem>('POST', '/api/audio/speech', { ...request.body, form: { type: 'speech', ...form, ...FROM_CANVAS } })).id;
 }
 
 // 一个节点显示出来的名字：图片 1。提示词里 @ 的就是它。
@@ -274,11 +277,12 @@ export function fitVideo(data: VideoData): VideoData {
 }
 
 // 新建节点时的参数跟创作页当前选的一致，换平台之后选的模型不在了就用列表里的第一个。
-export function newNodeData(kind: NodeKind, seed: { form: { model: string; resolution: string; ratio: string; duration: number }; image: { model: string; ratio: string }; speech: { voiceId: string; voiceName: string } }): Record<string, unknown> {
+export function newNodeData(kind: NodeKind, seed: { form: { model: string; resolution: string; ratio: string; duration: number }; image: { model: string; ratio: string; resolution?: string }; speech: { voiceId: string; voiceName: string } }): Record<string, unknown> {
   if (kind === 'text') return { text: '', prompt: '' };
   if (kind === 'image') {
     const models = state.catalog.image;
-    return { prompt: '', model: models.includes(seed.image.model) || !models.length ? seed.image.model : models[0], ratio: seed.image.ratio };
+    const model = models.includes(seed.image.model) || !models.length ? seed.image.model : models[0];
+    return { prompt: '', model, ratio: seed.image.ratio, resolution: fitImageSize(model, seed.image.resolution) };
   }
   if (kind === 'video') {
     const model = state.models.includes(seed.form.model) ? seed.form.model : state.models[0];

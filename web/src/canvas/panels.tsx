@@ -45,11 +45,10 @@ export function Finder({ nodes, onJump, onClose }: { nodes: Node[]; onJump: (id:
 
   return (
     <div className="cfind nowheel" role="dialog" aria-label="搜索节点">
-      <div className="search-field">
-        <Icon name="search" size={16} />
+      <div className="pop-search">
+        <Icon name="search" />
         <input
           ref={input}
-          className="input search"
           value={query}
           placeholder="搜索节点的名字、提示词、文本"
           aria-label="搜索节点"
@@ -76,7 +75,7 @@ export function Finder({ nodes, onJump, onClose }: { nodes: Node[]; onJump: (id:
       </div>
       <div ref={list} className="cfind-list" role="listbox" aria-label="搜索结果">
         {found.map((node, index) => (
-          <button key={node.id} type="button" role="option" aria-selected={index === current} className={`cfind-item ${index === current ? 'active' : ''}`} onClick={() => onJump(node.id)} onPointerMove={() => setAt(index)}>
+          <button key={node.id} type="button" role="option" aria-selected={index === current} className={`menu-item cfind-item ${index === current ? 'active' : ''}`} onClick={() => onJump(node.id)} onPointerMove={() => setAt(index)}>
             <Icon name={NODE_ICONS[node.type as NodeKind]} size={16} />
             <span className="cfind-name">{nameOf(node)}</span>
             <span className="cfind-text ellipsis">{excerpt(node, word)}</span>
@@ -110,9 +109,9 @@ export function HistoryPicker({ onPick }: { onPick: (item: HistoryItem) => void 
     <div className="popover-body chist">
       <div className="chist-head">
         <Segmented options={FILTERS} value={filter} onChange={setFilter} />
-        <div className="search-field">
-          <Icon name="search" size={16} />
-          <input className="input search" value={query} placeholder="搜提示词" aria-label="搜提示词" spellCheck={false} onChange={(e) => setQuery(e.target.value)} />
+        <div className="pop-search">
+          <Icon name="search" />
+          <input value={query} placeholder="搜提示词" aria-label="搜提示词" spellCheck={false} onChange={(e) => setQuery(e.target.value)} />
         </div>
       </div>
       <div className="chist-grid">
@@ -165,12 +164,12 @@ export function WorkflowPicker({ onPick }: { onPick: (id: string) => void }) {
     <div className="popover-body cflows">
       {(list || []).map((item) => (
         <div key={item.id} className="cflows-item">
-          <button type="button" className="cflows-pick" onClick={() => onPick(item.id)}>
+          <button type="button" className="menu-item cflows-pick" onClick={() => onPick(item.id)}>
             <Icon name="workflow" size={16} />
             <span className="cflows-name ellipsis">{item.name}</span>
             <span className="cflows-count">{item.count} 个节点</span>
           </button>
-          <button type="button" className="cnode-btn" {...tip('删除这份工作流')} aria-label={`删除工作流「${item.name}」`} onClick={() => remove(item)}>
+          <button type="button" className="icon-btn icon-btn-sm cnode-btn" {...tip('删除这份工作流')} aria-label={`删除工作流「${item.name}」`} onClick={() => remove(item)}>
             <Icon name="trash" size={16} />
           </button>
         </div>

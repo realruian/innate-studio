@@ -1,7 +1,7 @@
 // 生成记录：任务进度、播放、下载、复用参数、详情。视频、图片、音频（语音、音效、配乐）都在这里。
 // 有两处用到：创作页输入框下面的「最近生成」（只列最新几条），和单独的「创作记录」页（全部，带筛选和搜索）。
 
-import { memo, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { memo, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { api, state, emit, useStore, loadHistory, isPendingTask, isTimedOutTask, goTo } from './store.ts';
 import { fmtTime, fmtDuration, fmtBytes } from './format.ts';
 import { videoFamily } from './request.ts';
@@ -35,6 +35,9 @@ const nameOf = (item: HistoryItem) => item.prompt || typeLabel(item);
 const done = (item: HistoryItem) => item.status === 'completed' && Boolean(item.mediaUrl);
 
 const RECENT_COUNT = 6;
+
+// 在画布里生成的（提交时画布在表单里留了记号）。它们不进创作页的「最近生成」，记录页里单独看。
+const fromCanvas = (item: HistoryItem) => item.form?.from === 'canvas';
 
 function modeOf(item: HistoryItem) {
   if (videoFamily(item.model) === 'grok') return item.payload?.image || item.payload?.frame_images?.length ? '图生视频' : '文生视频';
@@ -77,10 +80,13 @@ async function removeItem(item: HistoryItem) {
 }
 
 function reuse(item: HistoryItem) {
+  // 画布的记号不跟着填回创作面板，不然下一次在创作页生成的也会被算成画布的。
+  const { from: _from, ...rest } = item.form || {};
+  const form = item.form && rest;
   if (item.kind !== 'video') {
-    setStudio(typeOf(item) as 'image' | 'speech' | 'sfx' | 'music', item.form || { prompt: item.prompt });
-  } else if (item.form) {
-    setForm(item.form);
+    setStudio(typeOf(item) as 'image' | 'speech' | 'sfx' | 'music', form || { prompt: item.prompt });
+  } else if (form) {
+    setForm(form);
   } else {
     const p = item.payload || {};
     const basics = { mode: 'text', prompt: item.prompt || '', model: item.model, resolution: p.resolution, ratio: p.ratio };
@@ -195,13 +201,15 @@ function openCardMenu(button: HTMLElement, id: string, scope: Scope) {
 // 图片：比例和画框差不多就铺满，差得多（比如竖图）就完整显示、两边留底色，不裁画面。详情里总是完整显示。
 function ImageView({ item, large }: { item: HistoryItem; large: boolean }) {
   const [cover, setCover] = useState(false);
+  // 详情里：画框缩成图片的比例，四周不留底色。
+  const [ratio, setRatio] = useState(0);
   return (
-    <div className="image-view">
+    <div className={`image-view${ratio ? ' fit' : ''}`} style={ratio ? ({ '--ratio': ratio } as CSSProperties) : undefined}>
       <img
         className={`media-image${cover ? ' cover' : ''}`}
         src={item.mediaUrl}
         alt={item.prompt || '生成的图片'}
-        onLoad={large ? undefined : (e) => setCover(Math.abs(e.currentTarget.naturalWidth / e.currentTarget.naturalHeight / (16 / 9) - 1) < 0.03)}
+        onLoad={large ? (e) => setRatio(e.currentTarget.naturalWidth / e.currentTarget.naturalHeight) : (e) => setCover(Math.abs(e.currentTarget.naturalWidth / e.currentTarget.naturalHeight / (16 / 9) - 1) < 0.03)}
       />
     </div>
   );
@@ -211,7 +219,7 @@ function AudioView({ item, large }: { item: HistoryItem; large: boolean }) {
   const voice = item.tool === 'speech' && item.payload?.voice_name;
   // 详情里的配乐：原视频还在本机的话，画面和音乐一起放，才听得出配得怎么样。
   const source = item.tool === 'music' && item.form?.video?.url;
-  if (large && source) return <VideoPlayer src={source} soundtrack={item.mediaUrl} autoplay label="配乐预览" />;
+  if (large && source) return <VideoPlayer src={source} soundtrack={item.mediaUrl} autoplay fit label="配乐预览" />;
   // 配乐没有提示词，写上它是给多长的视频配的。
   const seconds = item.tool === 'music' && Math.round(item.payload?.duration_seconds || 0);
   const text = item.prompt || (seconds ? `给一段 ${seconds} 秒的视频配的音乐` : '');
@@ -230,7 +238,7 @@ function MediaBox({ item, large = false }: { item: HistoryItem; large?: boolean 
   if (done(item)) {
     if (item.kind === 'image') return <ImageView item={item} large={large} />;
     if (item.kind === 'audio') return <AudioView item={item} large={large} />;
-    return <VideoPlayer src={item.videoUrl} autoplay={large} clickToPlay={large} frameRatio={large ? null : 16 / 9} showLength={!large} label={item.prompt || '生成的视频'} />;
+    return <VideoPlayer src={item.videoUrl} autoplay={large} hoverPlay={!large} fit={large} frameRatio={large ? null : 16 / 9} showLength={!large} label={item.prompt || '生成的视频'} />;
   }
   if (item.status === 'failed') {
     const reason = explainFailure(item.error?.message);
@@ -288,10 +296,10 @@ function Card({ item, index, scope }: { item: HistoryItem; index: number; scope:
   }, []);
   return (
     <article ref={ref} className={`card status-${item.status}`} aria-label={nameOf(item)}>
-      {/* 控制条和「更多」上的点击各管各的，不算在"点画面打开详情"里。 */}
-      <div className="card-media" onClick={(e) => !(e.target as Element).closest('.player-bar, .audio-controls, .card-more') && openDetail(item.id, scope)}>
+      {/* 音频控制行和「更多」上的点击各管各的，不算在"点画面打开详情"里。 */}
+      <div className="card-media" onClick={(e) => !(e.target as Element).closest('.audio-controls, .card-more') && openDetail(item.id, scope)}>
         <CardMedia item={item} signature={mediaSignature(item)} />
-        <button className="card-more" type="button" {...tip('更多')} aria-label="更多操作" aria-haspopup="menu" aria-expanded="false" onClick={(e) => openCardMenu(e.currentTarget, item.id, scope)}>
+        <button className="icon-btn icon-btn-sm card-more" type="button" {...tip('更多')} aria-label="更多操作" aria-haspopup="menu" aria-expanded="false" onClick={(e) => openCardMenu(e.currentTarget, item.id, scope)}>
           <Icon name="more" size={16} />
         </button>
       </div>
@@ -334,7 +342,7 @@ function paramsOf(item: HistoryItem): Entry[] {
   const p = item.payload || {};
   // 用了技能的记录：提示词是扩写出来的，这里标出用的是哪个技能、用户原来写的是什么。
   const skill: Entry[] = item.form?.skill ? [['技能', item.form.skill.name], ['你写的', item.form.prompt, true]] : [];
-  if (item.kind === 'image') return [['模型', item.model, true], ['画面比例', p.aspect_ratio], ...skill];
+  if (item.kind === 'image') return [['模型', item.model, true], ['画面比例', p.aspect_ratio], ['分辨率', p.resolution], ...skill];
   if (item.tool === 'speech') return [['模型', item.model, true], ['音色', p.voice_name || p.voice_id]];
   if (item.tool === 'sfx') {
     return [['模型', item.model, true], ['时长', p.duration_seconds ? `${p.duration_seconds} 秒` : '由模型决定'], ['和描述的贴合度', p.prompt_influence]];
@@ -407,7 +415,7 @@ function DetailView({ id, scope, close }: { id: string; scope: Scope; close: () 
   }, [item]);
   if (!item) return null;
   const nav = (by: number, label: string) => (
-    <button className={`detail-nav-btn ${by < 0 ? 'is-prev' : ''}`} type="button" aria-label={label} disabled={index < 0 || !list[index + by]} onClick={() => step(by)} {...tip(label)}>
+    <button className={`icon-btn detail-nav-btn ${by < 0 ? 'is-prev' : ''}`} type="button" aria-label={label} disabled={index < 0 || !list[index + by]} onClick={() => step(by)} {...tip(label)}>
       <Icon name="chevron" size={18} />
     </button>
   );
@@ -478,7 +486,7 @@ function Detail({ item, close, nav }: { item: HistoryItem; close: () => void; na
 
   return (
     <>
-      {/* 左边：结果。画框的大小是固定的，画面在里面完整显示。 */}
+      {/* 左边：结果。这一块的大小是固定的；视频和图片在里面按自己的比例尽量放大，四周不垫底色。 */}
       <div className={`detail-media ${item.kind === 'audio' && done(item) ? 'is-audio' : ''}`}>
         <MediaBox item={item} large />
       </div>
@@ -546,7 +554,7 @@ export function openDetail(id: string, scope: Scope = () => state.history) {
 export function Recent() {
   useStore('history', 'createType');
   const type = state.createType;
-  const list = state.history.filter((item) => typeOf(item) === type);
+  const list = state.history.filter((item) => typeOf(item) === type && !fromCanvas(item));
   const feed = useRef<HTMLElement>(null);
   // 打开页面时排在问句、输入框之后进场。
   useLayoutEffect(() => {
@@ -562,6 +570,7 @@ export function Recent() {
           hidden={list.length <= RECENT_COUNT}
           onClick={() => {
             state.recordsType = type;
+            state.recordsSource = 'create';
             emit('recordsType');
             goTo('records');
           }}
@@ -585,6 +594,12 @@ export function Recent() {
 
 // 记录页的类型筛选，和创作页输入框上方的切换是同一组。
 const TYPE_FILTERS = [{ value: 'all' as const, label: '全部' }, ...(Object.keys(TYPE_LABELS) as CreateType[]).map((value) => ({ value, label: TYPE_LABELS[value] }))];
+
+// 记录页的来源切换：创作页生成的和画布里生成的分开看。
+const SOURCE_FILTERS = [
+  { value: 'create' as const, label: '创作' },
+  { value: 'canvas' as const, label: '画布' },
+];
 
 // 搜索用得少，平时只是一个图标，点了才展开成输入框；清空并离开后收回去。
 function SearchBox({ onQuery }: { onQuery: (query: string) => void }) {
@@ -626,20 +641,31 @@ function SearchBox({ onQuery }: { onQuery: (query: string) => void }) {
 
 // 「创作记录」页：全部记录，可以按类型筛选、按提示词搜索。
 export function Records() {
-  useStore('history', 'recordsType');
+  useStore('history', 'recordsType', 'recordsSource');
   const [query, setQuery] = useState('');
   const type = state.recordsType;
-  const list = state.history.filter((item) => (type === 'all' || typeOf(item) === type) && (!query || (item.prompt || '').toLowerCase().includes(query)));
+  const source = state.recordsSource;
+  const from = state.history.filter((item) => fromCanvas(item) === (source === 'canvas'));
+  const list = from.filter((item) => (type === 'all' || typeOf(item) === type) && (!query || (item.prompt || '').toLowerCase().includes(query)));
   return (
     <div className="page">
       <header className="page-head">
         <div>
           <h1>创作记录</h1>
-          <p className="muted">生成过的全部视频、图片和音频。点画面看详情，点「复用」把那次的参数填回创作面板。</p>
+          <p className="muted">生成过的全部视频、图片和音频，创作页和画布里生成的分开看。点画面看详情，点「复用」把那次的参数填回创作面板。</p>
         </div>
       </header>
       <div className="page-tools">
-        <div>
+        <div className="filter-group">
+          <Segmented
+            options={SOURCE_FILTERS}
+            value={source}
+            onChange={(next) => {
+              state.recordsSource = next;
+              emit('recordsSource');
+            }}
+            className="filters"
+          />
           <Segmented
             options={TYPE_FILTERS}
             value={type}
@@ -656,8 +682,8 @@ export function Records() {
         list={list}
         empty={
           <div className="empty">
-            <div className="empty-title">{!state.historyLoaded ? '正在读取记录…' : state.history.length ? '没有符合条件的记录' : '还没有生成过内容'}</div>
-            {state.historyLoaded && !state.history.length ? <div className="muted">点左边的「创作」开始。生成的结果和参数都会保存在这里。</div> : null}
+            <div className="empty-title">{!state.historyLoaded ? '正在读取记录…' : from.length ? '没有符合条件的记录' : source === 'canvas' ? '画布里还没有生成过内容' : '还没有生成过内容'}</div>
+            {state.historyLoaded && !from.length ? <div className="muted">点左边的「{source === 'canvas' ? '画布' : '创作'}」开始。生成的结果和参数都会保存在这里。</div> : null}
           </div>
         }
       />

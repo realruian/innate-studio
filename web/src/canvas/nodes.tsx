@@ -6,7 +6,7 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { BaseEdge, Handle, NodeToolbar, Position, getBezierPath, useConnection, useEdges, useInternalNode, useReactFlow, useStore as useFlowStore, useUpdateNodeInternals, type ConnectionLineComponentProps, type EdgeProps, type Node, type NodeProps } from '@xyflow/react';
 import { api, state, useStore, loadVoices, isPendingTask, polishModel, KINDS as MEDIA } from '../store.ts';
-import { RATIOS, capabilities, imageRatios, imageRefLimit, traits, voiceName } from '../composer/state.ts';
+import { RATIOS, capabilities, fitImageSize, imageRatios, imageRefLimit, imageSizes, traits, voiceName } from '../composer/state.ts';
 import { modelLabel, modelNote } from '../../../shared/models.ts';
 import { kindOfFile, recordName, uploadLocalFile, uploadVirtualAsset } from '../media.ts';
 import { openAssetPicker } from '../assets.tsx';
@@ -80,7 +80,7 @@ function Frame({ id, kind, no, pins = [], selected, dragging, width, tools, pane
         </span>
         {alone && (
           <span className="cnode-acts nodrag">
-            <button className="cnode-btn" type="button" {...tip('颜色标记')} aria-label="颜色标记" aria-haspopup="dialog" aria-expanded="false" onClick={(e) => openPopover(e.currentTarget, <PinSheet value={pins} onChange={(pin) => flow.updateNodeData(id, { pin })} />, { label: '颜色标记' })}>
+            <button className="icon-btn icon-btn-sm cnode-btn" type="button" {...tip('颜色标记')} aria-label="颜色标记" aria-haspopup="dialog" aria-expanded="false" onClick={(e) => openPopover(e.currentTarget, <PinSheet value={pins} onChange={(pin) => flow.updateNodeData(id, { pin })} />, { label: '颜色标记' })}>
               <span className={`cpin ${pins.length ? `is-${pins[0]}` : 'is-none'}`} />
             </button>
             {tools}
@@ -256,7 +256,7 @@ function Prompt({ id, value, placeholder, presets }: { id: string; value: string
         }}
       />
       {presets && (
-        <button className="cnode-at is-slash" type="button" {...tip('预设：九宫格、三视图、画面推演…')} aria-label="预设" aria-haspopup="menu" onClick={() => preset(false)}>
+        <button className="cnode-at is-slash" type="button" {...tip('预设')} aria-label="预设" aria-haspopup="menu" onClick={() => preset(false)}>
           /
         </button>
       )}
@@ -521,7 +521,7 @@ function NodeTools({ id, kind, data, onUpload }: { id: string; kind: Kind; data:
   // 扩图：把画面往外补成另一个比例。先在本地做一张放大了画布的底图，再让这个节点的模型去补；结果放进右边一个新的图片节点。
   async function outpaint(ratio: string) {
     const model = (data as ImageData).model;
-    if (!imageRefLimit(model)) return toast(`${model} 不收参考图，做不了扩图。先在下面的面板里换一个收参考图的模型`, 'info');
+    if (!imageRefLimit(model)) return toast(`${modelLabel(model)} 不支持参考图，先换一个模型再扩图`, 'info');
     toast('正在准备扩图…', 'info', 1800);
     try {
       const [w, h] = ratio.split(':').map(Number);
@@ -574,17 +574,17 @@ function NodeTools({ id, kind, data, onUpload }: { id: string; kind: Kind; data:
   return (
     <>
       {hasContent && (
-        <button className="cnode-btn" type="button" {...tip('全屏查看')} aria-label="全屏查看" onClick={view}>
+        <button className="icon-btn icon-btn-sm cnode-btn" type="button" {...tip('全屏查看')} aria-label="全屏查看" onClick={view}>
           <Icon name="expand" size={16} />
         </button>
       )}
       {!hasContent && onUpload ? (
-        <button className="cnode-btn" type="button" {...tip('上传一张图片放进这个节点')} aria-label="上传图片" onClick={onUpload}>
+        <button className="icon-btn icon-btn-sm cnode-btn" type="button" {...tip('上传一张图片放进这个节点')} aria-label="上传图片" onClick={onUpload}>
           <Icon name="upload" size={16} />
         </button>
       ) : (
         items.length > 0 && (
-          <button ref={moreButton} className="cnode-btn" type="button" {...tip('更多')} aria-label="更多操作" aria-haspopup="menu" aria-expanded="false" onClick={(e) => openMenu(e.currentTarget, { label: '更多操作', items, onSelect: act })}>
+          <button ref={moreButton} className="icon-btn icon-btn-sm cnode-btn" type="button" {...tip('更多')} aria-label="更多操作" aria-haspopup="menu" aria-expanded="false" onClick={(e) => openMenu(e.currentTarget, { label: '更多操作', items, onSelect: act })}>
             <Icon name="more" size={16} />
           </button>
         )
@@ -720,11 +720,12 @@ export function ImageNode({ id, data: raw, selected, dragging }: NodeProps) {
           <Prompt id={id} value={data.prompt} placeholder={promptHint(linked, hasRefs ? '想怎么改这张图？例如：把背景改成雪夜' : '描述想生成的图片：主体、环境、构图、光线和风格')} presets={{ refs: inputs.filter((i) => i.link.kind === 'image').length, limit: refLimit, run: (prompt) => generate(flow, id, snap, { prompt }) }} />
           {data.error && !data.busy && <p className="cnode-error">{data.error}</p>}
           <Bar working={working} ready={Boolean(data.prompt.trim()) || linked} action="生成图片" onSend={() => generate(flow, id, snap)}>
-            <Dropdown variant="tool" chevron label="模型" value={data.model} options={models.map((m) => ({ value: m, label: modelLabel(m) }))} onChange={(model) => flow.updateNodeData(id, { model, ratio: imageRatios(model).includes(data.ratio) ? data.ratio : imageRatios(model)[0] || data.ratio })} />
+            <Dropdown variant="tool" chevron label="模型" value={data.model} options={models.map((m) => ({ value: m, label: modelLabel(m) }))} onChange={(model) => flow.updateNodeData(id, { model, ratio: imageRatios(model).includes(data.ratio) ? data.ratio : imageRatios(model)[0] || data.ratio, resolution: fitImageSize(model, data.resolution) })} />
             <Params
               label="参数"
               groups={[
                 { label: '比例', value: data.ratio, options: ratios.map((r) => ({ value: r, label: r })), onChange: (ratio) => flow.updateNodeData(id, { ratio }) },
+                { label: '分辨率', value: fitImageSize(data.model, data.resolution) || '', options: imageSizes(data.model).map((r) => ({ value: r, label: r })), onChange: (resolution) => flow.updateNodeData(id, { resolution }) },
                 { label: '张数', value: String(data.count || 1), options: IMAGE_COUNTS.map((n) => ({ value: String(n), label: `${n} 张` })), onChange: (count) => flow.updateNodeData(id, { count: Number(count) }) },
               ]}
             />
@@ -1027,7 +1028,7 @@ export function GroupNode({ id, data: raw, selected }: NodeProps) {
         <span className="cgroup-count">{data.members.length} 个节点</span>
         {alone && (
           <button
-            className="cnode-btn nodrag"
+            className="icon-btn icon-btn-sm cnode-btn nodrag"
             type="button"
             {...tip('更多')}
             aria-label="分组操作"
@@ -1087,7 +1088,7 @@ export function StackNode({ id, data: raw, selected, dragging }: NodeProps) {
         </span>
         {alone && (
           <span className="cnode-acts nodrag">
-            <button className="cnode-btn" type="button" {...tip('取消堆叠：里面的节点都摊回画布')} aria-label="取消堆叠" onClick={() => unstack(id)}>
+            <button className="icon-btn icon-btn-sm cnode-btn" type="button" {...tip('取消堆叠')} aria-label="取消堆叠" onClick={() => unstack(id)}>
               <Icon name="grid" size={16} />
             </button>
           </span>

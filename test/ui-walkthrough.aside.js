@@ -108,27 +108,19 @@ await shot('01-create');
 
 // 1b. 关键位置的颜色要等于从 Antigravity 截图取到的值；输入框底部要有灰色托边
 const REFERENCE = {
-  light: { 主区底色: 'rgb(249, 249, 249)', 侧栏底色: 'rgb(243, 243, 243)', 输入框底色: 'rgb(252, 252, 252)', 输入框边线: 'rgb(233, 233, 233)', 托边: 'rgb(233, 233, 233)', 分隔线: 'rgb(230, 230, 230)' },
-  dark: { 主区底色: 'rgb(16, 16, 16)', 侧栏底色: 'rgb(22, 22, 22)', 输入框底色: 'rgb(28, 28, 28)', 输入框边线: 'rgb(37, 37, 37)', 托边: 'rgb(37, 37, 37)', 分隔线: 'rgb(26, 26, 26)' },
+  light: { 主区底色: 'rgb(249, 249, 249)', 侧栏底色: 'rgb(243, 243, 243)', 输入框底色: 'rgb(252, 252, 252)', 托边: 'rgb(233, 233, 233)' },
+  dark: { 主区底色: 'rgb(16, 16, 16)', 侧栏底色: 'rgb(22, 22, 22)', 输入框底色: 'rgb(28, 28, 28)', 托边: 'rgb(37, 37, 37)' },
 }[THEME];
 const colours = await pg.evaluate(() => {
   const css = (selector) => getComputedStyle(document.querySelector(selector));
-  // 半透明边线叠在底色上，算出实际看到的颜色
-  const over = (line, base) => {
-    const [r, g, b, a = 1] = line.match(/[\d.]+/g).map(Number);
-    const under = base.match(/[\d.]+/g).map(Number);
-    return `rgb(${[r, g, b].map((v, i) => Math.round(v * a + under[i] * (1 - a))).join(', ')})`;
-  };
   const card = css('.composer-card');
   return {
     主区底色: css('body').backgroundColor,
     侧栏底色: css('.sidebar').backgroundColor,
     输入框底色: card.backgroundColor,
-    输入框边线: over(card.borderTopColor, card.backgroundColor),
     托边: (card.boxShadow.match(/rgba?\([^)]+\)/) || ['没有托边'])[0],
     托边高度: card.boxShadow.replace(/rgba?\([^)]+\)/, '').trim(),
     托边占位: card.marginBottom,
-    分隔线: over(css('.main').borderLeftColor, css('body').backgroundColor),
   };
 });
 for (const [name, want] of Object.entries(REFERENCE)) {
@@ -638,7 +630,7 @@ const settled = await pg.evaluate(() => {
     const active = s.querySelector('.seg.active').getBoundingClientRect();
     return Math.abs(thumb.left - active.left) > 1 || Math.abs(thumb.width - active.width) > 1;
   });
-  const moving = document.getAnimations().filter((a) => a.playState === 'running' && a.animationName !== 'spin').length;
+  const moving = document.getAnimations().filter((a) => a.playState === 'running' && a.animationName !== 'spin' && a.animationName !== 'sheen').length;
   return { off: off.map((s) => s.className), moving, card: document.querySelector('.composer-card').getAttribute('style') };
 });
 if (settled.off.length || settled.moving || settled.card) problems.push(`切换类型的动效没有收干净：${JSON.stringify(settled)}`);

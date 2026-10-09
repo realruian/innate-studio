@@ -108,8 +108,8 @@ export function SkillPanel({ close }: { close: () => void }) {
   };
   return (
     <>
-      <div className="skill-search">
-        <Icon name="search" />
+      <div className="pop-search">
+        <Icon name="search" size={18} />
         <input ref={search} type="search" placeholder="搜索技能" aria-label="搜索技能" onInput={(e) => setQuery(e.currentTarget.value.trim().toLowerCase())} />
       </div>
       <div className="skill-list" role="listbox" aria-label="技能">
@@ -135,11 +135,11 @@ export function SkillPanel({ close }: { close: () => void }) {
         {state.skills && !list.length && <div className="empty small-empty">{query ? `没有带「${query}」的技能` : `还没有用在${TYPE_LABELS[type]}上的技能`}</div>}
       </div>
       <div className="skill-foot">
-        <button className="skill-action" type="button" onClick={() => leave(() => openSkillEditor({ type }))}>
+        <button className="menu-item skill-action" type="button" onClick={() => leave(() => openSkillEditor({ type }))}>
           <Icon name="plus" size={18} />
           <span>创建技能</span>
         </button>
-        <button className="skill-action" type="button" onClick={() => leave(() => goTo('skills'))}>
+        <button className="menu-item skill-action" type="button" onClick={() => leave(() => goTo('skills'))}>
           <Icon name="sliders" size={18} />
           <span>管理技能</span>
         </button>
@@ -184,7 +184,7 @@ export function Skills() {
       <header className="page-head">
         <div>
           <h1>技能</h1>
-          <p className="muted">技能是一套写提示词的规则。在创作页选一个技能，只写一句简单的话，发送时它会帮你扩写成完整的提示词。</p>
+          <p className="muted">一套写提示词的规则：在创作页选一个，只写一句话，发送时帮你扩写成完整的提示词。</p>
         </div>
         <div className="row">
           <div className="search-field">

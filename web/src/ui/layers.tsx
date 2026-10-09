@@ -458,7 +458,7 @@ function ModalView({ modal }: { modal: Modal }) {
             <h2>{modal.title}</h2>
             {modal.subtitle && <p className="muted small">{modal.subtitle}</p>}
           </div>
-          <button className="modal-close" type="button" aria-label="关闭" onClick={modal.close}>
+          <button className="icon-btn icon-btn-sm modal-close" type="button" aria-label="关闭" onClick={modal.close}>
             <Icon name="x" size={16} />
           </button>
         </header>

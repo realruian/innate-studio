@@ -114,6 +114,8 @@ test('模型列表：型号和各自支持什么是登记好的，连一次接�
   assert.deepEqual(data.imageModels, ['doubao-seedream-5-0-pro-260628', 'doubao-seedream-5-0-flash-260915', 'doubao-seedream-5-0-260128']);
   assert.equal(data.imageRefs[IMAGE], 10);
   assert.equal(data.imageRatios[IMAGE].includes('16:9'), true);
+  assert.deepEqual(data.imageSizes[IMAGE], { options: ['1K', '1.5K', '2K'], default: '1.5K' });
+  assert.deepEqual(data.imageSizes['doubao-seedream-5-0-260128'], { options: ['2K', '3K', '4K'], default: '2K' });
   assert.deepEqual(data.polishModels, ['doubao-seed-2-1-lite-260915', 'doubao-seed-2-1-turbo-260628', 'doubao-seed-2-1-pro-260915']);
   assert.deepEqual(data.audio, { speech: true, sfx: false, music: false });
   assert.equal(ark.log.some((entry) => entry.method === 'GET' && entry.pathname === '/contents/generations/tasks' && entry.authed), true);
@@ -201,6 +203,18 @@ test('生图：要几张发几次，大小按画面比例换成像素值，不�
   assert.match(done[0].mediaUrl, /^\/media\/images\/img_\w+\.jpg$/);
   assert.equal(done[0].usage, null);
   assert.deepEqual(sent('/images/generations').slice(-2), Array(2).fill({ model: IMAGE, prompt: '窗台上的猫', size: '2048x1152', response_format: 'b64_json', watermark: false }));
+
+  // 选了分辨率档位：按那一档的像素发；这个模型没有的档位直接拒掉，不发出去。
+  const large = await call('POST', '/api/images', { payload: { model: 'doubao-seedream-5-0-260128', prompt: '四K的猫', n: 1, aspect_ratio: '16:9', resolution: '4K' } });
+  assert.equal(large.status, 200);
+  await waitFor(() => sent('/images/generations').some((r) => r.prompt === '四K的猫'), '请求发出');
+  assert.equal(sent('/images/generations').at(-1).size, '5504x3040');
+  const largeItem = await waitFor(async () => (await call('GET', '/api/history')).data.items.find((i) => i.id === large.data.items[0].id && i.status !== 'running'), '4K 的那张有结果');
+  assert.equal(largeItem.payload.resolution, '4K');
+  const wrong = await call('POST', '/api/images', { payload: { model: IMAGE, prompt: '没有这一档', n: 1, aspect_ratio: '16:9', resolution: '4K' } });
+  const wrongItem = await waitFor(async () => (await call('GET', '/api/history')).data.items.find((i) => i.id === wrong.data.items[0].id && i.status === 'failed'), '没有的档位失败');
+  assert.match(wrongItem.error.message, /没有 4K 这一档/);
+  assert.equal(sent('/images/generations').some((r) => r.prompt === '没有这一档'), false);
 
   const url = await upload();
   const ref = { type: 'image_url', image_url: { url } };

@@ -62,3 +62,20 @@ test('字距：只有大标题收紧，正文不调', () => {
   assert.deepEqual(offenders(declarations('letter-spacing'), (v) => v === '-0.01em' || v === '-0.02em'), []);
   assert.ok(declarations('letter-spacing').length <= 2, '只应有首屏问句和页面标题两处调了字距');
 });
+
+test('圆角：只用四档变量；胶囊、圆形和细条（2、3、4 像素）除外', () => {
+  const allowed = /^(0|50%|999px|[234]px|inherit|var\(--r-(xs|sm|md|lg)\))$/;
+  assert.deepEqual(offenders(declarations('border-radius'), (v) => allowed.test(v)), []);
+});
+
+test('盖在画面上的黑底和白字：只用 --scrim、--scrim-strong、--on-scrim，不写色值', () => {
+  const raw = /rgba\(0, 0, 0|#fff\b|#ffffff\b/i;
+  // 品牌字标的填色是品牌自己的颜色，不算
+  const found = declarations('(?:background(?:-color)?|color)').filter(({ where }) => !where.startsWith('.brand-'));
+  assert.deepEqual(offenders(found, (v) => !raw.test(v)), []);
+});
+
+test('时长：过渡和动效只用五档变量；进度条和一直循环的动画除外', () => {
+  const loose = [...rules.matchAll(/(?<![\d.])(\d+)ms\b/g)].map((m) => Number(m[1])).filter((ms) => ms !== 480);
+  assert.deepEqual(loose, []);
+});

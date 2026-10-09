@@ -38,6 +38,19 @@ async function start() {
   else openSettings();
 }
 
+// 滚动条平时不显示：哪一块在滚就给它加上 .is-scrolling，停下一会儿再去掉。页面上所有能滚的地方都走这里。
+const scrollTimers = new WeakMap<Element, number>();
+document.addEventListener(
+  'scroll',
+  (e) => {
+    const el = e.target instanceof Element ? e.target : document.documentElement;
+    el.classList.add('is-scrolling');
+    clearTimeout(scrollTimers.get(el));
+    scrollTimers.set(el, window.setTimeout(() => el.classList.remove('is-scrolling'), 800));
+  },
+  { capture: true, passive: true },
+);
+
 // 自动化走查要直接改状态来模拟接口的变化，所以把状态挂出来。
 Object.assign(window, { __studio: { state, emit } });
 

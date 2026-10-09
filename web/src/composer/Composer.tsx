@@ -2,7 +2,7 @@
 // 状态和动作在 state.ts。
 
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { state, useStore, KINDS, polishModel, goTo, loadCharacters } from '../store.ts';
+import { state, useStore, KINDS, goTo, loadCharacters } from '../store.ts';
 import { RES_RANK } from '../request.ts';
 import { modelLabel, modelNote, referenceModeLabel } from '../../../shared/models.ts';
 import { Icon, type IconName } from '../ui/Icon.tsx';
@@ -15,7 +15,7 @@ import { SkillPanel } from '../skills.tsx';
 import type { Kind, Ref, VideoForm } from '../types.ts';
 import {
   composer, RESOLUTIONS, RATIOS, SR_RESOLUTIONS,
-  typeOf, draftPrompt, isGrok, specDriven, traits, availableTypes, capabilities, imageRatios, imageRefLimit, usedAssetIds, refStatus, currentRequest,
+  typeOf, draftPrompt, isGrok, specDriven, traits, availableTypes, capabilities, imageRatios, imageSizes, imageRefLimit, usedAssetIds, refStatus, currentRequest,
   update, setMode, swapFrames, updateSr, updateStudio, setType, typePrompt, polish, undoPolish, submit, registerPrompt,
   voiceName, voiceNote, togglePreview, setVoiceFilter, pickVoice, stopPreview, useCharacter, activeSkill, setSkill,
 } from './state.ts';
@@ -133,7 +133,7 @@ function MediaBlock() {
         {frame('first', '首帧')}
         {traits().lastFrame && (
           <>
-            <button className="frames-swap" type="button" aria-label="互换首帧和尾帧" disabled={!form.frames.first && !form.frames.last} onClick={swapFrames} {...tip('互换首帧和尾帧')}>
+            <button className="icon-btn icon-btn-sm frames-swap" type="button" aria-label="互换首帧和尾帧" disabled={!form.frames.first && !form.frames.last} onClick={swapFrames} {...tip('互换首帧和尾帧')}>
               <Icon name="swap" />
             </button>
             {frame('last', '尾帧（可选）')}
@@ -251,12 +251,27 @@ function VideoToolbar() {
   );
 }
 
+// 图片的画面：模型分几档分辨率时（火山方舟的 Seedream），点开是一块面板，比例和分辨率放在一起；不分档时只是一个比例菜单。
 function ImageRatioButton() {
   const ref = useRef<HTMLButtonElement>(null);
   // 只列当前模型收的比例；它一个都不收就不显示这个入口。
   const ratios = imageRatios().map((value) => ({ value, label: value }));
   const ratio = ratios.find((r) => r.value === composer.studio.image.ratio) || ratios[0];
+  const { resolution } = composer.studio.image;
   if (!ratio) return null;
+  const shape = (
+    <span className="ratio-box">
+      <RatioShape value={ratio.value} />
+    </span>
+  );
+  if (imageSizes().length && resolution) {
+    return (
+      <PanelButton name="frame" label="画面" ariaLabel={`画面：${ratio.label}，${resolution}`} className="frame-popover" panel={() => <ImageFramePanel />}>
+        {shape}
+        <span>{`${ratio.label} · ${resolution}`}</span>
+      </PanelButton>
+    );
+  }
   return (
     <button
       ref={ref}
@@ -268,11 +283,32 @@ function ImageRatioButton() {
       aria-label={`画面比例：${ratio.label}`}
       onClick={() => openMenu(ref.current!, { label: '画面比例', items: ratios.map((r) => ({ ...r, selected: r === ratio })), onSelect: (value) => updateStudio('image', { ratio: value }) })}
     >
-      <span className="ratio-box">
-        <RatioShape value={ratio.value} />
-      </span>
+      {shape}
       <span>{ratio.label}</span>
     </button>
+  );
+}
+
+function ImageFramePanel() {
+  useStore('composer');
+  const { ratio, resolution } = composer.studio.image;
+  const ratios = imageRatios();
+  return (
+    <>
+      <div className="popover-title">画面比例</div>
+      <div className="ratio-grid" role="radiogroup" aria-label="画面比例">
+        {ratios.map((r) => (
+          <button key={r} type="button" className={`ratio-option ${ratio === r ? 'active' : ''}`} role="radio" aria-checked={ratio === r} onClick={() => updateStudio('image', { ratio: r })}>
+            <span className="ratio-box">
+              <RatioShape value={r} />
+            </span>
+            <span>{r}</span>
+          </button>
+        ))}
+      </div>
+      <div className="popover-title">分辨率</div>
+      <Segmented options={imageSizes().map((r) => ({ value: r, label: r }))} value={resolution || ''} onChange={(next) => updateStudio('image', { resolution: next })} />
+    </>
   );
 }
 
@@ -588,7 +624,7 @@ function SendArea() {
   return (
     <>
       {(type.value === 'image' || type.value === 'video') && (
-        <button key="character" className="entry-action-btn" type="button" data-control="character" aria-haspopup="menu" aria-expanded="false" {...tip('带上角色库里一个角色的参考图')} onClick={(e) => pickCharacter(e.currentTarget, type.value as 'image' | 'video')}>
+        <button key="character" className="entry-action-btn" type="button" data-control="character" aria-haspopup="menu" aria-expanded="false" {...tip('用角色的参考图')} onClick={(e) => pickCharacter(e.currentTarget, type.value as 'image' | 'video')}>
           角色
         </button>
       )}
@@ -600,12 +636,11 @@ function SendArea() {
           data-control="skill"
           aria-haspopup="dialog"
           aria-expanded="false"
-          {...tip('选一套写提示词的规则，只写一句话，发送时帮你扩写')}
+          {...tip('按一套规则扩写提示词')}
           onClick={(e) => {
             const layer = openPopover(e.currentTarget, <div className="popover-body">{<SkillPanel close={() => layer?.close()} />}</div>, { className: 'skill-popover', label: '技能', align: 'end' });
           }}
         >
-          <Icon name="wand" />
           技能
         </button>
       )}
@@ -618,7 +653,7 @@ function SendArea() {
             撤销润色
           </button>
         ) : (
-          <button key="polish" className="entry-action-btn" type="button" data-control="polish" {...tip(`让 ${polishModel()} 把提示词补充得更具体`)} disabled={polishing} onClick={polish}>
+          <button key="polish" className="entry-action-btn" type="button" data-control="polish" {...tip('把提示词写得更具体')} disabled={polishing} onClick={polish}>
             {polishing && <span className="spinner" />}
             润色
           </button>

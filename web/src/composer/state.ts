@@ -294,14 +294,24 @@ export function imageRatios(model = composer.studio.image.model) {
   const accepted = state.catalog.imageRatios[model];
   return accepted ? IMAGE_RATIOS.filter((r) => accepted.includes(r)) : IMAGE_RATIOS;
 }
+// 图片能选的分辨率档位。只有火山方舟上有；别的平台不分档，返回空的，这时不显示分辨率。
+export const imageSizes = (model = composer.studio.image.model) => state.catalog.imageSizes[model]?.options || [];
+// 选着的档位这个模型没有（或者还没选过）时，用它默认的那一档；模型不分档时不带档位。
+export function fitImageSize(model: string, resolution?: string) {
+  const sizes = state.catalog.imageSizes[model];
+  if (!sizes) return undefined;
+  return resolution && sizes.options.includes(resolution) ? resolution : sizes.default;
+}
 // 这个图片模型最多收几张参考图（图生图）。只有火山方舟上有；0 是不能带参考图。
 export const imageRefLimit = (model = composer.studio.image.model) => (specDriven() ? state.catalog.imageRefs[model] || 0 : 0);
-// 换了图片模型后，选着的比例它不收就换成它收的第一个；参考图超出它收的张数，多的去掉。
+// 换了图片模型后，选着的比例它不收就换成它收的第一个；分辨率它没有那一档就换成它默认的；参考图超出它收的张数，多的去掉。
 function fitImage() {
   const { image } = composer.studio;
   const ratios = imageRatios();
   if (state.catalog.known && (image.refs?.length || 0) > imageRefLimit()) image.refs = (image.refs || []).slice(0, imageRefLimit());
   if (ratios.length && !ratios.includes(image.ratio)) image.ratio = ratios[0];
+  // 模型列表还没读到时先不动，免得把存着的选择冲掉。
+  if (state.catalog.known) image.resolution = fitImageSize(image.model, image.resolution);
 }
 
 export function updateStudio<T extends 'image' | 'speech' | 'sfx' | 'music'>(type: T, patch: Partial<Studio[T]>) {
@@ -535,7 +545,7 @@ export async function polish() {
     if (composer.studio.type === type && draftPrompt() === original) {
       composer.beforePolish = original;
       setPrompt(text);
-      if (model !== wanted) toast(`${wanted} 暂时用不了，这次是 ${model} 润色的`, 'info', 5000);
+      if (model !== wanted) toast('选的润色模型暂时用不了，这次换了一个', 'info', 5000);
     }
   } catch (err) {
     toast((err as Error).message, 'error', 6000);
