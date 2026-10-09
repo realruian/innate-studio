@@ -14,8 +14,6 @@ import { toast, openModal, openMenu, confirmDialog, copyText } from './ui/layers
 import { enter } from './ui/motion.ts';
 import { setForm, setStudio, useImageForVideo, useVideoForMusic, useVideoAsSource } from './composer/state.ts';
 import { openCharacterEditor } from './characters.tsx';
-import { openSaveTemplate } from './templates.tsx';
-import { thumbOf } from './media.ts';
 import { VIDEO_TASKS, videoFamilyOf, referenceModeLabel, type VideoTask } from '../../shared/models.ts';
 import type { CreateType, HistoryItem, Ref } from './types.ts';
 
@@ -141,14 +139,6 @@ async function score(item: HistoryItem) {
   toast('已选好这段视频，点右下角的发送键生成配乐', 'success');
 }
 
-// 把一条记录的提示词和参数存成模板。封面用它生成的图或视频缩一张小图；配乐没有参数，不能存。
-const canTemplate = (item: HistoryItem) => typeOf(item) !== 'music' && Boolean(item.form || item.prompt);
-async function saveAsTemplate(item: HistoryItem) {
-  const type = typeOf(item) as Exclude<CreateType, 'music'>;
-  const cover = done(item) && item.savedLocally && item.kind !== 'audio' ? await thumbOf(item.mediaUrl!, item.kind) : null;
-  openSaveTemplate({ type, form: item.form || { prompt: item.prompt, model: item.model }, cover });
-}
-
 // 已经存到本机的直接下载，还没存下来的在新标签页打开原地址。
 const downloadProps = (item: HistoryItem): { href?: string; download?: string; target?: string } => (item.savedLocally ? { href: `${item.mediaUrl}?download=1`, download: '' } : { href: item.mediaUrl, target: '_blank' });
 
@@ -162,7 +152,7 @@ function download(item: HistoryItem) {
 }
 
 // 卡片右上角的「更多」。菜单内容按点开那一刻的状态来定：生成中的可以刷新，查询超时的可以再查一次，已完成的可以下载。
-// 已完成的视频可以拿去配乐，已完成的图片可以拿去生成视频、存为角色；带着参数的记录可以存为模板。
+// 已完成的视频可以拿去配乐，已完成的图片可以拿去生成视频、存为角色。
 function openCardMenu(button: HTMLElement, id: string, scope: Scope) {
   const item = state.history.find((i) => i.id === id);
   if (!item) return;
@@ -176,7 +166,6 @@ function openCardMenu(button: HTMLElement, id: string, scope: Scope) {
     edit: () => rework(item, 'edit'),
     animate: () => animate(item),
     character: () => openCharacterEditor({ images: [item.mediaUrl!] }),
-    template: () => saveAsTemplate(item),
     detail: () => openDetail(item.id, scope),
     remove: () => removeItem(item),
   };
@@ -194,7 +183,6 @@ function openCardMenu(button: HTMLElement, id: string, scope: Scope) {
       done(item) && item.kind === 'video' && state.catalog.audio.music && { value: 'score', label: '配乐' },
       done(item) && item.kind === 'image' && { value: 'animate', label: '生成视频' },
       done(item) && item.kind === 'image' && item.savedLocally && { value: 'character', label: '存为角色' },
-      canTemplate(item) && { value: 'template', label: '存为模板' },
       { value: 'detail', label: '详情' },
       { value: 'remove', label: '删除', danger: true },
     ].filter((entry) => Boolean(entry)) as { value: string; label: string; danger?: boolean }[],
@@ -344,7 +332,9 @@ const present = ([, value]: Entry) => value != null && value !== '' && value !==
 // 型号名长（OpenRouter 的还带厂商前缀），挤在一格里会从中间断行，所以「模型」独占一行。
 function paramsOf(item: HistoryItem): Entry[] {
   const p = item.payload || {};
-  if (item.kind === 'image') return [['模型', item.model, true], ['画面比例', p.aspect_ratio]];
+  // 用了技能的记录：提示词是扩写出来的，这里标出用的是哪个技能、用户原来写的是什么。
+  const skill: Entry[] = item.form?.skill ? [['技能', item.form.skill.name], ['你写的', item.form.prompt, true]] : [];
+  if (item.kind === 'image') return [['模型', item.model, true], ['画面比例', p.aspect_ratio], ...skill];
   if (item.tool === 'speech') return [['模型', item.model, true], ['音色', p.voice_name || p.voice_id]];
   if (item.tool === 'sfx') {
     return [['模型', item.model, true], ['时长', p.duration_seconds ? `${p.duration_seconds} 秒` : '由模型决定'], ['和描述的贴合度', p.prompt_influence]];
@@ -363,6 +353,7 @@ function paramsOf(item: HistoryItem): Entry[] {
     ['联网搜索', p.web_search ? '开' : null],
     ['输入模式', p.input_type],
     ['画质超分', describeSuperResolution(p.super_resolution_config), true],
+    ...skill,
   ];
 }
 

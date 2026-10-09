@@ -12,7 +12,7 @@ import { Library } from './assets.tsx';
 import { Persons } from './persons.tsx';
 import { Projects } from './canvas/Projects.tsx';
 import { Characters } from './characters.tsx';
-import { Templates } from './templates.tsx';
+import { Skills } from './skills.tsx';
 import { openSettings } from './settings.tsx';
 import type { ViewId } from './types.ts';
 
@@ -24,7 +24,7 @@ const VIEWS: { id: ViewId; label: string; icon: IconName; size?: number; stroke?
   { id: 'canvas', label: '画布', icon: 'workflow' },
   { id: 'records', label: '创作记录', icon: 'history' },
   { id: 'characters', label: '角色', icon: 'mask' },
-  { id: 'templates', label: '模板', icon: 'grid' },
+  { id: 'skills', label: '技能', icon: 'wand' },
   { id: 'library', label: '素材库', icon: 'folder', feature: 'library' },
   { id: 'persons', label: '真人档案', icon: 'user', feature: 'persons' },
 ];
@@ -97,8 +97,8 @@ export function App() {
         <div className="view" hidden={view !== 'characters'}>
           {opened.has('characters') && <Characters />}
         </div>
-        <div className="view" hidden={view !== 'templates'}>
-          {opened.has('templates') && <Templates />}
+        <div className="view" hidden={view !== 'skills'}>
+          {opened.has('skills') && <Skills />}
         </div>
         <div className="view" hidden={view !== 'library'}>
           {opened.has('library') && <Library />}
