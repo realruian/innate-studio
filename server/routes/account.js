@@ -12,11 +12,13 @@ import { VIDEO_MODELS, IMAGE_MODELS, ARK_TEXT_MODELS } from '../../shared/models
 
 const KEY_SERVICES = { speech: DOUBAO_SPEECH, minimax: MINIMAX, aihubmix: AIHUBMIX, 'aihubmix-manage': AIHUBMIX_MANAGE };
 
-// hosted 是多人模式，这时 user 是登录着的账号（没登录是 null，页面据此显示登录框）。成员看不到 Key 的头尾，只知道配没配。
+// hosted 是多人模式，这时 user 是登录着的账号（没登录是 null，页面据此显示登录框）。
+// 多人模式下 Key 的状态只给管理员；成员只知道服务能不能用（hasKey），接了哪些平台、各自配没配都不给。
 route('GET', /^\/api\/state$/, async ({ user }) => {
   const state = keyState();
-  if (isHosted() && user?.role !== 'admin') for (const info of [state, state.minimax, state.aihubmix, state.aihubmixManage, state.speech, state.billing]) Object.assign(info, { keyHint: '', keySource: '', baseUrl: '' });
-  return { ...state, hosted: isHosted(), user: user ? userView(user) : null };
+  const account = { hosted: isHosted(), user: user ? userView(user) : null };
+  if (isHosted() && user?.role !== 'admin') return { hasKey: Boolean(user) && state.hasKey, ...account };
+  return { ...state, ...account };
 }, 'open');
 
 // service 是 speech 时存的是豆包语音的 Key，是 minimax、aihubmix 时存的是 MiniMax、AiHubMix 的 Key，是 billing 时存的是查余额用的那对 Access Key，其余是火山方舟的 Key。
@@ -62,7 +64,7 @@ route('DELETE', /^\/api\/key$/, async ({ query }) => {
 // 火山方舟没有能用 API Key 读的模型列表，型号登记在 shared/models.ts。
 // 这里只查一次最近的任务列表，用来确认 Key 能用；列表里有哪些任务不关心。账号有没有开通某个模型，要到提交时才知道。
 // models 是视频模型，其余是图片模型和润色用的文本模型。
-route('GET', /^\/api\/models$/, async () => {
+route('GET', /^\/api\/models$/, async ({ user }) => {
   const imageRatios = {};
   const imageRefs = {};
   const imageSizes = {};
@@ -82,7 +84,9 @@ route('GET', /^\/api\/models$/, async () => {
     await callArk('GET', `${VIDEO_TASKS_PATH}?page_num=1&page_size=1`, { timeoutMs: 20000 });
     return { ...base, polishModels: ARK_TEXT_MODELS, source: 'remote' };
   } catch (err) {
-    return { ...base, polishModels: [], source: 'default', error: err.message, errorCode: err.code };
+    // 平台那边的报错只给管理员看。
+    const hidden = isHosted() && user?.role !== 'admin';
+    return { ...base, polishModels: [], source: 'default', error: hidden ? '服务暂不可用，请联系管理员' : err.message, errorCode: err.code };
   }
 });
 

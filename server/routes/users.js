@@ -2,8 +2,7 @@
 
 import { HttpError, readJsonBody, route } from '../http.js';
 import { allUsers, changeOwnPassword, clearedCookie, createUser, findUser, isHosted, login, logout, newPassword, removeUser, sessionCookie, updateUser, userView } from '../auth.js';
-import { spaceOf } from '../spaces.js';
-import { estimateCost } from '../../shared/models.ts';
+import { balanceOf, grantCredits, monthUsed } from '../credits.js';
 
 route('POST', /^\/api\/login$/, async ({ req, res }) => {
   if (!isHosted()) throw new HttpError(400, 'invalid_request', '当前不需要登录');
@@ -26,29 +25,28 @@ route('PUT', /^\/api\/me\/password$/, async ({ req, user }) => {
   return null;
 });
 
-// 一个成员这个月大约花了多少元：把他这个月提交的记录按用量估一遍（估法在 shared/models.ts）。
-function monthSpend(user) {
-  const now = new Date();
-  const since = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
-  let total = 0;
-  for (const item of spaceOf(user).history) if ((item.createdAt || 0) >= since) total += estimateCost(item) || 0;
-  return Math.round(total * 100) / 100;
-}
-
-route('GET', /^\/api\/users$/, async () => ({ items: allUsers().map((user) => ({ ...userView(user), monthSpend: monthSpend(user) })) }), 'admin');
+// credits 是剩多少积分，monthUsed 是这个月花了多少。
+route('GET', /^\/api\/users$/, async () => ({ items: allUsers().map((user) => ({ ...userView(user), credits: balanceOf(user.id), monthUsed: monthUsed(user.id) })) }), 'admin');
 
 // 建账号、重置密码时，密码由这里随机生成，在返回里给管理员看这一次，之后查不到。
+// 这里建的都是成员。管理员只能在服务器的命令行里建（npm run user -- add <名称> --admin），页面上给不了。
 route('POST', /^\/api\/users$/, async ({ req }) => {
-  const { name, role } = await readJsonBody(req);
+  const { name } = await readJsonBody(req);
   const password = newPassword();
-  return { user: userView(createUser({ name, role, password })), password };
+  return { user: userView(createUser({ name, password })), password };
+}, 'admin');
+
+// 给成员发积分；amount 是负数就是扣回。
+route('POST', /^\/api\/users\/([\w-]+)\/credits$/, async ({ req, params, user: me }) => {
+  const { amount } = await readJsonBody(req);
+  return { credits: grantCredits(findUser(params[0]), amount, me) };
 }, 'admin');
 
 route('PUT', /^\/api\/users\/([\w-]+)$/, async ({ req, params }) => {
   const user = findUser(params[0]);
-  const { role, disabled, resetPassword } = await readJsonBody(req);
+  const { disabled, resetPassword } = await readJsonBody(req);
   const password = resetPassword ? newPassword() : undefined;
-  updateUser(user, { role, disabled, password });
+  updateUser(user, { disabled, password });
   return { user: userView(user), ...(password ? { password } : {}) };
 }, 'admin');
 

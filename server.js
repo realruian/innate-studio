@@ -96,13 +96,10 @@ const server = http.createServer((req, res) => {
     if (res.headersSent) return res.end();
     const status = err instanceof HttpError ? err.status : 500;
     if (!(err instanceof HttpError)) console.error(err);
-    sendJson(res, status, {
-      error: {
-        code: err.code || 'internal_error',
-        message: err instanceof HttpError ? err.message : `本地服务出错：${err.message}`,
-        upstream: err.upstream,
-      },
-    });
+    // 多人模式下，平台返回的原始内容、缺哪个平台的 Key，只给管理员看。
+    const hidden = isHosted() && userOf(req)?.role !== 'admin';
+    const message = hidden && err.code === 'no_api_key' ? '该功能暂未开通，请联系管理员' : err instanceof HttpError ? err.message : `本地服务出错：${err.message}`;
+    sendJson(res, status, { error: { code: err.code || 'internal_error', message, upstream: hidden ? undefined : err.upstream } });
   });
 });
 
