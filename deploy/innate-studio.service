@@ -1,0 +1,24 @@
+# systemd 服务：放到 /etc/systemd/system/innate-studio.service
+# 代码在 /opt/innate-studio，数据在 /var/lib/innate-studio，用单独的 innate 用户跑。
+[Unit]
+Description=Innate Studio
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=innate
+WorkingDirectory=/opt/innate-studio
+# 各平台的 Key 写在这个文件里，权限 600，只有 root 读得到。格式见 deploy/env.example。
+EnvironmentFile=/etc/innate-studio.env
+Environment=INNATE_DATA_DIR=/var/lib/innate-studio
+Environment=PORT=5178
+ExecStart=/usr/bin/node server.js
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/innate-studio
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

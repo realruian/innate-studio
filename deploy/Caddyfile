@@ -1,0 +1,10 @@
+# Caddy 反向代理：放到 /etc/caddy/Caddyfile，把域名换成自己的。证书由 Caddy 自动申请和续期。
+# 服务只听本机的 5178，对外的 80、443 由 Caddy 接。
+studio.example.com {
+	encode zstd gzip
+	# 上传的参考素材最大 64 MB。
+	request_body {
+		max_size 70MB
+	}
+	reverse_proxy 127.0.0.1:5178
+}
