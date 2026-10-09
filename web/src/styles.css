@@ -653,10 +653,11 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 .canvas .react-flow__minimap { overflow: hidden; margin-bottom: var(--sp-64); border: 1px solid var(--border-float); border-radius: var(--r-sm); }
 .canvas .react-flow__attribution a { color: var(--text-4); }
 /* 连接点：节点左右两侧各一个带加号的小圆，鼠标移到节点上、选中节点或者正在拉线时才出现 */
-.canvas .react-flow__handle.cnode-port { display: grid; place-items: center; width: 22px; height: 22px; margin-top: var(--sp-12); scale: var(--inv, 1); border: 1px solid var(--text-off); background: var(--bg); color: var(--text-3); opacity: 0; transition: opacity 120ms var(--ease), border-color 120ms var(--ease), color 120ms var(--ease), background-color 120ms var(--ease); }
+/* 加号在屏幕上大小不变、离框边的距离不变、正对框的中线。React Flow 自带的定位是用 transform 往回挪半个身位，那段偏移会被 scale 一起放大缩小，位置就跟着缩放漂；这里把它关掉，直接算出左上角。框的中线在整个节点的中线下面 12（上面那行名字占 24）。 */
+.canvas .react-flow__handle.cnode-port { display: grid; place-items: center; width: 22px; height: 22px; top: calc(50% + 1px); transform: none; scale: var(--inv, 1); border: 1px solid var(--text-off); background: var(--bg); color: var(--text-3); opacity: 0; transition: opacity 120ms var(--ease), border-color 120ms var(--ease), color 120ms var(--ease), background-color 120ms var(--ease); }
 /* 加号在屏幕上大小不变，离框的距离也按屏幕上的 22 像素算 */
-.canvas .react-flow__handle-left.cnode-port { left: calc(-22px * var(--inv, 1)); }
-.canvas .react-flow__handle-right.cnode-port { right: calc(-22px * var(--inv, 1)); }
+.canvas .react-flow__handle-left.cnode-port { left: calc(-22px * var(--inv, 1) - 11px); }
+.canvas .react-flow__handle-right.cnode-port { right: calc(-22px * var(--inv, 1) - 11px); }
 .cnode-port > .icon { pointer-events: none; }
 .cnode.selected .cnode-port, .canvas:has(.react-flow__connectionline) .cnode-port { opacity: 1; }
 @media (hover: hover) { .react-flow__node:hover .cnode-port { opacity: 1; } .canvas .cnode-port:hover { border-color: var(--text); color: var(--text); } }
@@ -700,7 +701,7 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 /* 节点：上面一行名字，下面一个框放内容。所有节点的框一样高，宽度由内容的比例定（写在节点上）。框的底色和输入框一样，选中时边线变亮 */
 .cnode { position: relative; display: flex; flex-direction: column; gap: var(--sp-8); }
 /* 名字在屏幕上大小不变：以左下角为准把画布的缩放抵消掉 */
-.cnode-title { display: flex; align-items: center; align-self: flex-start; gap: var(--sp-4); padding: 0 var(--sp-2); color: var(--text-3); font-size: var(--text-caption); line-height: var(--lh-snug); white-space: nowrap; cursor: grab; transform-origin: left bottom; scale: var(--inv, 1); }
+.cnode-title { display: flex; align-items: center; align-self: flex-start; gap: var(--sp-4); padding: 0 var(--sp-2); color: var(--text-3); font-size: var(--text-caption); line-height: var(--lh-snug); white-space: nowrap; cursor: grab; transform-origin: left bottom; scale: var(--inv, 1); translate: 0 calc(var(--sp-8) * (1 - var(--inv, 1))); }
 .cnode-box { display: grid; height: 240px; overflow: hidden; background: var(--surface-1); border: 1px solid var(--border-float); border-radius: var(--r-md); }
 @media (hover: hover) { .cnode:hover .cnode-box { border-color: var(--border-strong); } }
 .cnode.selected .cnode-box { border-color: var(--text-2); }

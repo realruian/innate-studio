@@ -16,7 +16,7 @@ import { openMenu, toast } from '../ui/layers.tsx';
 import { VideoPlayer, AudioPlayer } from '../player.tsx';
 import { openDetail } from '../history.tsx';
 import type { Kind } from '../types.ts';
-import { BOX_HEIGHT, NODE_LABELS, ROLE_LABELS, canLink, nodeWidth, joinPrompt, linkLabel, type AudioData, type FrameRole, type ImageData, type LinkData, type NodeKind, type TextData, type VideoData } from './model.ts';
+import { BOX_HEIGHT, NODE_LABELS, ROLE_LABELS, TITLE_ROOM, canLink, nodeWidth, joinPrompt, linkLabel, type AudioData, type FrameRole, type ImageData, type LinkData, type NodeKind, type TextData, type VideoData } from './model.ts';
 import { fitVideo, generate, outputOf, recordOf } from './run.ts';
 
 // 画布页交给节点用的几件事。snap：会改动画布结构的操作，动手之前调一下，撤销时回到这一刻。
@@ -43,6 +43,8 @@ function useAlone(selected?: boolean) {
 function Frame({ id, kind, selected, width, tools, panel, children }: { id: string; kind: NodeKind; selected?: boolean; width: number; tools?: ReactNode; panel: ReactNode; children: ReactNode }) {
   const flow = useReactFlow();
   const alone = useAlone(selected);
+  // 名字那一行在屏幕上高度不变，节点给它留的位置却跟着缩放变。操作条按屏幕上的高度让开，缩小时才不会压住名字。
+  const zoom = useFlowStore((s) => s.transform[2]);
   // 正从别的节点拉一条线过来：这个节点接得住，就把整个框变成落点，不用对准小加号；接不住就暗下去。
   // 从右边的加号拉出来的线要找下游，从左边的加号拉出来的要找上游。
   const link = useConnection();
@@ -55,7 +57,7 @@ function Frame({ id, kind, selected, width, tools, panel, children }: { id: stri
   return (
     <div className={`cnode cnode-${kind} ${selected ? 'selected' : ''} ${other && !fits ? 'is-dimmed' : ''}`} style={{ width }}>
       {/* 操作条和输入面板画在画布的缩放之外，所以大小不变；位置仍然贴着节点。 */}
-      <NodeToolbar isVisible={alone} position={Position.Top} offset={8}>
+      <NodeToolbar isVisible={alone} position={Position.Top} offset={8 + TITLE_ROOM * (1 - zoom)}>
         <div className="cnode-tools">
           {tools}
           <button className="cnode-btn" type="button" {...tip('删除节点')} aria-label="删除节点" onClick={() => flow.deleteElements({ nodes: [{ id }] })}>
@@ -563,7 +565,9 @@ export function LinkEdge({ id, source, target, sourceX, sourceY, targetX, target
 }
 
 // 正在拉的那条线：一直跟着鼠标走，拖到节点上也不提前吸过去，松手才连上。能不能连，看那个节点有没有浮起来。
+// 这条线画在画布坐标里，而 React Flow 给的 pointer 是屏幕上的位置，要按当前的平移和缩放换算过来，不然只有 100%、没平移过的时候才对得上。
 export function DragLine({ fromX, fromY, fromPosition, pointer }: ConnectionLineComponentProps) {
-  const [path] = getBezierPath({ sourceX: fromX, sourceY: fromY, sourcePosition: fromPosition, targetX: pointer.x, targetY: pointer.y, targetPosition: fromPosition === Position.Right ? Position.Left : Position.Right });
+  const [x, y, zoom] = useFlowStore((s) => s.transform);
+  const [path] = getBezierPath({ sourceX: fromX, sourceY: fromY, sourcePosition: fromPosition, targetX: (pointer.x - x) / zoom, targetY: (pointer.y - y) / zoom, targetPosition: fromPosition === Position.Right ? Position.Left : Position.Right });
   return <path d={path} fill="none" className="react-flow__connection-path" />;
 }
