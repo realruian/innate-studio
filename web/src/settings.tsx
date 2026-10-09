@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { api, state, useStore, loadApp, loadModels, switchProvider, polishModel, setPolishModel } from './store.ts';
-import { PROVIDERS, type ProviderId } from '../../shared/models.ts';
+import { PROVIDERS, DOUBAO_SPEECH, type ProviderId } from '../../shared/models.ts';
 import { currentTheme, setTheme } from './theme.ts';
 import { Segmented, FormRow, Dropdown } from './ui/controls.tsx';
 import { toast, openModal, confirmDialog } from './ui/layers.tsx';
@@ -163,7 +163,7 @@ function Settings() {
           </div>
         </FormRow>
       </div>
-      {provider === 'ark' && <p className="small muted">火山方舟是字节官方的接口，能生成 Seedance 视频和 Seedream 图片，也能用豆包的文本模型润色提示词。Seedance 2.0、2.5 要账户余额大于 200 元才能开通。语音、音效、配乐、素材库、真人档案这里没有，延长和编辑视频只在 Flatkey 上。</p>}
+      {provider === 'ark' && <p className="small muted">火山方舟是字节官方的接口，能生成 Seedance 视频和 Seedream 图片，也能用豆包的文本模型润色提示词。Seedance 2.0、2.5 要账户余额大于 200 元才能开通。语音用的是另一个产品「豆包语音」，Key 在最下面单独填。音效、配乐、素材库、真人档案这里没有，延长和编辑视频只在 Flatkey 上。</p>}
       <div className="section-title">{platform} API Key</div>
       <div className="form-section">
         <FormRow label="当前 Key">
@@ -212,6 +212,94 @@ function Settings() {
         </button>
       </div>
       {test.text && <div className={`small ${test.tone}`}>{test.text}</div>}
+      {provider === 'ark' && <SpeechKey />}
+    </>
+  );
+}
+
+// 豆包语音的 Key：火山方舟这条线上的语音用它。它和方舟不是一个产品，Key 要另外创建、另外填。
+function SpeechKey() {
+  useStore('app');
+  const [masked, setMasked] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const input = useRef<HTMLInputElement>(null);
+  const { hasKey, keyHint, keySource } = state.app.speech;
+  const fromEnv = keySource === 'env';
+  const { label, keysUrl } = DOUBAO_SPEECH;
+
+  async function save() {
+    const value = input.current!.value.trim();
+    if (!value) return toast(`请粘贴${label}的 API Key`, 'error');
+    if (/[^\x21-\x7e]/.test(value)) {
+      setMasked(false);
+      return toast('这不像是 API Key：里面有中文或空格，可能是剪贴板里的其他内容。', 'error', 8000);
+    }
+    setSaving(true);
+    try {
+      state.app = await api('PUT', '/api/key', { apiKey: value, service: 'speech' });
+      input.current!.value = '';
+      setMasked(true);
+      await loadApp();
+      toast(`${label}的 API Key 已保存`, 'success');
+    } catch (err) {
+      toast(message(err), 'error', 6000);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function remove() {
+    const ok = await confirmDialog({ title: `清除已保存的${label} API Key？`, message: '清除后需要重新填写才能生成语音。', okText: '清除', danger: true });
+    if (!ok) return;
+    try {
+      await api('DELETE', '/api/key?service=speech');
+      await loadApp();
+      toast('已清除', 'success');
+    } catch (err) {
+      toast(message(err), 'error');
+    }
+  }
+
+  return (
+    <>
+      <div className="section-title">{label} API Key（生成语音用）</div>
+      <div className="form-section">
+        <FormRow label="当前 Key">
+          <span className={hasKey ? 'mono' : 'warn-text'}>{hasKey ? `${keyHint}${fromEnv ? '（来自环境变量）' : ''}` : '还没有设置'}</span>
+        </FormRow>
+      </div>
+      <div className="row">
+        <input
+          ref={input}
+          className={`input mono${masked ? ' masked' : ''}`}
+          type="text"
+          placeholder={`粘贴${label}的 API Key`}
+          autoComplete="off"
+          data-1p-ignore=""
+          data-lpignore="true"
+          aria-label={`${label} API Key`}
+          disabled={fromEnv}
+          onKeyDown={(e) => e.key === 'Enter' && save()}
+        />
+        <button className="btn" type="button" disabled={fromEnv} onClick={() => setMasked(!masked)}>
+          {masked ? '显示' : '隐藏'}
+        </button>
+        <button className="btn btn-primary" type="button" disabled={fromEnv || saving} onClick={save}>
+          保存
+        </button>
+      </div>
+      <p className="small muted">
+        不生成语音可以不填。{label}是火山引擎的另一个产品，要先开通「语音合成大模型」，再在{' '}
+        <a href={keysUrl} target="_blank" rel="noopener">
+          {label}控制台
+        </a>{' '}
+        里创建 Key；它和火山方舟的 Key 不通用。
+      </p>
+      <div className="row wrap">
+        <button className="btn" type="button" hidden={keySource !== 'file'} onClick={remove}>
+          清除已保存的 Key
+        </button>
+      </div>
     </>
   );
 }

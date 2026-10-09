@@ -182,4 +182,6 @@ export interface AppInfo extends KeyInfo {
   provider: ProviderId;
   features: Features;
   providers: (KeyInfo & { id: ProviderId; label: string })[];
+  // 豆包语音那个 Key 的状态（火山方舟这条线上的语音用）。
+  speech: KeyInfo;
 }

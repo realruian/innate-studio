@@ -453,7 +453,7 @@ export async function ensureVoices() {
 }
 
 const VOICE_GENDERS: Record<string, string> = { male: '男声', female: '女声', neutral: '中性' };
-const VOICE_LANGUAGES: Record<string, string> = { zh: '中文', en: '英语' };
+const VOICE_LANGUAGES: Record<string, string> = { zh: '中文', en: '英语', ja: '日语', ko: '韩语', es: '西班牙语', pt: '葡萄牙语', fr: '法语', de: '德语', it: '意大利语', ru: '俄语', ar: '阿拉伯语', id: '印尼语', th: '泰语', vi: '越南语', ms: '马来语', fil: '菲律宾语' };
 // 音色的名字是「名字 - 一句描述」，前半截当名字，后半截当附注。
 export const voiceName = (voice: Voice) => voice.name.split(/\s[-–]\s/)[0];
 export const voiceNote = (voice: Voice) => [VOICE_GENDERS[voice.gender], VOICE_LANGUAGES[voice.language] || voice.language.toUpperCase(), voice.name.split(/\s[-–]\s/)[1]].filter(Boolean).join(' · ');

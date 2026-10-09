@@ -10,7 +10,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startMock as startFlatkey } from './mock-flatkey.js';
-import { startMock as startArk, MOCK_ARK_KEY } from './mock-ark.js';
+import { startMock as startArk, MOCK_ARK_KEY, MOCK_SPEECH_KEY } from './mock-ark.js';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 let flatkey;
@@ -76,7 +76,7 @@ before(async () => {
     cwd: root,
     stdio: 'ignore',
     // Key 的环境变量都置空：即使本机设置了真实 Key，测试也绝不会用到它。
-    env: { ...process.env, PORT: String(port), FLATKEY_BASE_URL: flatkey.url, ARK_BASE_URL: ark.url, SEEDANCE_DATA_DIR: dataDir, FLATKEY_API_KEY: '', ARK_API_KEY: '' },
+    env: { ...process.env, PORT: String(port), FLATKEY_BASE_URL: flatkey.url, ARK_BASE_URL: ark.url, DOUBAO_SPEECH_BASE_URL: ark.url, SEEDANCE_DATA_DIR: dataDir, DOUBAO_SPEECH_API_KEY: '', FLATKEY_API_KEY: '', ARK_API_KEY: '' },
   });
   await waitFor(async () => (await fetch(`${base}/api/state`)).ok, '服务启动');
 });
@@ -88,7 +88,7 @@ after(async () => {
   if (dataDir) fs.rmSync(dataDir, { recursive: true, force: true });
 });
 
-test('切到火山方舟：Key 单独存，没有固定开头也能存；能做的只有视频和图片', async () => {
+test('切到火山方舟：Key 单独存，没有固定开头也能存；能做的是视频、图片和语音', async () => {
   const saved = (await call('PUT', '/api/key', { apiKey: MOCK_ARK_KEY, provider: 'ark' })).data;
   assert.equal(saved.provider, 'flatkey');
   assert.deepEqual(saved.providers.map((p) => [p.id, p.hasKey]), [['flatkey', false], ['ark', true]]);
@@ -97,7 +97,7 @@ test('切到火山方舟：Key 单独存，没有固定开头也能存；能做�
   const switched = (await call('PUT', '/api/provider', { provider: 'ark' })).data;
   assert.equal(switched.provider, 'ark');
   assert.equal(switched.baseUrl, ark.url);
-  assert.deepEqual(switched.features, { image: true, speech: false, sfx: false, music: false, library: false, persons: false });
+  assert.deepEqual(switched.features, { image: true, speech: true, sfx: false, music: false, library: false, persons: false });
 
   const bad = await call('PUT', '/api/key', { apiKey: '中文 key', provider: 'ark' });
   assert.equal(bad.status, 400);
@@ -115,7 +115,7 @@ test('模型列表：型号和各自支持什么是登记好的，连一次接�
   assert.equal(data.imageRefs[IMAGE], 10);
   assert.equal(data.imageRatios[IMAGE].includes('16:9'), true);
   assert.deepEqual(data.polishModels, ['doubao-seed-2-1-lite-260915', 'doubao-seed-2-1-turbo-260628', 'doubao-seed-2-1-pro-260915']);
-  assert.deepEqual(data.audio, { speech: false, sfx: false, music: false });
+  assert.deepEqual(data.audio, { speech: true, sfx: false, music: false });
   assert.equal(ark.log.some((entry) => entry.method === 'GET' && entry.pathname === '/contents/generations/tasks' && entry.authed), true);
 });
 
@@ -231,9 +231,44 @@ test('润色：用豆包的文本模型，关掉深度思考；Seedance 的型�
   assert.equal((await call('POST', '/api/polish', { text: '一只猫', kind: 'video', model: 'claude-haiku-5-5' })).status, 400);
 });
 
-test('方舟上没有的功能被拒绝：语音、音效、配乐、素材库', async () => {
-  assert.deepEqual((await call('GET', '/api/voices')).data, { items: [] });
-  for (const [method, url, body] of [['POST', '/api/audio/speech', { text: '你好', voiceId: 'sarah' }], ['POST', '/api/audio/sfx', { text: '雨声' }], ['POST', '/api/audio/music', { video: '/media/videos/a.mp4', duration: 5 }], ['POST', '/api/assets', {}]]) {
+test('语音：用豆包语音，Key 另外存；音色是登记好的；音频分段返回，拼起来存成 MP3', async () => {
+  const voices = (await call('GET', '/api/voices')).data.items;
+  assert.equal(voices.length > 200, true);
+  assert.deepEqual(voices[0], { id: 'zh_female_vv_uranus_bigtts', name: 'Vivi 2.0 - 通用场景', gender: 'female', language: 'zh', accent: '', previewUrl: '' });
+  assert.equal(voices.some((v) => v.language === 'en' && v.gender === 'male'), true);
+  // 墨西哥西语的音色 ID 以 mx 开头，语言记成 es。
+  assert.equal(voices.some((v) => v.language === 'mx'), false);
+
+  // 没填豆包语音的 Key：不发请求，提示去设置里填。方舟的 Key 不能代替它。
+  const noKey = await call('POST', '/api/audio/speech', { text: '你好', voiceId: 'zh_female_vv_uranus_bigtts' });
+  assert.equal(noKey.status, 401);
+  assert.match(noKey.data.error.message, /豆包语音的 API Key/);
+
+  const saved = (await call('PUT', '/api/key', { apiKey: MOCK_SPEECH_KEY, service: 'speech' })).data;
+  assert.equal(saved.speech.hasKey, true);
+  assert.equal(saved.provider, 'ark');
+  assert.equal(saved.hasKey, true);
+  assert.equal(JSON.stringify(saved).includes(MOCK_SPEECH_KEY), false);
+
+  const created = await call('POST', '/api/audio/speech', { text: '你好，世界', voiceId: 'zh_female_vv_uranus_bigtts', voiceName: 'Vivi 2.0' });
+  assert.equal(created.status, 200);
+  assert.equal(created.data.model, 'seed-tts-2.0');
+  const done = await waitFor(async () => (await call('GET', '/api/history')).data.items.find((i) => i.id === created.data.id && i.status === 'completed'), '语音生成完');
+  assert.match(done.mediaUrl, /^\/media\/audio\/aud_\w+\.mp3$/);
+  assert.equal(await (await fetch(base + done.mediaUrl)).text(), 'mock mp3 zh_female_vv_uranus_bigtts 你好，世界');
+  const request = sent('/api/v3/tts/unidirectional').at(-1);
+  assert.deepEqual(request, { req_params: { text: '你好，世界', speaker: 'zh_female_vv_uranus_bigtts', audio_params: { format: 'mp3', sample_rate: 24000 } } });
+
+  const failed = await call('POST', '/api/audio/speech', { text: 'FAIL', voiceId: 'zh_female_vv_uranus_bigtts' });
+  const item = await waitFor(async () => (await call('GET', '/api/history')).data.items.find((i) => i.id === failed.data.id && i.status === 'failed'), '语音失败');
+  assert.match(item.error.message, /豆包语音返回（200）：synthesis failed/);
+
+  assert.equal((await call('DELETE', '/api/key?service=speech')).data.speech.hasKey, false);
+  assert.equal((await call('GET', '/api/state')).data.hasKey, true);
+});
+
+test('方舟上没有的功能被拒绝：音效、配乐、素材库', async () => {
+  for (const [method, url, body] of [['POST', '/api/audio/sfx', { text: '雨声' }], ['POST', '/api/audio/music', { video: '/media/videos/a.mp4', duration: 5 }], ['POST', '/api/assets', {}]]) {
     const res = await call(method, url, body);
     assert.equal(res.status, 400, url);
     assert.equal(res.data.error.code, 'not_on_provider', url);

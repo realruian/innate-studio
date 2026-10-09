@@ -63,7 +63,7 @@ export const state = {
   createType: 'video' as CreateType,
   // 记录页的类型筛选。放在这里是因为创作页的「查看全部」要带着类型过去。
   recordsType: 'all' as CreateType | 'all',
-  app: { hasKey: false, keyHint: '', keySource: '', baseUrl: '', provider: 'flatkey', features: PROVIDERS.flatkey.features, providers: [] } as AppInfo,
+  app: { hasKey: false, keyHint: '', keySource: '', baseUrl: '', provider: 'flatkey', features: PROVIDERS.flatkey.features, providers: [], speech: { hasKey: false, keyHint: '', keySource: '', baseUrl: '' } } as AppInfo,
   models: ['seedance-2.0', 'seedance-2.0-fast'] as string[],
   // 火山方舟的模型各自支持什么（分辨率、比例、时长、首尾帧）。Flatkey 的模型登记在 shared/models.ts，这里是空的。
   videoSpecs: {} as Record<string, VideoSpec>,

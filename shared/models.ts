@@ -7,7 +7,7 @@ export type VideoMode = 'text' | 'frames' | 'reference';
 
 // ---------- 平台 ----------
 // 应用可以接两个平台，在设置里切换。Flatkey 是原来的那套；
-// 火山方舟是字节官方的接口，只有字节自己的模型：Seedance 视频、Seedream 图片，润色用豆包的文本模型，没有音频、素材库和真人档案。
+// 火山方舟是字节官方的接口，只有字节自己的模型：Seedance 视频、Seedream 图片，润色用豆包的文本模型；语音用豆包语音（要另填一个 Key）；没有音效、配乐、素材库和真人档案。
 // features 是这个平台上能用的东西，页面按它决定显示哪些创作类型和页面。
 // keyPrefix 是这个平台的 Key 开头的那几个字符，用来提醒用户别贴错；火山方舟的 Key 没有固定的开头，留空。
 
@@ -32,9 +32,12 @@ export const PROVIDERS: Record<ProviderId, { label: string; keyPrefix: string; k
     label: '火山方舟',
     keyPrefix: '',
     keysUrl: 'https://ark.volcengine.com/region:cn-beijing/apikey',
-    features: { image: true, speech: false, sfx: false, music: false, library: false, persons: false },
+    features: { image: true, speech: true, sfx: false, music: false, library: false, persons: false },
   },
 };
+
+// 火山方舟上的语音用的是火山引擎的另一个产品「豆包语音」，接口地址和 Key 都和方舟不是一套，所以要另填一个 Key。
+export const DOUBAO_SPEECH = { label: '豆包语音', keysUrl: 'https://console.volcengine.com/speech/new/setting/apikeys' };
 export const isProvider = (id: unknown): id is ProviderId => typeof id === 'string' && Object.hasOwn(PROVIDERS, id);
 
 // ---------- 视频模型属于哪一族 ----------

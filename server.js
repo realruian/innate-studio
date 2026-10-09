@@ -2,7 +2,7 @@
 
 // Innate Studio 本地服务：托管页面、保管 API Key、转发请求给模型平台、轮询任务并保存历史。
 // 平台有两个，在设置里切换：Flatkey 能生成视频（Seedance、Grok）、图片、音频（语音、音效、配乐）；
-// 火山方舟是字节官方的接口，能生成视频（Seedance）和图片（Seedream）。两边都能润色提示词。
+// 火山方舟是字节官方的接口，能生成视频（Seedance）和图片（Seedream），语音走火山引擎的另一个产品「豆包语音」。两边都能润色提示词。
 // 服务本身不依赖第三方包。页面是 web/ 里的 React 源码，用 npm run build 构建到 web/dist 之后由这里托管。
 
 import http from 'node:http';
@@ -14,6 +14,7 @@ import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
 import { videoFamilyOf, polishGuide, POLISH_KINDS, PROVIDERS, isProvider, ARK_VIDEO_MODELS, ARK_IMAGE_MODELS, ARK_TEXT_MODELS } from './shared/models.ts';
 import { OFFICIAL_SKILLS } from './shared/skills.ts';
+import { doubaoVoices } from './shared/doubao-voices.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -26,6 +27,8 @@ const UPSTREAMS = {
   // 火山方舟的地址里已经带着版本号，所以它的接口路径前面没有 /v1。
   ark: { baseUrl: trimSlash(process.env.ARK_BASE_URL || 'https://ark.cn-beijing.volces.com/api/v3'), envKey: 'ARK_API_KEY', configKey: 'arkKey' },
 };
+// 豆包语音：火山方舟这条线上的语音用它。它是另一个产品，地址和 Key 都和方舟不是一套。seed-tts-2.0 是「豆包语音合成模型 2.0」。
+const DOUBAO_SPEECH = { baseUrl: trimSlash(process.env.DOUBAO_SPEECH_BASE_URL || 'https://openspeech.bytedance.com'), envKey: 'DOUBAO_SPEECH_API_KEY', configKey: 'doubaoSpeechKey', model: 'seed-tts-2.0' };
 const DATA_DIR = path.resolve(process.env.SEEDANCE_DATA_DIR || path.join(__dirname, 'data'));
 // 生成结果按类型分目录存；uploads 放的是从本机选来当输入的文件（Grok 的首帧、要配乐的视频）。
 const MEDIA_DIRS = { video: 'videos', image: 'images', audio: 'audio' };
@@ -111,17 +114,15 @@ function apiKey(provider = currentProvider()) {
   return process.env[envKey] || config[configKey] || '';
 }
 
-function providerState(provider) {
-  const key = apiKey(provider);
-  return {
-    hasKey: Boolean(key),
-    keyHint: key ? `${key.slice(0, 6)}…${key.slice(-4)}` : '',
-    keySource: process.env[UPSTREAMS[provider].envKey] ? 'env' : key ? 'file' : '',
-    baseUrl: UPSTREAMS[provider].baseUrl,
-  };
+// 一个 Key 的状态：有没有、露出头尾几个字符给用户核对、是从环境变量来的还是存在文件里的。
+function keyInfo({ envKey, configKey, baseUrl }) {
+  const key = process.env[envKey] || config[configKey] || '';
+  return { hasKey: Boolean(key), keyHint: key ? `${key.slice(0, 6)}…${key.slice(-4)}` : '', keySource: process.env[envKey] ? 'env' : key ? 'file' : '', baseUrl };
 }
+const providerState = (provider) => keyInfo(UPSTREAMS[provider]);
+const speechKey = () => process.env[DOUBAO_SPEECH.envKey] || config[DOUBAO_SPEECH.configKey] || '';
 
-// 最外面几项说的是当前平台；providers 里是每个平台各自的 Key 状态，设置页用。
+// 最外面几项说的是当前平台；providers 里是每个平台各自的 Key 状态，speech 是豆包语音那个 Key 的状态，设置页用。
 function keyState() {
   const provider = currentProvider();
   return {
@@ -129,6 +130,7 @@ function keyState() {
     provider,
     features: PROVIDERS[provider].features,
     providers: Object.keys(UPSTREAMS).map((id) => ({ id, label: labelOf(id), ...providerState(id) })),
+    speech: keyInfo(DOUBAO_SPEECH),
   };
 }
 
@@ -670,20 +672,22 @@ function providerIn(value) {
   return value;
 }
 
+// service 是 speech 时存的是豆包语音的 Key，其余是某个平台的 Key。
 route('PUT', /^\/api\/key$/, async ({ req }) => {
-  const { apiKey: key, provider: wanted } = await readJsonBody(req);
-  const provider = providerIn(wanted);
+  const { apiKey: key, provider: wanted, service } = await readJsonBody(req);
+  const speech = service === 'speech';
+  const provider = speech ? null : providerIn(wanted);
   const value = String(key || '').trim();
   if (!value) throw new HttpError(400, 'invalid_key', 'API Key 不能为空');
-  if (!isUsableKey(value)) throw new HttpError(400, 'invalid_key', badKeyMessage(provider));
-  config[UPSTREAMS[provider].configKey] = value;
+  if (!isUsableKey(value)) throw new HttpError(400, 'invalid_key', speech ? '这不像是 API Key：里面有中文、空格或其他不能用的字符。请到豆包语音的控制台复制那一串，再粘贴进来。' : badKeyMessage(provider));
+  config[speech ? DOUBAO_SPEECH.configKey : UPSTREAMS[provider].configKey] = value;
   saveConfig();
   forgetAccount();
   return keyState();
 });
 
 route('DELETE', /^\/api\/key$/, async ({ query }) => {
-  delete config[UPSTREAMS[providerIn(query.get('provider'))].configKey];
+  delete config[query.get('service') === 'speech' ? DOUBAO_SPEECH.configKey : UPSTREAMS[providerIn(query.get('provider'))].configKey];
   saveConfig();
   forgetAccount();
   return keyState();
@@ -708,7 +712,8 @@ async function arkModels() {
     imageRatios[id] = Object.keys(sizes);
     imageRefs[id] = refs;
   }
-  const rest = { imageModels: Object.keys(ARK_IMAGE_MODELS), imageRatios, imageRefs, audio: { speech: false, sfx: false, music: false } };
+  // 语音一直列着：它用的是豆包语音的 Key，没填的话生成时会提示去设置里填。
+  const rest = { imageModels: Object.keys(ARK_IMAGE_MODELS), imageRatios, imageRefs, audio: { speech: true, sfx: false, music: false } };
   try {
     await callUpstream('GET', `${VIDEO_TASKS_PATH.ark}?page_num=1&page_size=1`, { timeoutMs: 20000, provider: 'ark' });
     polishAvailable = POLISH_MODELS.ark;
@@ -915,8 +920,8 @@ async function arkImages({ model, prompt, n, aspect_ratio, input_references }) {
 let voices = null;
 
 route('GET', /^\/api\/voices$/, async () => {
-  // 火山方舟这条线还没有接语音。
-  if (currentProvider() === 'ark') return { items: [] };
+  // 火山方舟这条线用豆包语音，音色是登记好的，不用去读。
+  if (currentProvider() === 'ark') return { items: doubaoVoices() };
   if (!voices) {
     const { data } = await callUpstream('GET', '/v1/voices', { timeoutMs: 20000 });
     voices = (Array.isArray(data?.voices) ? data.voices : listOf(data))
@@ -938,24 +943,82 @@ route('POST', /^\/api\/audio\/speech$/, async ({ req }) => {
   const script = String(text || '').trim();
   if (!script) throw new HttpError(400, 'invalid_request', '请填写要朗读的文字');
   if (!/^[\w-]+$/.test(voiceId || '')) throw new HttpError(400, 'invalid_request', '请选择音色');
-  requireKey();
   const provider = currentProvider();
-  if (provider === 'ark') throw new HttpError(400, 'not_on_provider', '火山方舟这条线还没有接语音，可以在「设置」里切换到别的平台');
+  const doubao = provider === 'ark';
+  if (doubao && !speechKey()) throw new HttpError(401, 'no_api_key', '还没有设置豆包语音的 API Key。语音用的是火山引擎的另一个产品，请先在「设置」里填它的 Key。');
+  if (!doubao) requireKey();
   const item = newItem({
     id: newId('aud'),
     kind: 'audio',
     tool: 'speech',
-    model: SPEECH_MODEL,
+    model: doubao ? DOUBAO_SPEECH.model : SPEECH_MODEL,
     prompt: script,
     payload: { voice_id: voiceId, voice_name: String(voiceName || '') },
     form: form || null,
   });
   runDirect([item], async () => {
-    const { data } = await callUpstream('POST', `/v1/text-to-speech/${voiceId}`, { json: { text: script, model_id: SPEECH_MODEL }, binary: true, timeoutMs: 3 * 60 * 1000, provider });
+    const data = doubao ? await doubaoSpeech(script, voiceId) : (await callUpstream('POST', `/v1/text-to-speech/${voiceId}`, { json: { text: script, model_id: SPEECH_MODEL }, binary: true, timeoutMs: 3 * 60 * 1000, provider })).data;
     finishItem(item, data, 'mp3');
   });
   return historyView(item);
 });
+
+// 豆包语音合成（官方文档《单向流式语音合成(HTTP)》）。一次把文字发过去，音频分成很多段返回：
+// 响应体是一个接一个的 JSON，每个里面的 data 是一段 base64 的 MP3，按顺序拼起来就是整段音频。
+// code 是 0 表示这一段正常，20000000 是结束的标记，其余都是出错。
+const DOUBAO_OK = new Set([0, 20000000]);
+async function doubaoSpeech(text, speaker) {
+  let res;
+  try {
+    res = await fetch(`${DOUBAO_SPEECH.baseUrl}/api/v3/tts/unidirectional`, {
+      method: 'POST',
+      headers: { 'X-Api-Key': speechKey(), 'X-Api-Resource-Id': DOUBAO_SPEECH.model, 'X-Api-Request-Id': crypto.randomUUID(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ req_params: { text, speaker, audio_params: { format: 'mp3', sample_rate: 24000 } } }),
+      signal: AbortSignal.timeout(3 * 60 * 1000),
+    });
+  } catch (err) {
+    throw new HttpError(502, 'upstream_unreachable', `连接豆包语音失败：${err.name === 'TimeoutError' ? '请求超时' : err.cause?.code || err.message}`);
+  }
+  const parts = jsonSequence(await res.text());
+  const failed = parts.find((part) => !DOUBAO_OK.has(Number(part?.code ?? 0)));
+  if (!res.ok || failed) {
+    const reason = failed?.message || parts[0]?.message || parts[0]?.error?.message || `HTTP ${res.status}`;
+    const hint = res.status === 401 || res.status === 403 ? '豆包语音的 API Key 无效，或者账号还没有开通语音合成。' : '';
+    throw new HttpError(res.ok ? 502 : res.status, String(failed?.code || `http_${res.status}`), `${hint}豆包语音返回（${res.status}）：${reason}`);
+  }
+  const audio = Buffer.concat(parts.filter((part) => typeof part?.data === 'string' && part.data).map((part) => Buffer.from(part.data, 'base64')));
+  if (!audio.length) throw new HttpError(502, 'bad_upstream_response', '豆包语音没有返回音频');
+  return audio;
+}
+
+// 把一串首尾相接的 JSON 拆开。它们之间可能有换行，也可能没有，所以按花括号配对来切，字符串里的花括号不算。
+function jsonSequence(text) {
+  const out = [];
+  let depth = 0;
+  let start = -1;
+  let inString = false;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (inString) {
+      if (ch === '\\') i += 1;
+      else if (ch === '"') inString = false;
+    } else if (ch === '"') inString = true;
+    else if (ch === '{') {
+      if (depth === 0) start = i;
+      depth += 1;
+    } else if (ch === '}' && depth > 0) {
+      depth -= 1;
+      if (depth === 0) {
+        try {
+          out.push(JSON.parse(text.slice(start, i + 1)));
+        } catch {
+          /* 这一段不是完整的 JSON，跳过 */
+        }
+      }
+    }
+  }
+  return out;
+}
 
 route('POST', /^\/api\/audio\/sfx$/, async ({ req }) => {
   const { text, duration, influence, form } = await readJsonBody(req);

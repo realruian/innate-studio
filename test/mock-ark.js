@@ -7,11 +7,13 @@
 // - 提示词里带 FAIL：任务变成 failed
 // - 其余任务按时间走 queued → running → succeeded
 // - 生图的提示词里带 FAIL：返回 500
+// - 豆包语音（另一个产品，另一个 Key）：音频分两段返回，文字里带 FAIL 时在流里返回出错的 code
 
 import http from 'node:http';
 import crypto from 'node:crypto';
 
 export const MOCK_ARK_KEY = '0a1b2c3d-mock-4e5f-ark0-testkey00001';
+export const MOCK_SPEECH_KEY = 'mock-doubao-speech-key-0001';
 
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
 
@@ -54,6 +56,17 @@ export function startMock({ port = 0, taskSeconds = 14 } = {}) {
       const bytes = Buffer.from(`mock ark video ${file[1]}`);
       res.writeHead(200, { 'Content-Type': 'video/mp4', 'Content-Length': bytes.length });
       return res.end(bytes);
+    }
+
+    // 豆包语音：Key 放在 X-Api-Key 里，响应体是一个接一个的 JSON，中间没有分隔。
+    if (req.method === 'POST' && pathname === '/api/v3/tts/unidirectional') {
+      if (req.headers['x-api-key'] !== MOCK_SPEECH_KEY) return json(res, 401, { code: 45000010, message: 'invalid api key' });
+      const { req_params: params } = JSON.parse(body.toString('utf8'));
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      if (/FAIL/.test(params.text)) return res.end(JSON.stringify({ code: 55000000, message: 'synthesis failed {internal}' }));
+      const audio = Buffer.from(`mock mp3 ${params.speaker} ${params.text}`);
+      const chunk = (bytes) => JSON.stringify({ code: 0, message: '', data: bytes.toString('base64') });
+      return res.end(chunk(audio.subarray(0, 9)) + chunk(audio.subarray(9)) + JSON.stringify({ code: 20000000, message: 'OK', data: null, usage: { text_words: params.text.length } }));
     }
 
     if (!authed) return fail(res, 401, 'AuthenticationError', 'the API key or AK/SK in the request is missing or invalid.');
