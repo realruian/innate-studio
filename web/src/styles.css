@@ -295,9 +295,6 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 .switch input:checked::after { transform: translateX(14px); background: var(--bg); }
 
 /* 设置项列表：左名称右控件 */
-.section-title { margin-top: var(--sp-8); font-size: var(--text-caption); color: var(--text-4); }
-/* 后面的每一组和上一组隔 24（这里的 12 加上弹窗里各行之间的 12），是组内间距的 2 倍 */
-.section-title:not(:first-child) { margin-top: var(--sp-12); }
 .form-section { display: flex; flex-direction: column; }
 .form-row { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-16); min-height: 40px; }
 .form-label { display: flex; flex-direction: column; min-width: 0; font-size: var(--text-ui); }
@@ -306,6 +303,17 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 .form-control .input { width: 190px; }
 .form-control .row .input { width: 132px; flex: none; }
 .sub-panel { display: flex; flex-direction: column; margin: var(--sp-4) 0 var(--sp-8); padding: var(--sp-4) var(--sp-12); border-radius: var(--r-sm); background: var(--hover); }
+/* 设置弹窗：一组一个小标题加一张卡片，卡片里各行用分隔线隔开；组与组隔 24 */
+.settings { display: flex; flex-direction: column; gap: var(--sp-24); }
+.settings-group { display: flex; flex-direction: column; gap: var(--sp-8); }
+.settings-card { border: 1px solid var(--border-float); border-radius: var(--r-md); }
+.settings-card > * { padding: var(--sp-8) var(--sp-16); }
+.settings-card > * + * { border-top: 1px solid var(--border-float); }
+.settings-card > .form-row { min-height: 52px; }
+.settings-hint { font-size: var(--text-caption); color: var(--text-3); text-wrap: pretty; }
+/* Key 那一行换成输入框时，输入框占满右边 */
+.form-control.key-edit { flex: 1; }
+.form-control.key-edit .input { flex: 1; width: auto; min-width: 0; }
 .field-label { display: block; font-size: var(--text-caption); color: var(--text-2); }
 .modal-body > .field-label, .tab-pane > .field-label { margin-top: var(--sp-8); }
 

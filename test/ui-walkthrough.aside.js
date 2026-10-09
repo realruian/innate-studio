@@ -987,7 +987,7 @@ if ((await text('.sidebar-foot')).join('').includes('sk-')) problems.push('侧�
 await must('打开设置', click('.sidebar-foot .nav-item'));
 await sleep(900);
 const settingRows = (await text('.modal .form-label')).join('|');
-if (!settingRows.includes('润色用的模型') || !settingRows.includes('账户余额')) problems.push(`设置里缺少润色模型或余额：${settingRows}`);
+if (!settingRows.includes('润色模型') || !settingRows.includes('账户余额')) problems.push(`设置里缺少润色模型或余额：${settingRows}`);
 if (!/剩余 [\d.,]+/.test((await text('.modal .form-row')).join(' '))) problems.push('设置里没有读到余额');
 await audit('设置');
 await shot('11-settings');
@@ -997,6 +997,8 @@ await sleep(300);
 if ((await pg.evaluate(() => document.documentElement.dataset.theme)) === THEME) problems.push('在设置里切换主题没有生效');
 await must('切回原主题', clickText('.modal .segmented .seg', THEME === 'light' ? '浅色' : '深色'));
 await sleep(300);
+await must('点更换', clickText('.modal .btn', '更换'));
+await sleep(200);
 await must('点显示', clickText('.modal .btn', '显示'));
 if (await pg.evaluate(() => document.querySelector('.modal input.mono').classList.contains('masked'))) problems.push('点「显示」后输入框内容仍被遮住');
 await escape();

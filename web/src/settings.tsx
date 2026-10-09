@@ -1,4 +1,4 @@
-// 设置弹窗：外观、润色用的模型、用哪个平台、API Key 和余额。
+// 设置弹窗：外观、润色用的模型、用哪个平台、API Key 和余额。一组一张卡片。
 
 import { useEffect, useRef, useState } from 'react';
 import { api, state, useStore, loadApp, loadModels, switchProvider, polishModel, setPolishModel } from './store.ts';
@@ -14,16 +14,11 @@ function Settings() {
   useStore('app', 'models');
   const [theme, setThemeState] = useState(currentTheme());
   const [polish, setPolish] = useState(polishModel());
-  // 输入框默认遮住内容；显示出来是为了核对粘贴的到底是不是 Key。
-  const [masked, setMasked] = useState(true);
-  const [saving, setSaving] = useState(false);
   const [credits, setCredits] = useState('—');
   const [test, setTest] = useState({ tone: '', text: '' });
   const [switching, setSwitching] = useState(false);
-  const input = useRef<HTMLInputElement>(null);
   const { hasKey, keyHint, keySource, baseUrl, provider } = state.app;
   const { label: platform, keyPrefix, keysUrl } = PROVIDERS[provider];
-  const fromEnv = keySource === 'env';
   const models = state.catalog.polish;
 
   async function readCredits() {
@@ -32,7 +27,7 @@ function Settings() {
     try {
       const { remaining, used, unavailable } = await api('GET', '/api/credits');
       // 火山方舟没有查余额的接口。
-      if (unavailable) return setCredits('这里读不到，请到火山引擎控制台的费用中心查看');
+      if (unavailable) return setCredits('');
       setCredits(`剩余 ${amount(remaining)} · 已用 ${amount(used)}`);
     } catch {
       setCredits('没有读到');
@@ -47,7 +42,6 @@ function Settings() {
     if (next === provider || switching) return;
     setSwitching(true);
     setTest({ tone: '', text: '' });
-    input.current!.value = '';
     try {
       await switchProvider(next);
       setPolish(polishModel());
@@ -75,30 +69,21 @@ function Settings() {
     }
   }
 
-  async function save() {
-    const value = input.current!.value.trim();
-    if (!value) return toast('请粘贴你的 API Key', 'error');
-    if (/[^\x21-\x7e]/.test(value)) {
-      setMasked(false);
-      return toast(`这不像是 API Key：里面有中文或空格，可能是剪贴板里的其他内容。请复制 ${platform} 控制台里${keyPrefix ? `以 ${keyPrefix} 开头的` : ''}那一串。`, 'error', 8000);
-    }
+  async function save(value: string) {
     if (!value.startsWith(keyPrefix)) {
       const ok = await confirmDialog({ title: `这看起来不像 ${platform} 的 Key`, message: `${platform} 的 Key 通常以 ${keyPrefix} 开头，你粘贴的内容不是。仍然保存吗？`, okText: '仍然保存' });
-      if (!ok) return;
+      if (!ok) return false;
     }
-    setSaving(true);
     try {
       state.app = await api('PUT', '/api/key', { apiKey: value, provider });
-      input.current!.value = '';
-      setMasked(true);
       await loadApp();
       readCredits();
       toast('API Key 已保存', 'success');
-      await testConnection();
+      testConnection();
+      return true;
     } catch (err) {
       toast(message(err), 'error', 6000);
-    } finally {
-      setSaving(false);
+      return false;
     }
   }
 
@@ -117,11 +102,11 @@ function Settings() {
   }
 
   return (
-    <>
-      <div className="section-title">外观</div>
-      <div className="form-section">
-        <FormRow label="主题">
-          <div>
+    <div className="settings">
+      <section className="settings-group">
+        <h3>通用</h3>
+        <div className="settings-card">
+          <FormRow label="主题">
             <Segmented
               options={[
                 { value: 'light', label: '浅色' },
@@ -133,118 +118,170 @@ function Settings() {
                 setThemeState(currentTheme());
               }}
             />
-          </div>
-        </FormRow>
-      </div>
-      <div className="section-title">提示词润色</div>
-      {/* 润色提示词用哪个文本模型。账号里一个可用的都没有时，创作面板上不会出现「润色」。 */}
-      <div className="form-section">
-        <FormRow label="润色用的模型" desc="创作面板上的「润色」会让它把提示词补充得更具体">
-          {models.length ? (
-            <Dropdown
-              label="润色用的模型"
-              value={models.includes(polish) ? polish : polishModel()}
-              options={models.map((m) => ({ value: m, label: m }))}
-              onChange={(model) => {
-                setPolishModel(model);
-                setPolish(model);
-              }}
-            />
-          ) : (
-            <span className="muted">{state.catalog.known ? '账号里没有可用的文本模型' : '读到模型列表后才能选'}</span>
-          )}
-        </FormRow>
-      </div>
-      <div className="section-title">模型平台</div>
-      <div className="form-section">
-        <FormRow label="用哪个平台生成" desc="每个平台的 Key 各存各的，随时可以换回来">
-          <div>
+          </FormRow>
+          {/* 润色提示词用哪个文本模型。账号里一个可用的都没有时，创作面板上不会出现「润色」。 */}
+          <FormRow label="润色模型">
+            {models.length ? (
+              <Dropdown
+                label="润色模型"
+                value={models.includes(polish) ? polish : polishModel()}
+                options={models.map((m) => ({ value: m, label: m }))}
+                onChange={(model) => {
+                  setPolishModel(model);
+                  setPolish(model);
+                }}
+              />
+            ) : (
+              <span className="muted">{state.catalog.known ? '账号里没有可用的文本模型' : '读到模型列表后才能选'}</span>
+            )}
+          </FormRow>
+        </div>
+      </section>
+
+      <section className="settings-group">
+        <h3>模型平台</h3>
+        <div className="settings-card">
+          <FormRow label="生成平台">
             <Segmented options={(Object.keys(PROVIDERS) as ProviderId[]).map((id) => ({ value: id, label: PROVIDERS[id].label, disabled: switching }))} value={provider} onChange={changeProvider} />
+          </FormRow>
+        </div>
+      </section>
+
+      <section className="settings-group">
+        <h3>{platform}</h3>
+        <div className="settings-card">
+          <KeyRow
+            key={provider}
+            name={`${platform} `}
+            placeholder={keyPrefix ? `${keyPrefix}…` : `粘贴 ${platform} 的 API Key`}
+            copyHint={`请复制 ${platform} 控制台里${keyPrefix ? `以 ${keyPrefix} 开头的` : ''}那一串。`}
+            hasKey={hasKey}
+            keyHint={keyHint}
+            keySource={keySource}
+            onSave={save}
+            onRemove={remove}
+          />
+          <FormRow label="接口地址">
+            <span className="mono">{baseUrl}</span>
+          </FormRow>
+          {credits && (
+            <FormRow label="账户余额">
+              <span className="muted amount">{credits}</span>
+            </FormRow>
+          )}
+          <div className="form-row">
+            <div className="form-label">
+              连接
+              {test.text && <span className={`form-desc ${test.tone}`}>{test.text}</span>}
+            </div>
+            <div className="form-control">
+              <button className="btn btn-sm" type="button" onClick={testConnection}>
+                测试连接
+              </button>
+            </div>
           </div>
-        </FormRow>
-      </div>
-      {provider === 'ark' && <p className="small muted">火山方舟是字节官方的接口，能生成 Seedance 视频和 Seedream 图片，也能用豆包的文本模型润色提示词。Seedance 2.0、2.5 要账户余额大于 200 元才能开通。语音用的是另一个产品「豆包语音」，Key 在最下面单独填。音效、配乐、素材库、真人档案这里没有，延长和编辑视频只在 Flatkey 上。</p>}
-      <div className="section-title">{platform} API Key</div>
-      <div className="form-section">
-        <FormRow label="当前 Key">
-          <span className={hasKey ? 'mono' : 'warn-text'}>{hasKey ? `${keyHint}${fromEnv ? '（来自环境变量）' : ''}` : '还没有设置'}</span>
-        </FormRow>
-        <FormRow label="接口地址">
-          <span className="mono">{baseUrl}</span>
-        </FormRow>
-        <FormRow label="账户余额">
-          <span className="muted amount">{credits}</span>
-        </FormRow>
-      </div>
-      <div className="row">
-        <input
-          ref={input}
-          className={`input mono${masked ? ' masked' : ''}`}
-          type="text"
-          placeholder={keyPrefix ? `${keyPrefix}…` : `粘贴 ${platform} 的 API Key`}
-          autoComplete="off"
-          data-1p-ignore=""
-          data-lpignore="true"
-          aria-label={`${platform} API Key`}
-          disabled={fromEnv}
-          onKeyDown={(e) => e.key === 'Enter' && save()}
-        />
-        <button className="btn" type="button" disabled={fromEnv} onClick={() => setMasked(!masked)}>
+        </div>
+        <p className="settings-hint">
+          Key 只保存在这台电脑上，在{' '}
+          <a href={keysUrl} target="_blank" rel="noopener">
+            {platform} 控制台
+          </a>{' '}
+          创建。
+        </p>
+      </section>
+
+      {provider === 'ark' && <SpeechKey />}
+    </div>
+  );
+}
+
+// Key 的那一行。平时只显示尾号和「更换」；要填的时候这一行原地换成输入框，不把下面的内容往下推。
+// 还没有 Key 时一直是输入框。onSave 存成了返回 true，这一行才收回去。
+function KeyRow({ name, desc, placeholder, copyHint = '', hasKey, keyHint, keySource, onSave, onRemove }: { name: string; desc?: string; placeholder: string; copyHint?: string; hasKey: boolean; keyHint: string; keySource: string; onSave: (value: string) => Promise<boolean>; onRemove: () => void }) {
+  const [editing, setEditing] = useState(false);
+  // 输入框默认遮住内容；显示出来是为了核对粘贴的到底是不是 Key。
+  const [masked, setMasked] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const input = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (editing) input.current?.focus();
+  }, [editing]);
+
+  async function submit() {
+    const value = input.current!.value.trim();
+    if (!value) return toast(`请粘贴${name}API Key`, 'error');
+    if (/[^\x21-\x7e]/.test(value)) {
+      setMasked(false);
+      return toast(`这不像是 API Key：里面有中文或空格，可能是剪贴板里的其他内容。${copyHint}`, 'error', 8000);
+    }
+    setSaving(true);
+    try {
+      if (!(await onSave(value))) return;
+      if (input.current) input.current.value = '';
+      setMasked(true);
+      setEditing(false);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (hasKey && !editing) {
+    return (
+      <FormRow label="API Key" desc={desc}>
+        <span className="mono">{keyHint}</span>
+        {keySource === 'env' ? (
+          <span className="muted">来自环境变量</span>
+        ) : (
+          <>
+            <button className="btn btn-sm" type="button" onClick={() => setEditing(true)}>
+              更换
+            </button>
+            {keySource === 'file' && (
+              <button className="btn btn-sm" type="button" onClick={onRemove}>
+                清除
+              </button>
+            )}
+          </>
+        )}
+      </FormRow>
+    );
+  }
+  return (
+    <div className="form-row">
+      <div className="form-label">API Key</div>
+      <div className="form-control key-edit">
+        <input ref={input} className={`input mono${masked ? ' masked' : ''}`} type="text" placeholder={placeholder} autoComplete="off" data-1p-ignore="" data-lpignore="true" aria-label={`${name}API Key`} onKeyDown={(e) => e.key === 'Enter' && submit()} />
+        <button className="btn" type="button" onClick={() => setMasked(!masked)}>
           {masked ? '显示' : '隐藏'}
         </button>
-        <button className="btn btn-primary" type="button" disabled={fromEnv || saving} onClick={save}>
+        <button className="btn btn-primary" type="button" disabled={saving} onClick={submit}>
           保存
         </button>
+        {hasKey && (
+          <button className="btn" type="button" onClick={() => setEditing(false)}>
+            取消
+          </button>
+        )}
       </div>
-      <p className="small muted">
-        Key 只保存在这台电脑上（data/config.json），由本地服务在请求 {platform} 时带上，不会写进网页代码。在{' '}
-        <a href={keysUrl} target="_blank" rel="noopener">
-          {platform} 控制台
-        </a>{' '}
-        里可以创建 Key。
-      </p>
-      <div className="row wrap">
-        <button className="btn" type="button" onClick={testConnection}>
-          测试连接
-        </button>
-        <button className="btn" type="button" hidden={keySource !== 'file'} onClick={remove}>
-          清除已保存的 Key
-        </button>
-      </div>
-      {test.text && <div className={`small ${test.tone}`}>{test.text}</div>}
-      {provider === 'ark' && <SpeechKey />}
-    </>
+    </div>
   );
 }
 
 // 豆包语音的 Key：火山方舟这条线上的语音用它。它和方舟不是一个产品，Key 要另外创建、另外填。
 function SpeechKey() {
   useStore('app');
-  const [masked, setMasked] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const input = useRef<HTMLInputElement>(null);
   const { hasKey, keyHint, keySource } = state.app.speech;
-  const fromEnv = keySource === 'env';
   const { label, keysUrl } = DOUBAO_SPEECH;
 
-  async function save() {
-    const value = input.current!.value.trim();
-    if (!value) return toast(`请粘贴${label}的 API Key`, 'error');
-    if (/[^\x21-\x7e]/.test(value)) {
-      setMasked(false);
-      return toast('这不像是 API Key：里面有中文或空格，可能是剪贴板里的其他内容。', 'error', 8000);
-    }
-    setSaving(true);
+  async function save(value: string) {
     try {
       state.app = await api('PUT', '/api/key', { apiKey: value, service: 'speech' });
-      input.current!.value = '';
-      setMasked(true);
       await loadApp();
       toast(`${label}的 API Key 已保存`, 'success');
+      return true;
     } catch (err) {
       toast(message(err), 'error', 6000);
-    } finally {
-      setSaving(false);
+      return false;
     }
   }
 
@@ -261,46 +298,19 @@ function SpeechKey() {
   }
 
   return (
-    <>
-      <div className="section-title">{label} API Key（生成语音用）</div>
-      <div className="form-section">
-        <FormRow label="当前 Key">
-          <span className={hasKey ? 'mono' : 'warn-text'}>{hasKey ? `${keyHint}${fromEnv ? '（来自环境变量）' : ''}` : '还没有设置'}</span>
-        </FormRow>
+    <section className="settings-group">
+      <h3>{label}</h3>
+      <div className="settings-card">
+        <KeyRow name={label} desc="生成语音用" placeholder={`粘贴${label}的 API Key`} hasKey={hasKey} keyHint={keyHint} keySource={keySource} onSave={save} onRemove={remove} />
       </div>
-      <div className="row">
-        <input
-          ref={input}
-          className={`input mono${masked ? ' masked' : ''}`}
-          type="text"
-          placeholder={`粘贴${label}的 API Key`}
-          autoComplete="off"
-          data-1p-ignore=""
-          data-lpignore="true"
-          aria-label={`${label} API Key`}
-          disabled={fromEnv}
-          onKeyDown={(e) => e.key === 'Enter' && save()}
-        />
-        <button className="btn" type="button" disabled={fromEnv} onClick={() => setMasked(!masked)}>
-          {masked ? '显示' : '隐藏'}
-        </button>
-        <button className="btn btn-primary" type="button" disabled={fromEnv || saving} onClick={save}>
-          保存
-        </button>
-      </div>
-      <p className="small muted">
-        不生成语音可以不填。{label}是火山引擎的另一个产品，要先开通「语音合成大模型」，再在{' '}
+      <p className="settings-hint">
+        先开通「语音合成大模型」，再在{' '}
         <a href={keysUrl} target="_blank" rel="noopener">
           {label}控制台
         </a>{' '}
-        里创建 Key；它和火山方舟的 Key 不通用。
+        创建；和火山方舟的 Key 不通用。
       </p>
-      <div className="row wrap">
-        <button className="btn" type="button" hidden={keySource !== 'file'} onClick={remove}>
-          清除已保存的 Key
-        </button>
-      </div>
-    </>
+    </section>
   );
 }
 
