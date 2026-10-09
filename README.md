@@ -25,8 +25,17 @@
 
 ## 📸 界面预览
 
-<!-- 建议在此放置 1~2 张高分辨率工作台界面截图或 10 秒操作演示 GIF -->
-> 💡 *提示：建议在仓库的 `docs/` 或 Release 资源中添加工作台主视图与无限画布节点连线的实机截图。*
+<p align="center">
+  <img src="docs/screenshots/workbench.png" alt="Innate Studio Workbench" width="100%" />
+</p>
+<p align="center"><em>中性暗色多模态创作工作台：居中一体化输入框、多模态参数集约控制与最近生成记录流</em></p>
+
+<br />
+
+<p align="center">
+  <img src="docs/screenshots/canvas.png" alt="Innate Studio Infinite Canvas" width="100%" />
+</p>
+<p align="center"><em>无限节点画布（React Flow）：文本、图像、视频、音频多节点自由拓扑与流转生成</em></p>
 
 ---
 
