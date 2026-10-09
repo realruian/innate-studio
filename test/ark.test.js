@@ -69,14 +69,14 @@ const upload = async (type = 'image/png') => (await (await fetch(`${base}/api/up
 before(async () => {
   flatkey = await startFlatkey({ taskSeconds: 0.5, assetSeconds: 0.5 });
   ark = await startArk({ taskSeconds: 0.8 });
-  dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'seedance-test-'));
+  dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'innate-test-'));
   const port = await freePort();
   base = `http://127.0.0.1:${port}`;
   app = spawn(process.execPath, ['server.js'], {
     cwd: root,
     stdio: 'ignore',
     // Key 的环境变量都置空：即使本机设置了真实 Key，测试也绝不会用到它。
-    env: { ...process.env, PORT: String(port), FLATKEY_BASE_URL: flatkey.url, ARK_BASE_URL: ark.url, DOUBAO_SPEECH_BASE_URL: ark.url, VOLC_BILLING_BASE_URL: ark.url, VOLC_ACCESS_KEY_ID: '', VOLC_SECRET_ACCESS_KEY: '', SEEDANCE_DATA_DIR: dataDir, DOUBAO_SPEECH_API_KEY: '', FLATKEY_API_KEY: '', ARK_API_KEY: '' },
+    env: { ...process.env, PORT: String(port), FLATKEY_BASE_URL: flatkey.url, ARK_BASE_URL: ark.url, DOUBAO_SPEECH_BASE_URL: ark.url, VOLC_BILLING_BASE_URL: ark.url, VOLC_ACCESS_KEY_ID: '', VOLC_SECRET_ACCESS_KEY: '', INNATE_DATA_DIR: dataDir, DOUBAO_SPEECH_API_KEY: '', FLATKEY_API_KEY: '', ARK_API_KEY: '' },
   });
   await waitFor(async () => (await fetch(`${base}/api/state`)).ok, '服务启动');
 });

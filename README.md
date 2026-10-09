@@ -96,8 +96,8 @@
 
 ```bash
 # 1. 克隆仓库
-git clone https://github.com/realruian/seedance-studio.git
-cd seedance-studio
+git clone https://github.com/realruian/innate-studio.git
+cd innate-studio
 
 # 2. 安装依赖并启动
 npm install

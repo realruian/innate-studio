@@ -7,7 +7,15 @@
   <script>
     // 在样式生效前就定好主题，避免打开时先闪一下深色。
     try {
-      var saved = localStorage.getItem('seedance-studio.theme');
+      // 项目原来叫 seedance-studio：把那时存下的设置搬到新名字下，只搬一次。
+      for (var i = localStorage.length - 1; i >= 0; i -= 1) {
+        var old = localStorage.key(i);
+        if (old.indexOf('seedance-studio.') !== 0) continue;
+        var next = 'innate-studio.' + old.slice(16);
+        if (localStorage.getItem(next) === null) localStorage.setItem(next, localStorage.getItem(old));
+        localStorage.removeItem(old);
+      }
+      var saved = localStorage.getItem('innate-studio.theme');
       if (saved === 'system') saved = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
       document.documentElement.dataset.theme = saved === 'light' ? 'light' : 'dark';
     } catch { document.documentElement.dataset.theme = 'dark'; }

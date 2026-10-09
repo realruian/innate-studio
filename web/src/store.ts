@@ -181,7 +181,7 @@ export async function loadVoices() {
 }
 
 // 润色提示词用哪个文本模型。选择存在浏览器里；没选过或选的已经不可用，就用列表里的第一个。
-const POLISH_KEY = 'seedance-studio.polish-model';
+const POLISH_KEY = 'innate-studio.polish-model';
 
 export function polishModel() {
   let saved = '';

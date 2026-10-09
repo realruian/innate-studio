@@ -25,7 +25,7 @@ try {
 
 await pg.evaluate((theme) => {
   localStorage.clear();
-  localStorage.setItem('seedance-studio.theme', theme);
+  localStorage.setItem('innate-studio.theme', theme);
 }, THEME);
 await pg.reload();
 await sleep(2200);
@@ -79,7 +79,7 @@ async function audit(state) {
       if (!allowed.includes(size)) odd.add(`${size}（${el.className || el.tagName.toLowerCase()}）`);
     }
     if (odd.size) issues.push(`规范外的字号：${[...odd].join('，')}`);
-    if (root.dataset.theme !== localStorage.getItem('seedance-studio.theme')) issues.push(`主题和保存的不一致：页面是 ${root.dataset.theme}，保存的是 ${localStorage.getItem('seedance-studio.theme')}`);
+    if (root.dataset.theme !== localStorage.getItem('innate-studio.theme')) issues.push(`主题和保存的不一致：页面是 ${root.dataset.theme}，保存的是 ${localStorage.getItem('innate-studio.theme')}`);
     return issues;
   }, ALLOWED_FONT_SIZES);
   for (const issue of found) problems.push(`${state}：${issue}`);

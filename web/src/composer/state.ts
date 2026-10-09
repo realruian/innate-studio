@@ -10,8 +10,8 @@ import { ALL_RESOLUTIONS, PROVIDERS, VIDEO_TASKS, videoCapabilities, videoFamily
 import type { Asset, BuiltRequest, Character, CreateType, HistoryItem, Kind, Ref, RefStatus, SkillRef, Studio, VideoForm, Voice } from '../types.ts';
 
 // 视频的表单单独存一份（生成记录里存的也是它）；当前选的类型和其余几种的表单存在另一份里。
-const FORM_KEY = 'seedance-studio.form.v1';
-const STUDIO_KEY = 'seedance-studio.studio.v1';
+const FORM_KEY = 'innate-studio.form.v1';
+const STUDIO_KEY = 'innate-studio.studio.v1';
 
 // 能生成的五种内容。polish 表示这种内容的提示词可以让模型帮忙补充（要朗读的文字不能改写，配乐没有提示词）。
 export const TYPES: { value: CreateType; label: string; title: string; action: string; polish?: boolean; placeholder?: string }[] = [

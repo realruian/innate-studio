@@ -30,7 +30,8 @@ const UPSTREAMS = {
 // 豆包语音：火山方舟这条线上的语音用它。它是另一个产品，地址和 Key 都和方舟不是一套。seed-tts-2.0 是「豆包语音合成模型 2.0」。
 const VOLC_BILLING = { baseUrl: trimSlash(process.env.VOLC_BILLING_BASE_URL || 'https://billing.volcengineapi.com'), envId: 'VOLC_ACCESS_KEY_ID', envSecret: 'VOLC_SECRET_ACCESS_KEY', configId: 'volcAccessKeyId', configSecret: 'volcSecretAccessKey' };
 const DOUBAO_SPEECH = { baseUrl: trimSlash(process.env.DOUBAO_SPEECH_BASE_URL || 'https://openspeech.bytedance.com'), envKey: 'DOUBAO_SPEECH_API_KEY', configKey: 'doubaoSpeechKey', model: 'seed-tts-2.0' };
-const DATA_DIR = path.resolve(process.env.SEEDANCE_DATA_DIR || path.join(__dirname, 'data'));
+// 环境变量原来叫 SEEDANCE_*（项目改名前），旧名字还认。
+const DATA_DIR = path.resolve(process.env.INNATE_DATA_DIR || process.env.SEEDANCE_DATA_DIR || path.join(__dirname, 'data'));
 // 生成结果按类型分目录存；uploads 放的是从本机选来当输入的文件（Grok 的首帧、要配乐的视频）。
 const MEDIA_DIRS = { video: 'videos', image: 'images', audio: 'audio' };
 const mediaDir = (name) => path.join(DATA_DIR, name);
@@ -40,8 +41,8 @@ const PUBLIC_DIR = path.join(__dirname, 'web', 'dist');
 const MAX_UPLOAD_BYTES = 64 * 1024 * 1024;
 const MAX_JSON_BYTES = 6 * 1024 * 1024;
 const POLL_INTERVAL_MS = 6000;
-// 任务提交后超过这么久还没有结果，就停止自动查询。可以用环境变量 SEEDANCE_PENDING_LIMIT_MS 改。
-const MAX_PENDING_MS = Number(process.env.SEEDANCE_PENDING_LIMIT_MS) || 6 * 60 * 60 * 1000;
+// 任务提交后超过这么久还没有结果，就停止自动查询。可以用环境变量 INNATE_PENDING_LIMIT_MS 改。
+const MAX_PENDING_MS = Number(process.env.INNATE_PENDING_LIMIT_MS || process.env.SEEDANCE_PENDING_LIMIT_MS) || 6 * 60 * 60 * 1000;
 const DOWNLOAD_RETRY_MS = 30000;
 const MAX_DOWNLOAD_ATTEMPTS = 6;
 const DEFAULT_MODELS = { flatkey: ['seedance-2.0', 'seedance-2.0-fast'], ark: Object.keys(ARK_VIDEO_MODELS) };

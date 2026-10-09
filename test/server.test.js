@@ -78,14 +78,14 @@ const refreshUntil = (id, done, what) =>
 
 before(async () => {
   mock = await startMock({ taskSeconds: 0.5, assetSeconds: 0.5 });
-  dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'seedance-test-'));
+  dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'innate-test-'));
   const port = await freePort();
   base = `http://127.0.0.1:${port}`;
   app = spawn(process.execPath, ['server.js'], {
     cwd: root,
     stdio: 'ignore',
     // FLATKEY_API_KEY 置空：即使本机设置了真实 Key，测试也绝不会用到它。
-    env: { ...process.env, PORT: String(port), FLATKEY_BASE_URL: mock.url, SEEDANCE_DATA_DIR: dataDir, FLATKEY_API_KEY: '', SEEDANCE_PENDING_LIMIT_MS: '1500' },
+    env: { ...process.env, PORT: String(port), FLATKEY_BASE_URL: mock.url, INNATE_DATA_DIR: dataDir, FLATKEY_API_KEY: '', INNATE_PENDING_LIMIT_MS: '1500' },
   });
   await waitFor(async () => (await fetch(`${base}/api/state`)).ok, '服务启动');
 });

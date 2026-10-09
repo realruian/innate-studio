@@ -1,7 +1,7 @@
 // 浅色 / 深色主题，也可以跟着电脑的外观走。实际生效靠 <html data-theme>（只有 light、dark 两种），
 // 初始值由 index.html 里的内联脚本在样式加载前定好。
 
-const THEME_KEY = 'seedance-studio.theme';
+const THEME_KEY = 'innate-studio.theme';
 
 export type ThemeChoice = 'light' | 'dark' | 'system';
 

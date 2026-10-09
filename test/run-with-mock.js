@@ -30,7 +30,7 @@ console.log(`模拟 Flatkey：${mock.url}`);
 const app = spawn(process.execPath, ['server.js'], {
   cwd: root,
   stdio: 'inherit',
-  env: { ...process.env, PORT: String(appPort), FLATKEY_BASE_URL: mock.url, SEEDANCE_DATA_DIR: dataDir, FLATKEY_API_KEY: '' },
+  env: { ...process.env, PORT: String(appPort), FLATKEY_BASE_URL: mock.url, INNATE_DATA_DIR: dataDir, FLATKEY_API_KEY: '' },
 });
 
 const stop = () => {
