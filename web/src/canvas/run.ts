@@ -2,13 +2,13 @@
 // 结果是一条普通的生成记录，节点只记它的 id，进度跟着「创作记录」的轮询走。
 
 import type { Edge, Node, ReactFlowInstance } from '@xyflow/react';
-import { api, state, KINDS, findAsset, refreshAsset, assetReadiness, startHistoryLoop, loadHistory } from '../store.ts';
+import { api, state, KINDS, findAsset, refreshAsset, assetReadiness, startHistoryLoop, loadHistory, polishModel } from '../store.ts';
 import { capabilities, defaults, imageRefLimit, isOpenRouter, specOf, traits } from '../composer/state.ts';
 import { buildRequest as buildVideoRequest, buildOpenRouterRequest, buildImageRequest, buildSpeechRequest, buildSfxRequest } from '../request.ts';
 import { recordName, refFromAsset, uploadVirtualAsset } from '../media.ts';
 import { toast } from '../ui/layers.tsx';
 import type { HistoryItem, Kind, Ref } from '../types.ts';
-import { NODE_LABELS, joinPrompt, nodeWidth, numbered, placeResults, stripNodeData, videoFormFrom, type AudioData, type ImageData, type LinkData, type MediaInput, type NodeKind, type TextData, type VideoData } from './model.ts';
+import { NODE_LABELS, joinPrompt, nodeWidth, numbered, placeResults, runOrder, stripNodeData, videoFormFrom, type AudioData, type ImageData, type LinkData, type MediaInput, type NodeKind, type TextData, type VideoData } from './model.ts';
 
 type Flow = ReactFlowInstance<Node, Edge>;
 type AnyData = Partial<ImageData & VideoData & AudioData & TextData>;
@@ -129,7 +129,7 @@ export function deliver(flow: Flow, id: string, results: Record<string, unknown>
   const node = flow.getNode(id);
   if (!node || !results.length) return;
   const width = (n: Node) => n.measured?.width || nodeWidth(n.type as NodeKind, n.data);
-  const { here, spots } = placeResults({ id, position: node.position, width: width(node) }, isFilled(node.data as AnyData), results.length, flow.getNodes().map((n) => ({ id: n.id, position: n.position, width: width(n) })));
+  const { here, spots } = placeResults({ id, position: node.position, width: width(node) }, isFilled(node.data as AnyData), results.length, flow.getNodes().filter((n) => n.type !== 'group' && !n.hidden).map((n) => ({ id: n.id, position: n.position, width: width(n) })));
   if (here >= 0) flow.updateNodeData(id, results[here]);
   const rest = results.filter((_, index) => index !== here);
   if (!rest.length) return;
@@ -140,11 +140,17 @@ export function deliver(flow: Flow, id: string, results: Record<string, unknown>
   const incoming = flow.getEdges().filter((edge) => edge.target === id);
   flow.addNodes(fresh);
   flow.addEdges(fresh.flatMap((made) => incoming.map((edge) => ({ ...edge, id: crypto.randomUUID(), target: made.id, selected: false }))));
+  // 原节点在一个分组里，新节点也进这个组。
+  for (const group of flow.getNodes()) {
+    const members = (group.data as { members?: string[] }).members;
+    if (group.type === 'group' && members?.includes(id)) flow.updateNodeData(group.id, { members: [...members, ...fresh.map((made) => made.id)] });
+  }
 }
 
 export async function generate(flow: Flow, id: string, snap: () => void = () => {}) {
   const node = flow.getNode(id);
   if (!node || (node.data as AnyData).busy) return;
+  if (node.type === 'text') return write(flow, id, snap);
   if (!state.app.hasKey) return toast('还没有设置 API Key，请先到「设置」里填写', 'info');
   const say = (busy: string) => flow.updateNodeData(id, { busy });
   flow.updateNodeData(id, { busy: '准备中', error: '' });
@@ -184,6 +190,62 @@ export async function generate(flow: Flow, id: string, snap: () => void = () => 
   } finally {
     flow.updateNodeData(id, { busy: '' });
   }
+}
+
+// 文本节点让文本模型写：连进来的文本节点和框里已有的内容当参考，写出来的放进框里（框里已经有字就放进新节点）。
+async function write(flow: Flow, id: string, snap: () => void) {
+  const node = flow.getNode(id)!;
+  const data = node.data as AnyData;
+  const prompt = (data.prompt || '').trim();
+  const model = state.catalog.polish.includes(data.model || '') ? data.model! : polishModel();
+  if (!prompt) return toast('先写下想让模型写什么', 'info');
+  if (!model) return toast('当前账号里没有可用的文本模型', 'info');
+  flow.updateNodeData(id, { busy: '正在写', error: '' });
+  try {
+    const upstream = flow
+      .getEdges()
+      .filter((edge) => edge.target === id && (edge.data as unknown as LinkData)?.kind === 'text')
+      .map((edge) => (flow.getNode(edge.source)?.data as AnyData | undefined)?.text || '');
+    const result = await api<{ text: string }>('POST', '/api/text', { prompt, context: joinPrompt(upstream, data.text || ''), model });
+    deliver(flow, id, [{ text: result.text }], snap);
+  } catch (err) {
+    flow.updateNodeData(id, { error: (err as Error).message });
+    toast((err as Error).message, 'error', 6000);
+  } finally {
+    flow.updateNodeData(id, { busy: '' });
+  }
+}
+
+// ---------- 执行整组 ----------
+
+const RUN_WAIT_MS = 20 * 60 * 1000;
+
+// 把一批节点按上游到下游的顺序挨个生成。只动还没有内容的节点：已经有内容的当作现成的输入，不重新生成。
+// 每个节点要等它出了结果才轮到下一个，因为下游要拿它的结果当输入。中途有一个失败就停下。
+export async function runAll(flow: Flow, ids: string[], snap: () => void) {
+  const todo = runOrder(ids, flow.getEdges()).filter((id) => {
+    const node = flow.getNode(id);
+    if (!node || isFilled(node.data as AnyData)) return false;
+    // 没写要求的文本节点是留给人自己填的，跳过。
+    return node.type !== 'text' || Boolean(((node.data as AnyData).prompt || '').trim());
+  });
+  if (!todo.length) return toast('这一组里没有还空着、可以生成的节点', 'info');
+  toast(`开始执行，共 ${todo.length} 个节点`, 'info', 2400);
+  for (const [index, id] of todo.entries()) {
+    await generate(flow, id, snap);
+    const deadline = Date.now() + RUN_WAIT_MS;
+    for (;;) {
+      const node = flow.getNode(id);
+      if (!node) return;
+      const data = node.data as AnyData;
+      const record = recordOf(data);
+      const failed = Boolean(data.error) || record?.status === 'failed' || (node.type !== 'text' && !data.recordId);
+      if (failed || Date.now() > deadline) return toast(`执行到第 ${index + 1} 个节点停下了：${data.error || record?.error?.message || '没有出结果'}`, 'error', 6000);
+      if (node.type === 'text' ? (data.text || '').trim() && !data.busy : outputOf(node)) break;
+      await sleep(1000);
+    }
+  }
+  toast('这一组执行完了', 'success');
 }
 
 // ---------- 新节点的默认参数 ----------

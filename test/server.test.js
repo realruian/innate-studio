@@ -490,6 +490,23 @@ test('真人档案：创建、认证链接、添加素材都带幂等键', async
   assert.equal(assets[0].id, asset.data.id);
 });
 
+test('工作流：存一组节点和连线、列表只给概要、读回、改名、删除；空的不收', async () => {
+  const nodes = [{ id: 'a', type: 'text', position: { x: 0, y: 0 }, data: { text: '设定' } }, { id: 'b', type: 'image', position: { x: 360, y: 0 }, data: { prompt: '', model: 'm', ratio: '1:1' } }];
+  const edges = [{ id: 'e', source: 'a', target: 'b', data: { kind: 'text' } }];
+  assert.equal((await call('POST', '/api/workflows', { name: 'x', nodes: [], edges: [] })).status, 400);
+  const made = await call('POST', '/api/workflows', { name: '  角色出图  ', nodes, edges });
+  assert.equal(made.status, 200);
+  assert.match(made.data.id, /^wf_/);
+  assert.deepEqual([made.data.name, made.data.count], ['角色出图', 2]);
+  const list = await call('GET', '/api/workflows');
+  assert.equal(list.data.items.find((w) => w.id === made.data.id).nodes, undefined);
+  const read = await call('GET', `/api/workflows/${made.data.id}`);
+  assert.deepEqual([read.data.nodes, read.data.edges], [nodes, edges]);
+  assert.equal((await call('PUT', `/api/workflows/${made.data.id}`, { name: '新名字' })).data.name, '新名字');
+  assert.equal((await call('DELETE', `/api/workflows/${made.data.id}`)).status, 204);
+  assert.equal((await call('GET', `/api/workflows/${made.data.id}`)).status, 404);
+});
+
 test('画布：新建、保存、读回、改名、删除', async () => {
   const created = await call('POST', '/api/canvases', {});
   assert.equal(created.status, 200);

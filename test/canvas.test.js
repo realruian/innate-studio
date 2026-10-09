@@ -2,7 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { canLink, targetsOf, sourcesOf, linkLabel, joinPrompt, videoFormFrom, stripNodeData, nodeWidth, clipOf, pasteClip, snapTo, tidy, placeResults } from '../web/src/canvas/model.ts';
+import { canLink, targetsOf, sourcesOf, linkLabel, joinPrompt, videoFormFrom, stripNodeData, nodeWidth, clipOf, pasteClip, snapTo, tidy, placeResults, groupFrame, runOrder } from '../web/src/canvas/model.ts';
 import { buildRequest } from '../web/src/request.ts';
 
 const base = {
@@ -168,4 +168,26 @@ test('再次生成：空节点先装第一份，多出来的排在下面；已�
   const below = { id: 'b', position: { x: 160, y: 430 }, width: 240 };
   const aside = { id: 'c', position: { x: 900, y: 420 }, width: 240 };
   assert.deepEqual(placeResults(source, true, 1, [source, below, aside]).spots, [{ x: 100, y: 740 }]);
+});
+
+test('分组：框按成员占的范围算，四周各留 24；执行顺序是上游在前，组外的线不算；复制出来的分组指向新的成员', () => {
+  assert.equal(groupFrame([]), null);
+  assert.deepEqual(groupFrame([{ x: 100, y: 100, width: 240, height: 264 }, { x: 460, y: 180, width: 427, height: 264 }]), { x: 76, y: 76, width: 835, height: 392 });
+
+  const edges = [{ source: 'text', target: 'image' }, { source: 'image', target: 'video' }, { source: 'text', target: 'video' }, { source: 'outside', target: 'text' }];
+  assert.deepEqual(runOrder(['video', 'image', 'text'], edges), ['text', 'image', 'video']);
+  assert.deepEqual(runOrder(['video', 'image'], edges), ['image', 'video']);
+
+  const clip = clipOf(
+    [
+      { id: 'g', type: 'group', position: { x: 0, y: 0 }, data: { name: '开场', members: ['a', 'b'] } },
+      { id: 'a', type: 'text', position: { x: 100, y: 50 }, data: { text: '' } },
+      { id: 'b', type: 'image', position: { x: 400, y: 80 }, data: { prompt: '', model: 'm', ratio: '1:1' } },
+    ],
+    [],
+  );
+  let n = 0;
+  const pasted = pasteClip(clip, { at: { x: 1000, y: 1000 } }, () => `n${++n}`);
+  assert.deepEqual(pasted.nodes[0].data.members, ['n2', 'n3']);
+  assert.deepEqual(pasted.nodes[1].position, { x: 1000, y: 1000 });
 });

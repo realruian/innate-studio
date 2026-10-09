@@ -16,12 +16,20 @@ import { openMenu, openModal, openPopover, toast } from '../ui/layers.tsx';
 import { VideoPlayer, AudioPlayer } from '../player.tsx';
 import { openDetail } from '../history.tsx';
 import type { Kind } from '../types.ts';
-import { BOX_HEIGHT, NODE_LABELS, ROLE_LABELS, canLink, nodeWidth, joinPrompt, linkLabel, type AudioData, type FrameRole, type ImageData, type LinkData, type NodeKind, type TextData, type VideoData } from './model.ts';
-import { deliver, fitVideo, generate, outputOf, recordOf } from './run.ts';
+import { BOX_HEIGHT, NODE_LABELS, ROLE_LABELS, canLink, nodeWidth, joinPrompt, linkLabel, PINS, PIN_LABELS, type AudioData, type FrameRole, type GroupData, type ImageData, type Pin, type StackData, type LinkData, type NodeKind, type TextData, type VideoData } from './model.ts';
+import { fitVideo, generate, outputOf, recordOf, runAll } from './run.ts';
 
 // 画布页交给节点用的几件事。snap：会改动画布结构的操作，动手之前调一下，撤销时回到这一刻。
 // addInput：在某个节点左边加一个节点并连进它，extra 是新节点一出来就带着的内容（上传的文件、素材库里的素材）。
-export const CanvasActions = createContext<{ snap: () => void; addInput: (targetId: string, kind: NodeKind, extra?: Record<string, unknown>) => void }>({ snap() {}, addInput() {} });
+// ungroup：解散一个分组（只去掉框，里面的节点留着）。saveWorkflow：把一个分组存成工作流。
+// unstack：把一叠摊开；只给一个成员就只取回它。
+export const CanvasActions = createContext<{ snap: () => void; addInput: (targetId: string, kind: NodeKind, extra?: Record<string, unknown>) => void; ungroup: (groupId: string) => void; saveWorkflow: (groupId: string) => void; unstack: (stackId: string, memberId?: string) => void }>({
+  snap() {},
+  addInput() {},
+  ungroup() {},
+  saveWorkflow() {},
+  unstack() {},
+});
 
 export const NODE_ICONS: Record<NodeKind, IconName> = { text: 'type', image: 'image', video: 'video', audio: 'music' };
 
@@ -40,7 +48,8 @@ function useAlone(selected?: boolean) {
   return Boolean(selected) && count === 1;
 }
 
-function Frame({ id, kind, no, selected, width, tools, panel, children }: { id: string; kind: NodeKind; no?: number; selected?: boolean; width: number; tools?: ReactNode; panel: ReactNode; children: ReactNode }) {
+function Frame({ id, kind, no, pins = [], selected, width, tools, panel, children }: { id: string; kind: NodeKind; no?: number; pins?: Pin[]; selected?: boolean; width: number; tools?: ReactNode; panel: ReactNode; children: ReactNode }) {
+  const flow = useReactFlow();
   const alone = useAlone(selected);
   // 正从别的节点拉一条线过来：这个节点接得住，就把整个框变成落点，不用对准小加号；接不住就暗下去。
   // 从右边的加号拉出来的线要找下游，从左边的加号拉出来的要找上游。
@@ -58,8 +67,18 @@ function Frame({ id, kind, no, selected, width, tools, panel, children }: { id: 
         <span className="cnode-name">
           <Icon name={NODE_ICONS[kind]} size={14} />
           <span>{no ? `${NODE_LABELS[kind]} ${no}` : NODE_LABELS[kind]}</span>
+          {pins.map((pin) => (
+            <span key={pin} className={`cpin is-${pin}`} role="img" aria-label={`${PIN_LABELS[pin]}标记`} />
+          ))}
         </span>
-        {alone && tools && <span className="cnode-acts nodrag">{tools}</span>}
+        {alone && (
+          <span className="cnode-acts nodrag">
+            <button className="cnode-btn" type="button" {...tip('颜色标记')} aria-label="颜色标记" aria-haspopup="dialog" aria-expanded="false" onClick={(e) => openPopover(e.currentTarget, <PinSheet value={pins} onChange={(pin) => flow.updateNodeData(id, { pin })} />, { label: '颜色标记' })}>
+              <span className={`cpin ${pins.length ? `is-${pins[0]}` : 'is-none'}`} />
+            </button>
+            {tools}
+          </span>
+        )}
       </div>
       <div className="cnode-box">{children}</div>
       <Handle type="target" position={Position.Left} className="cnode-port">
@@ -73,6 +92,27 @@ function Frame({ id, kind, no, selected, width, tools, panel, children }: { id: 
       <NodeToolbar isVisible={alone} position={Position.Bottom} offset={20}>
         <div className="cnode-panel nowheel">{panel}</div>
       </NodeToolbar>
+    </div>
+  );
+}
+
+// 选颜色标记：几个色点，点一下标上、再点一下去掉，可以同时标几种；最后是「无」，一次清掉。它画在画布外面的浮层里，所以自己记着选了什么。
+function PinSheet({ value, onChange }: { value: Pin[]; onChange: (pins: Pin[]) => void }) {
+  const [picked, setPicked] = useState(value);
+  const set = (next: Pin[]) => {
+    setPicked(next);
+    onChange(next);
+  };
+  return (
+    <div className="popover-body cpins" role="group" aria-label="颜色标记">
+      {PINS.map((pin) => (
+        <button key={pin} type="button" className={`cpins-item ${picked.includes(pin) ? 'active' : ''}`} aria-pressed={picked.includes(pin)} aria-label={PIN_LABELS[pin]} {...tip(PIN_LABELS[pin])} onClick={() => set(picked.includes(pin) ? picked.filter((p) => p !== pin) : PINS.filter((p) => p === pin || picked.includes(p)))}>
+          <span className={`cpin is-${pin}`} />
+        </button>
+      ))}
+      <button type="button" className="cpins-none" disabled={!picked.length} onClick={() => set([])}>
+        无
+      </button>
     </div>
   );
 }
@@ -362,29 +402,14 @@ export function TextNode({ id, data: raw, selected }: NodeProps) {
     if (!selected) setEditing(false);
   }, [selected]);
 
-  async function write() {
-    const prompt = (data.prompt || '').trim();
-    if (!prompt) return toast('先写下想让模型写什么', 'info');
-    if (!model) return toast('当前账号里没有可用的文本模型', 'info');
-    flow.updateNodeData(id, { busy: '正在写', error: '' });
-    try {
-      const upstream = inputs.filter((i) => i.link.kind === 'text').map((i) => (i.node.data as unknown as TextData).text || '');
-      const result = await api<{ text: string }>('POST', '/api/text', { prompt, context: joinPrompt(upstream, data.text || ''), model });
-      // 框里已经有内容：原来的留着，写出来的放进下面一个新的文本节点。
-      deliver(flow, id, [{ text: result.text }], snap);
-    } catch (err) {
-      flow.updateNodeData(id, { error: (err as Error).message });
-      toast((err as Error).message, 'error', 6000);
-    } finally {
-      flow.updateNodeData(id, { busy: '' });
-    }
-  }
+  const write = () => generate(flow, id, snap);
 
   return (
     <Frame
       id={id}
       kind="text"
       no={data.no}
+      pins={(data as { pin?: Pin[] }).pin}
       selected={selected}
       width={BOX_HEIGHT}
       panel={
@@ -461,6 +486,7 @@ export function ImageNode({ id, data: raw, selected }: NodeProps) {
       id={id}
       kind="image"
       no={data.no}
+      pins={(data as { pin?: Pin[] }).pin}
       selected={selected}
       width={nodeWidth('image', data)}
       tools={<NodeTools id={id} kind="image" data={data} onUpload={() => file.current!.click()} />}
@@ -641,6 +667,7 @@ export function VideoNode({ id, data: raw, selected }: NodeProps) {
       id={id}
       kind="video"
       no={data.no}
+      pins={(data as { pin?: Pin[] }).pin}
       selected={selected}
       width={nodeWidth('video', data)}
       tools={<NodeTools id={id} kind="video" data={data} />}
@@ -706,6 +733,7 @@ export function AudioNode({ id, data: raw, selected }: NodeProps) {
       id={id}
       kind="audio"
       no={data.no}
+      pins={(data as { pin?: Pin[] }).pin}
       selected={selected}
       width={nodeWidth('audio')}
       tools={<NodeTools id={id} kind="audio" data={data} />}
@@ -732,6 +760,130 @@ export function AudioNode({ id, data: raw, selected }: NodeProps) {
     >
       <Result kind="audio" data={data} />
     </Frame>
+  );
+}
+
+// ---------- 分组 ----------
+
+// 分组只是一个框：垫在成员下面，左上角是组名。拖这个框，里面的节点一起走。
+// 组名双击改。只选中这一个分组时，名字后面是「更多」：执行整组、存为工作流、解散分组。
+export function GroupNode({ id, data: raw, selected }: NodeProps) {
+  const data = raw as unknown as GroupData;
+  const flow = useReactFlow();
+  const alone = useAlone(selected);
+  const { snap, ungroup, saveWorkflow } = useContext(CanvasActions);
+  const [naming, setNaming] = useState(false);
+  const draft = useDraft(data.name || '', (name) => flow.updateNodeData(id, { name }));
+  const name = data.name?.trim() || `分组${data.no ? ` ${data.no}` : ''}`;
+  const acts: Record<string, () => void> = { run: () => runAll(flow, data.members, snap), save: () => saveWorkflow(id), ungroup: () => ungroup(id) };
+  return (
+    <div className={`cgroup ${selected ? 'selected' : ''}`}>
+      <div className="cgroup-title">
+        {naming ? (
+          <input
+            className="cgroup-name-edit nodrag"
+            autoFocus
+            maxLength={30}
+            placeholder={name}
+            aria-label="组名"
+            {...draft}
+            onBlur={() => {
+              draft.onBlur();
+              setNaming(false);
+            }}
+            onKeyDown={(e) => !e.nativeEvent.isComposing && (e.key === 'Enter' || e.key === 'Escape') && e.currentTarget.blur()}
+          />
+        ) : (
+          <span className="cgroup-name" onDoubleClick={() => setNaming(true)}>
+            {name}
+          </span>
+        )}
+        <span className="cgroup-count">{data.members.length} 个节点</span>
+        {alone && (
+          <button
+            className="cnode-btn nodrag"
+            type="button"
+            {...tip('更多')}
+            aria-label="分组操作"
+            aria-haspopup="menu"
+            aria-expanded="false"
+            onClick={(e) =>
+              openMenu(e.currentTarget, {
+                label: '分组操作',
+                items: [
+                  { value: 'run', label: '执行整组' },
+                  { value: 'save', label: '存为工作流' },
+                  { value: 'ungroup', label: '解散分组', note: '⇧ ⌘ G' },
+                ],
+                onSelect: (value) => acts[value](),
+              })
+            }
+          >
+            <Icon name="more" size={16} />
+          </button>
+        )}
+      </div>
+      <div className="cgroup-frame" />
+    </div>
+  );
+}
+
+// ---------- 堆叠 ----------
+
+// 一叠里某个节点的小图：图片、视频是画面，文本是开头几个字，音频是图标。
+function Mini({ node }: { node: Node }) {
+  useStore('history');
+  const kind = node.type as NodeKind;
+  if (kind === 'text') return <span className="cstack-words">{((node.data as unknown as TextData).text || '').slice(0, 40) || '空的文本'}</span>;
+  const output = outputOf(node);
+  const thumb = output?.asset ? output.asset.thumb : output?.url;
+  if (thumb && kind === 'image') return <img src={thumb} alt="" draggable={false} />;
+  if (thumb && kind === 'video') return <video src={`${thumb}#t=0.1`} preload="metadata" muted playsInline tabIndex={-1} />;
+  return <Icon name={NODE_ICONS[kind]} size={20} />;
+}
+
+// 一叠：框里是最上面那个节点的画面，后面露出两层边，右上角写着一共几个。
+// 选中它，下面展开一个画廊：点其中一个把它取回画布；右上角可以整叠摊开。
+export function StackNode({ id, data: raw, selected }: NodeProps) {
+  const data = raw as unknown as StackData;
+  const flow = useReactFlow();
+  const alone = useAlone(selected);
+  const { unstack } = useContext(CanvasActions);
+  // 成员是藏着的节点，它们变了这里也要跟着变。
+  const all = useFlowStore((s) => s.nodes);
+  const members = data.members.map((member) => all.find((node) => node.id === member)).filter((node): node is Node => Boolean(node));
+  return (
+    <div className={`cnode cstack ${selected ? 'selected' : ''}`} style={{ width: BOX_HEIGHT }}>
+      <div className="cnode-title">
+        <span className="cnode-name">
+          <Icon name="layers" size={14} />
+          <span>{`堆叠${data.no ? ` ${data.no}` : ''}`}</span>
+        </span>
+        {alone && (
+          <span className="cnode-acts nodrag">
+            <button className="cnode-btn" type="button" {...tip('取消堆叠：里面的节点都摊回画布')} aria-label="取消堆叠" onClick={() => unstack(id)}>
+              <Icon name="grid" size={16} />
+            </button>
+          </span>
+        )}
+      </div>
+      <div className="cnode-box cstack-box">
+        {members[0] && <Mini node={members[0]} />}
+        <span className="cstack-count">{members.length}</span>
+      </div>
+      <NodeToolbar isVisible={alone} position={Position.Bottom} offset={20}>
+        <div className="cnode-panel cstack-panel nowheel">
+          <div className="cstack-grid">
+            {members.map((member) => (
+              <button key={member.id} type="button" className="cstack-item" {...tip('点一下把它取回画布')} aria-label={`取回 ${NODE_LABELS[member.type as NodeKind]}${member.data.no ? ` ${member.data.no}` : ''}`} onClick={() => unstack(id, member.id)}>
+                <Mini node={member} />
+                <span className="chist-cap ellipsis">{`${NODE_LABELS[member.type as NodeKind]}${member.data.no ? ` ${member.data.no}` : ''}`}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      </NodeToolbar>
+    </div>
   );
 }
 

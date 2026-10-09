@@ -3,6 +3,20 @@
 import type { Kind, Ref, VideoForm } from '../types.ts';
 
 export type NodeKind = 'text' | 'image' | 'video' | 'audio';
+// 画布上还有一种不放内容的节点：分组的框。
+export const isGroup = (node: { type?: string }) => node.type === 'group';
+// 堆叠：把一批节点收成一叠，只占一个节点的位置（type 是 stack）。data.members 记着里面有哪些节点；
+// 成员还在画布上、连线也还在，只是收起来不画（hidden）。
+export const isStack = (node: { type?: string }) => node.type === 'stack';
+export interface StackData {
+  no?: number;
+  members: string[];
+}
+export const MAX_STACK = 50;
+// 颜色标记：一个节点可以标一种或几种颜色，左上角按颜色汇总、点了定位。
+export const PINS = ['red', 'yellow', 'green', 'blue'] as const;
+export type Pin = (typeof PINS)[number];
+export const PIN_LABELS: Record<Pin, string> = { red: '红色', yellow: '黄色', green: '绿色', blue: '蓝色' };
 // 图片连到视频节点时当什么用。
 export type FrameRole = 'reference' | 'first' | 'last';
 
@@ -313,6 +327,50 @@ export function numbered<T extends { type?: string; data: Record<string, unknown
   });
 }
 
+// ---------- 分组 ----------
+
+// 分组是一个只画框的节点（type 是 group）：data.members 记着组里有哪些节点，data.name 是组名。
+// 组里的节点位置照旧各记各的，框的位置和大小不存，每次按成员现在占的范围算出来。
+export interface GroupData {
+  no?: number;
+  name?: string;
+  members: string[];
+}
+// 框比成员占的范围四周各大出这么多。
+export const GROUP_PAD = 24;
+// 一组成员（每个给出整个节点占的位置，含名字那一行）合起来的框。没有成员就是 null。
+export function groupFrame(members: Rect[]): Rect | null {
+  if (!members.length) return null;
+  const left = Math.min(...members.map((m) => m.x));
+  const top = Math.min(...members.map((m) => m.y));
+  const right = Math.max(...members.map((m) => m.x + m.width));
+  const bottom = Math.max(...members.map((m) => m.y + m.height));
+  return { x: left - GROUP_PAD, y: top - GROUP_PAD, width: right - left + GROUP_PAD * 2, height: bottom - top + GROUP_PAD * 2 };
+}
+
+// 一批节点按连线的先后排个序：上游在前、下游在后，执行整组时照这个顺序来。线两头有一头不在这批里的不算。
+export function runOrder(ids: string[], edges: { source: string; target: string }[]): string[] {
+  const inside = new Set(ids);
+  const waits = new Map(ids.map((id) => [id, 0]));
+  const next = new Map(ids.map((id) => [id, [] as string[]]));
+  for (const { source, target } of edges) {
+    if (!inside.has(source) || !inside.has(target)) continue;
+    waits.set(target, waits.get(target)! + 1);
+    next.get(source)!.push(target);
+  }
+  const ready = ids.filter((id) => !waits.get(id));
+  const order: string[] = [];
+  while (ready.length) {
+    const id = ready.shift()!;
+    order.push(id);
+    for (const target of next.get(id)!) {
+      waits.set(target, waits.get(target)! - 1);
+      if (!waits.get(target)) ready.push(target);
+    }
+  }
+  return order;
+}
+
 // ---------- 再次生成 ----------
 
 // 一个节点生成出 results 份结果，各放在哪。
@@ -337,6 +395,8 @@ export function placeResults(source: { id: string; position: { x: number; y: num
 interface Piece {
   id: string;
   type?: string;
+  // 收在一叠里的节点是藏着的。
+  hidden?: boolean;
   position: { x: number; y: number };
   data: Record<string, unknown>;
 }
@@ -355,7 +415,7 @@ export interface Clip {
 export function clipOf(nodes: Piece[], edges: Wire[]): Clip {
   const ids = new Set(nodes.map((node) => node.id));
   return {
-    nodes: nodes.map(({ id, type, position, data }) => ({ id, type, position: { ...position }, data: stripNodeData(data) })),
+    nodes: nodes.map(({ id, type, position, data, hidden }) => ({ id, type, position: { ...position }, data: stripNodeData(data), ...(hidden ? { hidden } : {}) })),
     edges: edges.filter((edge) => ids.has(edge.source) && ids.has(edge.target)).map(({ id, source, target, data }) => ({ id, source, target, data })),
   };
 }
@@ -363,13 +423,16 @@ export function clipOf(nodes: Piece[], edges: Wire[]): Clip {
 // 把复制下来的一份放回画布：节点和连线都换新 id，相互的位置不变。
 // at 是这一份的左上角落在哪；没给就照原位置错开 by 这么多。
 export function pasteClip(clip: Clip, place: { at?: { x: number; y: number }; by?: { x: number; y: number } }, newId: () => string): Clip {
-  const left = Math.min(...clip.nodes.map((node) => node.position.x));
-  const top = Math.min(...clip.nodes.map((node) => node.position.y));
+  // 分组的框没有自己的位置，对齐左上角时不算它。
+  const solid = clip.nodes.filter((node) => node.type !== 'group' && !node.hidden);
+  const left = Math.min(...(solid.length ? solid : clip.nodes).map((node) => node.position.x));
+  const top = Math.min(...(solid.length ? solid : clip.nodes).map((node) => node.position.y));
   const dx = place.at ? place.at.x - left : place.by?.x || 0;
   const dy = place.at ? place.at.y - top : place.by?.y || 0;
   const ids = new Map(clip.nodes.map((node) => [node.id, newId()]));
   return {
-    nodes: clip.nodes.map((node) => ({ ...node, id: ids.get(node.id)!, position: { x: node.position.x + dx, y: node.position.y + dy }, data: { ...node.data } })),
+    // 分组里记的成员也换成新 id。
+    nodes: clip.nodes.map((node) => ({ ...node, id: ids.get(node.id)!, position: { x: node.position.x + dx, y: node.position.y + dy }, data: { ...node.data, ...(Array.isArray(node.data.members) ? { members: (node.data.members as string[]).map((member) => ids.get(member)).filter(Boolean) } : {}) } })),
     edges: clip.edges.filter((edge) => ids.has(edge.source) && ids.has(edge.target)).map((edge) => ({ ...edge, id: newId(), source: ids.get(edge.source)!, target: ids.get(edge.target)!, data: edge.data && { ...edge.data } })),
   };
 }

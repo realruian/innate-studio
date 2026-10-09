@@ -2,10 +2,11 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Node } from '@xyflow/react';
-import { state, useStore } from '../store.ts';
+import { api, state, useStore } from '../store.ts';
 import { fmtTime } from '../format.ts';
 import { Icon } from '../ui/Icon.tsx';
-import { Segmented } from '../ui/controls.tsx';
+import { Segmented, tip } from '../ui/controls.tsx';
+import { toast } from '../ui/layers.tsx';
 import type { HistoryItem, Kind } from '../types.ts';
 import { NODE_LABELS, type NodeKind } from './model.ts';
 import { NODE_ICONS } from './nodes.tsx';
@@ -129,6 +130,52 @@ export function HistoryPicker({ onPick }: { onPick: (item: HistoryItem) => void 
         ))}
         {!shown.length && <div className="cfind-empty">{done.length ? '没有符合的内容' : '还没有生成过内容'}</div>}
       </div>
+    </div>
+  );
+}
+
+// ---------- 工作流 ----------
+
+export interface WorkflowMeta {
+  id: string;
+  name: string;
+  count: number;
+  updatedAt: number;
+}
+
+// 存下来的工作流。点一份，它的节点和连线就整套放到画布上，外面套一个同名的分组。
+export function WorkflowPicker({ onPick }: { onPick: (id: string) => void }) {
+  const [list, setList] = useState<WorkflowMeta[] | null>(null);
+  const load = () =>
+    api<{ items: WorkflowMeta[] }>('GET', '/api/workflows')
+      .then((data) => setList(data.items))
+      .catch((err) => toast(`工作流读不出来：${(err as Error).message}`, 'error', 6000));
+  useEffect(() => {
+    load();
+  }, []);
+  async function remove(item: WorkflowMeta) {
+    try {
+      await api('DELETE', `/api/workflows/${item.id}`);
+      load();
+    } catch (err) {
+      toast((err as Error).message, 'error', 6000);
+    }
+  }
+  return (
+    <div className="popover-body cflows">
+      {(list || []).map((item) => (
+        <div key={item.id} className="cflows-item">
+          <button type="button" className="cflows-pick" onClick={() => onPick(item.id)}>
+            <Icon name="workflow" size={16} />
+            <span className="cflows-name ellipsis">{item.name}</span>
+            <span className="cflows-count">{item.count} 个节点</span>
+          </button>
+          <button type="button" className="cnode-btn" {...tip('删除这份工作流')} aria-label={`删除工作流「${item.name}」`} onClick={() => remove(item)}>
+            <Icon name="trash" size={16} />
+          </button>
+        </div>
+      ))}
+      {list && !list.length && <div className="cfind-empty">还没有工作流。把几个节点打成一组，在分组的「更多」里选「存为工作流」。</div>}
     </div>
   );
 }

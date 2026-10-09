@@ -1,7 +1,7 @@
 // 一张画布：可以无限平移缩放的桌面，上面摆节点、拉连线。打开时整个窗口都是它，改动之后自动保存。
 
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { Background, BackgroundVariant, MiniMap, Panel, ReactFlow, ReactFlowProvider, SelectionMode, ViewportPortal, useEdgesState, useNodesState, useReactFlow, useViewport, type Connection, type Edge, type Node, type NodeChange, type OnConnectEnd, type Viewport } from '@xyflow/react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { Background, BackgroundVariant, MiniMap, Panel, ReactFlow, ReactFlowProvider, SelectionMode, ViewportPortal, useEdgesState, useNodesState, useReactFlow, useStoreApi, useViewport, type Connection, type Edge, type Node, type NodeChange, type OnConnectEnd, type Viewport } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { api, canvasPath, state, useStore, KINDS as MEDIA } from '../store.ts';
 import { composer, imageRefLimit, traits } from '../composer/state.ts';
@@ -12,10 +12,10 @@ import { tip } from '../ui/controls.tsx';
 import { openMenu, openPopover, toast } from '../ui/layers.tsx';
 import { reducedMotion } from '../ui/motion.ts';
 import type { HistoryItem, Kind } from '../types.ts';
-import { BOX_HEIGHT, NODE_LABELS, TITLE_ROOM, canLink, clipOf, nodeWidth, numbered, pasteClip, snapTo, sourcesOf, stripNodeData, targetsOf, tidy, type Clip, type Guide, type LinkData, type NodeKind, type Rect } from './model.ts';
+import { BOX_HEIGHT, NODE_LABELS, TITLE_ROOM, canLink, MAX_STACK, PINS, PIN_LABELS, clipOf, groupFrame, isGroup, isStack, nodeWidth, numbered, pasteClip, snapTo, sourcesOf, stripNodeData, targetsOf, tidy, type Clip, type GroupData, type Guide, type LinkData, type NodeKind, type Pin, type Rect } from './model.ts';
 import { coverOf, newNodeData } from './run.ts';
-import { AudioNode, CanvasActions, DragLine, ImageNode, LinkEdge, NODE_ICONS, TextNode, VideoNode } from './nodes.tsx';
-import { Finder, HistoryPicker } from './panels.tsx';
+import { AudioNode, CanvasActions, DragLine, GroupNode, ImageNode, LinkEdge, NODE_ICONS, StackNode, TextNode, VideoNode } from './nodes.tsx';
+import { Finder, HistoryPicker, WorkflowPicker } from './panels.tsx';
 
 interface Doc {
   id: string;
@@ -29,7 +29,7 @@ interface Snap {
   edges: Edge[];
 }
 
-const nodeTypes = { text: TextNode, image: ImageNode, video: VideoNode, audio: AudioNode };
+const nodeTypes = { text: TextNode, image: ImageNode, video: VideoNode, audio: AudioNode, group: GroupNode, stack: StackNode };
 const edgeTypes = { link: LinkEdge };
 const KINDS: NodeKind[] = ['text', 'image', 'video', 'audio'];
 // 画布上能上传的文件。音频只收 MP3 和 WAV。
@@ -46,10 +46,31 @@ const PANEL_ROOM = 240;
 const SNAP_REACH = 6;
 
 // 一个节点的框在画布上占的位置，不算上面那行名字：对齐看的是框。
+const membersOf = (node: Node) => (node.data as unknown as GroupData).members || [];
+
+// 分组的框不存位置和大小，每次按成员现在占的范围算出来，垫在所有节点下面。成员都不在了就不画。
+function framed(nodes: Node[]): Node[] {
+  if (!nodes.some(isGroup)) return nodes;
+  const byId = new Map(nodes.map((node) => [node.id, node]));
+  return nodes.map((node) => {
+    if (!isGroup(node)) return node;
+    const frame = frameOf(node, byId);
+    return frame ? { ...node, position: { x: frame.x, y: frame.y }, style: { width: frame.width, height: frame.height }, zIndex: -1, hidden: false } : { ...node, hidden: true };
+  });
+}
+function frameOf(group: Node, byId: Map<string, Node>) {
+  const rects = membersOf(group)
+    .map((id) => byId.get(id))
+    .filter((member): member is Node => Boolean(member) && !member!.hidden)
+    .map((member) => ({ x: member.position.x, y: member.position.y, width: member.measured?.width || nodeWidth(member.type as NodeKind, member.data), height: TITLE_ROOM + BOX_HEIGHT }));
+  return groupFrame(rects);
+}
+
 const boxOf = (node: Node, position = node.position): Rect => ({ x: position.x, y: position.y + TITLE_ROOM, width: node.measured?.width || nodeWidth(node.type as NodeKind, node.data), height: BOX_HEIGHT });
 
 // 存进画布的只有节点的位置和内容、连线的两头和用途；选中状态、量出来的尺寸这些不存。
-const savedNodes = (nodes: Node[]) => nodes.map(({ id, type, position, data }) => ({ id, type, position, data: stripNodeData(data) }));
+// 收在一叠里的节点是藏着的，这一点要存。
+const savedNodes = (nodes: Node[]) => nodes.map(({ id, type, position, data, hidden }) => ({ id, type, position, data: stripNodeData(data), ...(hidden ? { hidden: true } : {}) }));
 const savedEdges = (edges: Edge[]) => edges.map(({ id, source, target, data }) => ({ id, source, target, type: 'link', data }));
 
 function makeEdge(source: Node, target: Node): Edge {
@@ -61,6 +82,7 @@ function makeEdge(source: Node, target: Node): Edge {
 
 function Board({ id, onExit }: { id: string; onExit: () => void }) {
   const flow = useReactFlow();
+  const store = useStoreApi();
   const { zoom } = useViewport();
   // 名字、加号这些在屏幕上大小不变，靠这个倒数把画布的缩放抵消掉；最多放大到 2 倍。
   const inv = Math.min(1 / zoom, 2);
@@ -241,6 +263,7 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
       for (let moved = true; !at && moved; ) {
         moved = false;
         for (const n of flow.getNodes()) {
+          if (isGroup(n) || n.hidden) continue;
           const taken = n.measured?.width || nodeWidth(n.type as NodeKind, n.data);
           if (Math.abs(n.position.y - position.y) < 200 && position.x < n.position.x + taken + 60 && position.x + width + 60 > n.position.x) {
             position.x = n.position.x + taken + 80;
@@ -346,13 +369,13 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
     [addNode],
   );
 
-  // 生成历史出在工具栏的右边、和工具栏顶对齐，不盖住工具栏。浮层要贴着一个元素显示，用那个看不见的点。
-  function openHistory(button: HTMLElement) {
+  // 生成历史、工作流这两块浮层出在工具栏的右边、和工具栏顶对齐，不盖住工具栏。浮层要贴着一个元素显示，用那个看不见的点。
+  function openBeside(button: HTMLElement, content: ReactNode, label: string) {
     const bar = button.closest('.canvas-tools')!.getBoundingClientRect();
     const el = anchor.current!;
     el.style.left = `${bar.right + 12}px`;
     el.style.top = `${bar.top - 6}px`;
-    openPopover(el, <HistoryPicker onPick={restore} />, { label: '生成历史' });
+    openPopover(el, content, { label });
   }
 
   // ---------- 对齐 ----------
@@ -360,25 +383,189 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
   // 拖着一个节点靠近别的节点时，把它吸到对方的边线或中线上，并画出参考线。一次拖着好几个时不吸。
   const changeNodes = useCallback(
     (changes: NodeChange<Node>[]) => {
+      // 拖的是分组的框：框自己没有位置，把这一下挪动换成挪它的成员。成员自己也在被拖的（一起选中了）就不再挪一遍。
+      const moving = new Set(changes.filter((change) => change.type === 'position').map((change) => change.id));
+      const frames = changes.filter((change) => change.type === 'position' && change.position && isGroup(flow.getNode(change.id) || {}));
+      if (frames.length) {
+        setNodes((items) => {
+          const byId = new Map(items.map((node) => [node.id, node]));
+          const shift = new Map<string, { x: number; y: number }>();
+          for (const change of frames) {
+            if (change.type !== 'position' || !change.position) continue;
+            const group = byId.get(change.id);
+            const frame = group && frameOf(group, byId);
+            if (!group || !frame) continue;
+            for (const member of membersOf(group)) if (!moving.has(member)) shift.set(member, { x: change.position.x - frame.x, y: change.position.y - frame.y });
+          }
+          return items.map((node) => (shift.has(node.id) ? { ...node, position: { x: node.position.x + shift.get(node.id)!.x, y: node.position.y + shift.get(node.id)!.y } } : node));
+        });
+        changes = changes.filter((change) => !(change.type === 'position' && frames.includes(change)));
+      }
       // 松手时还会来最后一次位置（不带 dragging），它也要吸，不然一松手节点又弹回没对齐的地方。
       const moves = changes.filter((change) => change.type === 'position' && change.position && (change.dragging || change.id === snapping.current));
-      const move = moves.length === 1 ? moves[0] : null;
+      const move = moves.length === 1 && !frames.length ? moves[0] : null;
       const me = move?.type === 'position' ? flow.getNode(move.id) : undefined;
       if (move?.type === 'position' && move.position && me) {
         snapping.current = move.dragging ? move.id : '';
-        const others = flow.getNodes().filter((node) => node.id !== me.id).map((node) => boxOf(node));
+        const others = flow.getNodes().filter((node) => node.id !== me.id && !isGroup(node) && !node.hidden).map((node) => boxOf(node));
         const snapped = snapTo(boxOf(me, move.position), others, SNAP_REACH / flow.getZoom());
         move.position = { x: move.position.x + snapped.dx, y: move.position.y + snapped.dy };
         setGuides(snapped.guides);
       } else if (changes.some((change) => change.type === 'position')) setGuides((now) => (now.length ? [] : now));
       onNodesChange(changes);
     },
-    [flow, onNodesChange],
+    [flow, onNodesChange, setNodes],
+  );
+
+  // ---------- 分组 ----------
+
+  // 把选中的节点打成一组（至少两个）。它们原来在别的组里就先从那边拿出来。
+  const group = useCallback(() => {
+    const picked = flow.getNodes().filter((node) => node.selected && !isGroup(node));
+    if (picked.length < 2) return toast('先选中至少两个节点，再打组', 'info');
+    snap();
+    const ids = new Set(picked.map((node) => node.id));
+    setNodes((items) => {
+      const kept = items
+        .map((node) => (isGroup(node) ? { ...node, selected: false, data: { ...node.data, members: membersOf(node).filter((id) => !ids.has(id)) } } : node.selected ? { ...node, selected: false } : node))
+        .filter((node) => !isGroup(node) || membersOf(node).length);
+      const [made] = numbered([{ id: crypto.randomUUID(), type: 'group', position: { x: 0, y: 0 }, data: { members: [...ids] }, selected: true } as Node], kept);
+      return [made, ...kept];
+    });
+    // 框选之后会留着一个选区框，选中的东西换了，把它收掉。
+    store.setState({ nodesSelectionActive: false });
+  }, [flow, setNodes, snap, store]);
+
+  // 解散分组：只去掉框，里面的节点留着。给了 id 就解散那一个，没给就解散选中的。
+  const ungroup = useCallback(
+    (groupId?: string) => {
+      if (!flow.getNodes().some((node) => isGroup(node) && (groupId ? node.id === groupId : node.selected))) return;
+      snap();
+      setNodes((items) => items.filter((node) => !(isGroup(node) && (groupId ? node.id === groupId : node.selected))));
+    },
+    [flow, setNodes, snap],
+  );
+
+  // ---------- 堆叠 ----------
+
+  // 把选中的节点收成一叠（至少两个）。选中的里面已经有一叠，就并进同一叠。分组的框不收。
+  const stack = useCallback(() => {
+    const picked = flow.getNodes().filter((node) => node.selected && !isGroup(node));
+    const loose = picked.filter((node) => !isStack(node));
+    const members = [...picked.filter(isStack).flatMap(membersOf), ...loose.map((node) => node.id)];
+    if (members.length < 2 || !loose.length) return toast('先选中至少两个节点，再堆叠', 'info');
+    if (members.length > MAX_STACK) return toast(`一叠最多放 ${MAX_STACK} 个节点`, 'info');
+    snap();
+    const inside = new Set(loose.map((node) => node.id));
+    const merged = new Set(picked.filter(isStack).map((node) => node.id));
+    setNodes((items) => {
+      const kept = items.filter((node) => !merged.has(node.id)).map((node) => (inside.has(node.id) ? { ...node, hidden: true, selected: false } : node.selected ? { ...node, selected: false } : node));
+      const [made] = numbered([{ id: crypto.randomUUID(), type: 'stack', position: { ...picked[0].position }, data: { members }, selected: true } as Node], kept);
+      return [...kept, made];
+    });
+    store.setState({ nodesSelectionActive: false });
+  }, [flow, setNodes, snap, store]);
+
+  // 摊开一叠：里面的节点从这一叠的位置起排成几行。只给了一个成员，就只把它取回来放在这一叠右边；取到只剩一个时这一叠自动散掉。
+  const unstack = useCallback(
+    (stackId: string, memberId?: string) => {
+      const pile = flow.getNode(stackId);
+      if (!pile) return;
+      snap();
+      const members = membersOf(pile);
+      const out = memberId && members.length > 2 ? [memberId] : members;
+      const rest = members.filter((id) => !out.includes(id));
+      const spot = new Map<string, { x: number; y: number }>();
+      if (rest.length) spot.set(out[0], { x: pile.position.x + BOX_HEIGHT + 80, y: pile.position.y });
+      else {
+        // 要取的那个排第一，放在这一叠原来的位置。
+        const order = memberId ? [memberId, ...members.filter((id) => id !== memberId)] : members;
+        let x = pile.position.x;
+        let y = pile.position.y;
+        order.forEach((id, index) => {
+          if (index && index % 5 === 0) {
+            x = pile.position.x;
+            y += TITLE_ROOM + BOX_HEIGHT + 56;
+          }
+          spot.set(id, { x, y });
+          const member = flow.getNode(id);
+          x += (member ? nodeWidth(member.type as NodeKind, member.data) : BOX_HEIGHT) + 60;
+        });
+      }
+      setNodes((items) =>
+        items
+          .filter((node) => rest.length || node.id !== stackId)
+          .map((node) => {
+            if (spot.has(node.id)) return { ...node, hidden: false, position: spot.get(node.id)!, selected: node.id === (memberId || out[0]) };
+            if (node.id === stackId) return { ...node, data: { ...node.data, members: rest } };
+            return node.selected ? { ...node, selected: false } : node;
+          }),
+      );
+    },
+    [flow, setNodes, snap],
+  );
+
+  // 成员被删掉之后，分组里不再记着它；一个成员都不剩的分组一起去掉。
+  // 堆叠也一样；一叠里只剩一个节点时，这一叠散掉，把那个节点放回它的位置。
+  useEffect(() => {
+    const ids = new Set(nodes.map((node) => node.id));
+    const stale = (node: Node) => (isGroup(node) && (!membersOf(node).length || membersOf(node).some((id) => !ids.has(id)))) || (isStack(node) && membersOf(node).filter((id) => ids.has(id)).length !== membersOf(node).length) || (isStack(node) && membersOf(node).length < 2);
+    if (!nodes.some(stale)) return;
+    setNodes((items) => {
+      const live = new Set(items.map((node) => node.id));
+      const pruned = items.map((node) => (isGroup(node) || isStack(node) ? { ...node, data: { ...node.data, members: membersOf(node).filter((id) => live.has(id)) } } : node));
+      // 只剩一个成员的那几叠：成员放出来，这一叠去掉。
+      const freed = new Map(pruned.filter((node) => isStack(node) && membersOf(node).length === 1).map((node) => [membersOf(node)[0], node.position]));
+      return pruned.filter((node) => !((isGroup(node) && !membersOf(node).length) || (isStack(node) && membersOf(node).length < 2))).map((node) => (freed.has(node.id) ? { ...node, hidden: false, position: freed.get(node.id)! } : node));
+    });
+  }, [nodes, setNodes]);
+
+  // 把一个分组存成工作流：组里的节点和它们之间的连线。
+  const saveWorkflow = useCallback(
+    async (groupId: string) => {
+      const made = flow.getNode(groupId);
+      if (!made) return;
+      const ids = new Set(membersOf(made));
+      const clip = clipOf(savedNodes(flow.getNodes().filter((node) => ids.has(node.id))), savedEdges(flow.getEdges()));
+      const data = made.data as unknown as GroupData;
+      try {
+        await api('POST', '/api/workflows', { name: data.name?.trim() || `分组 ${data.no || ''}`.trim(), ...clip });
+        toast('已存为工作流，在左侧工具栏的「工作流」里', 'success');
+      } catch (err) {
+        toast((err as Error).message, 'error', 6000);
+      }
+    },
+    [flow],
+  );
+
+  // 把一份工作流放上画布：节点和连线都是新的，放在视野中间，外面套一个同名的分组。
+  const applyWorkflow = useCallback(
+    async (workflowId: string) => {
+      try {
+        const saved = await api<Clip & { name: string }>('GET', `/api/workflows/${workflowId}`);
+        // 画布上已经有东西：放在所有节点的下面，左边对齐，不压着谁。空画布就放在视野中间。
+        const box = wrap.current!.getBoundingClientRect();
+        const solid = flow.getNodes().filter((node) => !isGroup(node) && !node.hidden);
+        const at = solid.length
+          ? { x: Math.min(...solid.map((node) => node.position.x)), y: Math.max(...solid.map((node) => node.position.y)) + TITLE_ROOM + BOX_HEIGHT + 120 }
+          : flow.screenToFlowPosition({ x: box.left + box.width / 2 - 300, y: box.top + box.height / 2 - 200 });
+        const pasted = pasteClip({ nodes: saved.nodes.filter((node) => !isGroup(node)), edges: saved.edges }, { at }, () => crypto.randomUUID());
+        snap();
+        const fresh = numbered(pasted.nodes.map((node) => ({ ...node, data: { ...node.data, no: undefined } }) as Node), flow.getNodes());
+        const [made] = numbered([{ id: crypto.randomUUID(), type: 'group', position: { x: 0, y: 0 }, data: { name: saved.name, members: fresh.map((node) => node.id) }, selected: true } as Node], flow.getNodes());
+        setNodes((items) => [made, ...items.map((node) => (node.selected ? { ...node, selected: false } : node)), ...fresh]);
+        setEdges((items) => [...items, ...pasted.edges.map((edge) => ({ ...edge, type: 'link' }) as Edge)]);
+        requestAnimationFrame(() => flow.fitView({ nodes: fresh.map(({ id }) => ({ id })), maxZoom: 1, padding: 0.3, duration: reducedMotion() ? 0 : 280 }));
+      } catch (err) {
+        toast((err as Error).message, 'error', 6000);
+      }
+    },
+    [flow, setEdges, setNodes, snap],
   );
 
   // 一键整理：框选了两个以上就只整理它们，否则整理整张画布。
   const arrange = useCallback(() => {
-    const all = flow.getNodes();
+    const all = flow.getNodes().filter((node) => !isGroup(node) && !node.hidden);
     const picked = all.filter((node) => node.selected);
     const scope = picked.length > 1 ? picked : all;
     if (scope.length < 2) return;
@@ -393,8 +580,14 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
   // ---------- 复制、粘贴、创建副本 ----------
 
   const selection = useCallback((): Clip | null => {
-    const picked = flow.getNodes().filter((node) => node.selected);
-    return picked.length ? clipOf(savedNodes(picked), savedEdges(flow.getEdges())) : null;
+    // 选中了分组的框，就连它的成员一起带上；分组只有成员都在这次复制里才带。
+    const all = flow.getNodes();
+    const chosen = new Set(all.filter((node) => node.selected).map((node) => node.id));
+    for (const node of all) if (isGroup(node) && node.selected) membersOf(node).forEach((id) => chosen.add(id));
+    // 一叠被选中（或者跟着分组被带上），里面藏着的节点也一起。
+    for (const node of all) if (isStack(node) && chosen.has(node.id)) membersOf(node).forEach((id) => chosen.add(id));
+    const picked = all.filter((node) => chosen.has(node.id) && (!isGroup(node) || membersOf(node).every((id) => chosen.has(id))));
+    return picked.some((node) => !isGroup(node)) ? clipOf(savedNodes(picked), savedEdges(flow.getEdges())) : null;
   }, [flow]);
 
   // 把一份复制下来的节点放上画布并选中它们。
@@ -474,7 +667,12 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
         e.preventDefault();
         return setFinding(true);
       }
-      if (!(e.metaKey || e.ctrlKey) || e.altKey || !mine(e) || (e.shiftKey && key !== '+' && key !== '=')) return;
+      if (!(e.metaKey || e.ctrlKey) || e.altKey || !mine(e) || (e.shiftKey && key !== '+' && key !== '=' && key !== 'g')) return;
+      // ⌘ G 打组，⇧ ⌘ G 解散。
+      if (key === 'g') {
+        e.preventDefault();
+        return e.shiftKey ? ungroup() : group();
+      }
       if (key === 'd') {
         e.preventDefault();
         duplicate();
@@ -487,7 +685,7 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
         flow.zoomOut({ duration: reducedMotion() ? 0 : 160 });
       } else if (key === 'a') {
         e.preventDefault();
-        setNodes((items) => items.map((n) => (n.selected ? n : { ...n, selected: true })));
+        setNodes((items) => items.map((n) => (n.selected || n.hidden ? n : { ...n, selected: true })));
       }
     };
     document.addEventListener('copy', onCopy);
@@ -500,7 +698,7 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
       document.removeEventListener('paste', onPaste);
       window.removeEventListener('keydown', onKey);
     };
-  }, [addNode, duplicate, flow, pasteSpot, place, selection, setNodes, upload]);
+  }, [addNode, duplicate, flow, group, pasteSpot, place, selection, setNodes, ungroup, upload]);
 
   // ---------- 右键菜单 ----------
 
@@ -518,7 +716,7 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
           dropAt.current = at;
           file.current!.click();
         } else if (value === 'paste') place(copied!, { at });
-        else if (value === 'all') setNodes((items) => items.map((n) => (n.selected ? n : { ...n, selected: true })));
+        else if (value === 'all') setNodes((items) => items.map((n) => (n.selected || n.hidden ? n : { ...n, selected: true })));
         else addNode(value as NodeKind, at);
       },
     });
@@ -530,14 +728,23 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
     const el = anchor.current!;
     el.style.left = `${x}px`;
     el.style.top = `${y}px`;
+    // 这时候选中的是什么：点的是分组的框，菜单里是解散；选中了两个以上的节点，多一项打组。
+    const picked = node ? (node.selected ? flow.getNodes().filter((n) => n.selected) : [node]) : flow.getNodes().filter((n) => n.selected);
+    const onGroup = picked.length === 1 && isGroup(picked[0]);
     openMenu(el, {
       label: '节点',
       items: [
         { value: 'duplicate', label: '创建副本', note: '⌘ D' },
-        { value: 'delete', label: '删除', note: '⌫', danger: true },
+        ...(picked.filter((n) => !isGroup(n)).length > 1 ? [{ value: 'group', label: '打组', note: '⌘ G' }, { value: 'stack', label: '堆叠' }] : []),
+        ...(picked.length === 1 && isStack(picked[0]) ? [{ value: 'unstack', label: '取消堆叠' }] : []),
+        onGroup ? { value: 'ungroup', label: '解散分组', note: '⇧ ⌘ G' } : { value: 'delete', label: '删除', note: '⌫', danger: true },
       ],
       onSelect: (value) => {
         if (value === 'duplicate') duplicate();
+        else if (value === 'group') group();
+        else if (value === 'stack') stack();
+        else if (value === 'unstack') unstack(picked[0].id);
+        else if (value === 'ungroup') ungroup(picked[0].id);
         else flow.deleteElements({ nodes: flow.getNodes().filter((n) => n.selected) });
       },
     });
@@ -547,7 +754,7 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
     (link: Connection | Edge) => {
       const source = flow.getNode(link.source);
       const target = flow.getNode(link.target);
-      if (!source || !target || source.id === target.id) return false;
+      if (!source || !target || source.id === target.id || isGroup(source) || isGroup(target) || isStack(source) || isStack(target)) return false;
       if (!canLink(source.type as NodeKind, target.type as NodeKind)) return false;
       const all = flow.getEdges();
       if (all.some((edge) => edge.source === source.id && edge.target === target.id)) return false;
@@ -652,7 +859,14 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
     });
   }
 
-  const actions = useMemo(() => ({ snap, addInput }), [snap, addInput]);
+  const actions = useMemo(() => ({ snap, addInput, ungroup, saveWorkflow, unstack }), [snap, addInput, ungroup, saveWorkflow, unstack]);
+  const shown = useMemo(() => framed(nodes), [nodes]);
+  // 每种颜色标了哪些节点。收在一叠里的不算。
+  const pinned = useMemo(() => {
+    const by = Object.fromEntries(PINS.map((pin) => [pin, [] as Node[]])) as Record<Pin, Node[]>;
+    for (const node of nodes) if (!node.hidden) for (const pin of (node.data.pin as Pin[] | undefined) || []) by[pin]?.push(node);
+    return by;
+  }, [nodes]);
   const hasLibrary = state.app.features.library || state.app.features.persons;
 
   return (
@@ -684,7 +898,9 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
         }}
       >
         <ReactFlow
-          nodes={nodes}
+          nodes={shown}
+          // 选中的节点不自动提到最上面：分组的框要一直垫在成员下面。
+          elevateNodesOnSelect={false}
           edges={edges}
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
@@ -696,9 +912,13 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
           onNodeDragStart={snap}
           onNodeDragStop={() => setGuides([])}
           connectionLineComponent={DragLine}
-          onBeforeDelete={async () => {
+          onBeforeDelete={async ({ nodes: gone, edges: cut }) => {
             snap();
-            return true;
+            // 删掉一叠，里面的节点和它们的连线一起删。
+            const inside = new Set(gone.filter(isStack).flatMap(membersOf));
+            if (!inside.size) return true;
+            const have = new Set(cut.map((edge) => edge.id));
+            return { nodes: [...gone, ...flow.getNodes().filter((node) => inside.has(node.id))], edges: [...cut, ...flow.getEdges().filter((edge) => !have.has(edge.id) && (inside.has(edge.source) || inside.has(edge.target)))] };
           }}
           onMoveEnd={() => setMoved((n) => n + 1)}
           onPaneContextMenu={(e) => {
@@ -743,7 +963,7 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
           {showMap && <MiniMap pannable zoomable position="bottom-left" style={{ width: 168, height: 112 }} />}
           {finding && (
             <Panel position="top-center" className="canvas-find">
-              <Finder nodes={nodes} onJump={jumpTo} onClose={() => setFinding(false)} />
+              <Finder nodes={nodes.filter((node) => !isGroup(node) && !isStack(node) && !node.hidden)} onJump={jumpTo} onClose={() => setFinding(false)} />
             </Panel>
           )}
           <Panel position="top-left" className="canvas-title">
@@ -754,6 +974,21 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
             <button className="icon-btn canvas-switch" type="button" {...tip('切换画布')} aria-label="切换画布" aria-haspopup="listbox" aria-expanded="false" onClick={(e) => switchCanvas(e.currentTarget)}>
               <Icon name="chevron" size={14} />
             </button>
+            {PINS.filter((pin) => pinned[pin].length).map((pin) => (
+              <button
+                key={pin}
+                className="canvas-pin"
+                type="button"
+                {...tip(`${PIN_LABELS[pin]}标记的节点`)}
+                aria-label={`${PIN_LABELS[pin]}标记：${pinned[pin].length} 个节点`}
+                aria-haspopup="menu"
+                aria-expanded="false"
+                onClick={(e) => openMenu(e.currentTarget, { label: `${PIN_LABELS[pin]}标记`, items: pinned[pin].map((node) => ({ value: node.id, label: `${NODE_LABELS[node.type as NodeKind]}${node.data.no ? ` ${node.data.no}` : ''}`, note: String(node.data.prompt || node.data.text || '').slice(0, 14) })), onSelect: jumpTo })}
+              >
+                <span className={`cpin is-${pin}`} />
+                {pinned[pin].length}
+              </button>
+            ))}
             {saving === 'failed' ? (
               <button className="canvas-saved is-failed" type="button" onClick={flush}>
                 没存上，点这里重试
@@ -782,9 +1017,13 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
               <Icon name="upload" size={18} />
               <span className="canvas-tool-name">上传</span>
             </button>
-            <button className="icon-btn" type="button" aria-label="生成历史" aria-haspopup="dialog" aria-expanded="false" onClick={(e) => openHistory(e.currentTarget)}>
+            <button className="icon-btn" type="button" aria-label="生成历史" aria-haspopup="dialog" aria-expanded="false" onClick={(e) => openBeside(e.currentTarget, <HistoryPicker onPick={restore} />, '生成历史')}>
               <Icon name="history" size={18} />
               <span className="canvas-tool-name">生成历史</span>
+            </button>
+            <button className="icon-btn" type="button" aria-label="工作流" aria-haspopup="dialog" aria-expanded="false" onClick={(e) => openBeside(e.currentTarget, <WorkflowPicker onPick={applyWorkflow} />, '工作流')}>
+              <Icon name="workflow" size={18} />
+              <span className="canvas-tool-name">工作流</span>
             </button>
             <button className={`icon-btn ${finding ? 'active' : ''}`} type="button" aria-label="搜索节点" aria-pressed={finding} onClick={() => setFinding((on) => !on)}>
               <Icon name="search" size={18} />

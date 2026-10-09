@@ -702,6 +702,53 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 /* 在鼠标位置弹菜单时用的定位点，看不见 */
 .canvas-anchor { position: fixed; width: 0; height: 0; pointer-events: none; }
 
+/* 分组：一个垫在成员下面的框，左上角外面是组名。组名和节点的名字一样在屏幕上大小不变。 */
+/* React Flow 给叫 group 的节点配了一套自带的边框、底色和内边距，这里全部去掉，只用我们自己的框。 */
+.canvas .react-flow__node-group, .canvas .react-flow__node-group.selectable.selected, .canvas .react-flow__node-group.selectable:focus, .canvas .react-flow__node-group.selectable:focus-visible, .canvas .react-flow__node-group.selectable:hover { padding: 0; border: 0; border-radius: 0; outline: 0; background: none; box-shadow: none; }
+.cgroup { position: relative; width: 100%; height: 100%; }
+.cgroup-frame { position: absolute; inset: 0; border: 1px dashed var(--border-strong); border-radius: var(--r-lg); background: color-mix(in srgb, var(--text) 3%, transparent); transition: border-color 120ms var(--ease), background-color 120ms var(--ease); }
+.cgroup.selected .cgroup-frame { border-color: var(--text-2); border-style: solid; }
+.cgroup-title { position: absolute; left: 0; bottom: 100%; display: flex; align-items: center; gap: var(--sp-8); height: var(--sp-16); margin-bottom: var(--sp-8); padding: 0 var(--sp-2); color: var(--text-2); font-size: var(--text-ui); line-height: var(--lh-snug); white-space: nowrap; transform-origin: left bottom; scale: var(--inv, 1); translate: 0 calc(var(--sp-8) - var(--sp-8) * var(--inv, 1)); }
+.cgroup-name { font-weight: var(--fw-medium); cursor: text; }
+.cgroup-count { color: var(--text-4); font-size: var(--text-caption); }
+.cgroup-name-edit { width: 160px; height: 24px; padding: 0 var(--sp-4); border: 1px solid var(--border-hover); border-radius: var(--r-xs); outline: 0; background: var(--surface-1); color: var(--text); font-size: var(--text-ui); }
+/* 颜色标记：一个小圆点。节点名字后面、名字行右端的按钮里、左上角的汇总里都是它 */
+.cpin { display: inline-block; flex: none; width: 8px; height: 8px; border-radius: 50%; }
+.cpin.is-red { background: var(--danger); }
+.cpin.is-yellow { background: var(--warn); }
+.cpin.is-green { background: var(--ok); }
+.cpin.is-blue { background: var(--accent); }
+.cpin.is-none { box-shadow: inset 0 0 0 1.5px var(--text-3); }
+.cpins { flex-direction: row; align-items: center; gap: var(--sp-2); padding: var(--sp-2); }
+.cpins-item { display: grid; place-items: center; width: var(--h-sm); height: var(--h-sm); padding: 0; border: 0; border-radius: var(--r-xs); background: none; cursor: pointer; transition: background-color 120ms var(--ease); }
+.cpins-item .cpin { width: 12px; height: 12px; }
+.cpins-item.active { background: var(--surface-3); }
+.cpins-none { height: var(--h-sm); margin-left: var(--sp-4); padding: 0 var(--sp-8); border: 0; border-radius: var(--r-xs); background: none; color: var(--text-2); font-size: var(--text-ui); cursor: pointer; }
+.cpins-none:disabled { color: var(--text-off); cursor: default; }
+@media (hover: hover) { .cpins-item:hover, .cpins-none:hover:not(:disabled) { background: var(--hover); } }
+.canvas-pin { display: inline-flex; align-items: center; gap: var(--sp-4); height: var(--h-sm); margin-left: var(--sp-4); padding: 0 var(--sp-8); border: 0; border-radius: var(--r-xs); background: none; color: var(--text-3); font-size: var(--text-caption); font-variant-numeric: tabular-nums; cursor: pointer; transition: background-color 120ms var(--ease), color 120ms var(--ease); }
+.canvas-pin[aria-expanded='true'] { background: var(--hover); color: var(--text); }
+@media (hover: hover) { .canvas-pin:hover { background: var(--hover); color: var(--text); } }
+/* 堆叠：框后面露出两层边，右上角是个数；选中后下面是画廊 */
+.cstack-box { place-items: center; color: var(--text-3); box-shadow: 0 0 0 1px var(--border), 7px 7px 0 -1px var(--surface-1), 7px 7px 0 0 var(--border-strong), 14px 14px 0 -1px var(--surface-1), 14px 14px 0 0 var(--border-strong); }
+@media (hover: hover) { .cnode.cstack:not(.selected):hover .cstack-box { box-shadow: 0 0 0 1px var(--border-strong), 7px 7px 0 -1px var(--surface-1), 7px 7px 0 0 var(--border-strong), 14px 14px 0 -1px var(--surface-1), 14px 14px 0 0 var(--border-strong); } }
+.cstack-box > img, .cstack-box > video { width: 100%; height: 100%; min-height: 0; object-fit: cover; border-radius: var(--r-lg); pointer-events: none; }
+.cstack-words { padding: var(--sp-16); color: var(--text-2); font-size: var(--text-ui); line-height: var(--lh-body); overflow-wrap: anywhere; }
+.cstack-count { position: absolute; top: var(--sp-8); right: var(--sp-8); min-width: 24px; padding: var(--sp-2) var(--sp-8); border-radius: var(--r-sm); background: rgba(0, 0, 0, 0.55); color: #fff; font-size: var(--text-caption); font-variant-numeric: tabular-nums; text-align: center; }
+.cstack-panel { width: 520px; padding: var(--sp-16); }
+.cstack-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: var(--sp-8); max-height: 320px; overflow-y: auto; }
+.cstack-item { position: relative; display: grid; place-items: center; aspect-ratio: 1; padding: 0; overflow: hidden; border: 1px solid var(--border-float); border-radius: var(--r-sm); background: var(--surface-2); color: var(--text-3); cursor: pointer; transition: border-color 120ms var(--ease); }
+.cstack-item > img, .cstack-item > video { width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
+.cstack-item .cstack-words { padding: var(--sp-8); font-size: var(--text-micro); }
+@media (hover: hover) { .cstack-item:hover { border-color: var(--border-hover); } }
+/* 工作流列表 */
+.cflows { gap: var(--sp-2); width: 300px; max-height: 420px; padding: var(--sp-4); overflow-y: auto; }
+.cflows-item { display: flex; align-items: center; gap: var(--sp-2); }
+.cflows-pick { display: flex; align-items: center; gap: var(--sp-8); flex: 1; min-width: 0; height: var(--h-md); padding: 0 var(--sp-8); border: 0; border-radius: var(--r-xs); background: none; color: var(--text-2); font-size: var(--text-ui); text-align: left; cursor: pointer; transition: background-color 120ms var(--ease), color 120ms var(--ease); }
+.cflows-pick > .icon { flex: none; color: var(--text-3); }
+@media (hover: hover) { .cflows-pick:hover { background: var(--hover); color: var(--text); } }
+.cflows-name { flex: 1; min-width: 0; }
+.cflows-count { flex: none; color: var(--text-4); font-size: var(--text-caption); }
 /* 抓手开着：整张画布是抓的手势，节点点不中 */
 .canvas.is-hand .react-flow__pane, .canvas.is-hand .react-flow__node { cursor: grab; }
 .canvas.is-hand .react-flow__pane.dragging { cursor: grabbing; }

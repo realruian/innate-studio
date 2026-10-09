@@ -74,6 +74,7 @@ const assets = readJson('assets.json', {});
 const canvases = readJson('canvases.json', []);
 const characters = readJson('characters.json', []);
 const templates = readJson('templates.json', []);
+const workflows = readJson('workflows.json', []);
 
 const saveConfig = () => writeJson('config.json', config, 0o600);
 const saveHistory = () => writeJson('history.json', history);
@@ -81,6 +82,7 @@ const saveAssets = () => writeJson('assets.json', assets);
 const saveCanvases = () => writeJson('canvases.json', canvases);
 const saveCharacters = () => writeJson('characters.json', characters);
 const saveTemplates = () => writeJson('templates.json', templates);
+const saveWorkflows = () => writeJson('workflows.json', workflows);
 
 // Key 要放进 HTTP 请求头，只能由可见的 ASCII 字符组成。
 const isUsableKey = (value) => /^[\x21-\x7e]+$/.test(value);
@@ -1148,6 +1150,50 @@ route('PUT', /^\/api\/templates\/([\w-]+)$/, async ({ req, params }) => {
 route('DELETE', /^\/api\/templates\/([\w-]+)$/, async ({ params }) => {
   templates.splice(templates.indexOf(findTemplate(params[0])), 1);
   saveTemplates();
+  return null;
+});
+
+// ---------- 工作流 ----------
+// 一份工作流是画布上的一组节点和它们之间的连线，存下来以后可以整套放回任何一张画布。
+// 和画布一样原样存、原样取；列表里只给名字、节点数和时间。
+
+const MAX_WORKFLOW_NODES = 200;
+const workflowName = (name) => String(name || '').trim().slice(0, 60) || '未命名工作流';
+const workflowMeta = (flow) => ({ id: flow.id, name: flow.name, count: flow.nodes.length, updatedAt: flow.updatedAt });
+function findWorkflow(id) {
+  const flow = workflows.find((w) => w.id === id);
+  if (!flow) throw new HttpError(404, 'not_found', '没有这份工作流');
+  return flow;
+}
+
+route('GET', /^\/api\/workflows$/, async () => ({ items: [...workflows].sort((a, b) => b.updatedAt - a.updatedAt).map(workflowMeta) }));
+
+route('POST', /^\/api\/workflows$/, async ({ req }) => {
+  const { name, nodes, edges } = await readJsonBody(req);
+  if (!Array.isArray(nodes) || !nodes.length) throw new HttpError(400, 'invalid_request', '工作流里至少要有一个节点');
+  if (nodes.length > MAX_WORKFLOW_NODES) throw new HttpError(400, 'invalid_request', `一份工作流最多 ${MAX_WORKFLOW_NODES} 个节点`);
+  if (!Array.isArray(edges)) throw new HttpError(400, 'invalid_request', 'edges 需要是数组');
+  const now = Date.now();
+  const flow = { id: newId('wf'), name: workflowName(name), nodes, edges, createdAt: now, updatedAt: now };
+  workflows.push(flow);
+  saveWorkflows();
+  return workflowMeta(flow);
+});
+
+route('GET', /^\/api\/workflows\/([\w-]+)$/, async ({ params }) => findWorkflow(params[0]));
+
+route('PUT', /^\/api\/workflows\/([\w-]+)$/, async ({ req, params }) => {
+  const flow = findWorkflow(params[0]);
+  const body = await readJsonBody(req);
+  if (body.name !== undefined) flow.name = workflowName(body.name);
+  flow.updatedAt = Date.now();
+  saveWorkflows();
+  return workflowMeta(flow);
+});
+
+route('DELETE', /^\/api\/workflows\/([\w-]+)$/, async ({ params }) => {
+  workflows.splice(workflows.indexOf(findWorkflow(params[0])), 1);
+  saveWorkflows();
   return null;
 });
 
