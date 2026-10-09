@@ -669,6 +669,10 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 .canvas-name { width: 220px; height: var(--h-md); padding: 0 var(--sp-8); border: 1px solid transparent; border-radius: var(--r-sm); background: none; color: var(--text); font-size: var(--text-body); font-weight: var(--fw-medium); outline: 0; text-overflow: ellipsis; transition: border-color 120ms var(--ease), background-color 120ms var(--ease); }
 @media (hover: hover) { .canvas-name:hover { background: var(--hover); } }
 .canvas-name:focus { border-color: var(--border-hover); background: var(--surface-1); }
+/* 项目名后面：切换画布的箭头，和保存到哪一步了 */
+.canvas-switch { width: var(--h-sm); height: var(--h-sm); color: var(--text-3); }
+.canvas-saved { margin-left: var(--sp-8); padding: 0; border: 0; background: none; color: var(--text-4); font-size: var(--text-caption); white-space: nowrap; }
+.canvas-saved.is-failed { color: var(--danger); cursor: pointer; }
 /* 左侧竖排工具栏：上面四个是加节点，分隔线下面是素材库和上传。只有图标，悬停显示名字 */
 .canvas-tools, .canvas-foot { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-4); background: var(--surface-float); border: 1px solid var(--border-float); border-radius: var(--r-md); box-shadow: var(--shadow-float); }
 .canvas-tools { flex-direction: column; gap: var(--sp-4); }

@@ -213,6 +213,13 @@ function Result({ kind, data, onShape }: { kind: NodeKind; data: MediaData; onSh
     );
   }
   if (data.upload && kind === 'image') return <img className="cnode-pic" src={data.upload.url} alt={data.upload.name} draggable={false} onLoad={measure} />;
+  if (data.upload && kind === 'audio') {
+    return (
+      <div className={`cnode-sound ${INERT}`}>
+        <AudioPlayer src={data.upload.url} kind="上传的音频" text={data.upload.name} />
+      </div>
+    );
+  }
   if (data.upload) return <Clip src={data.upload.url} label={data.upload.name} onShape={onShape} />;
   if (!record) return blank(data.recordId && state.historyLoaded ? '这条生成记录已经删除' : <Icon name={NODE_ICONS[kind]} size={28} stroke={1.2} />);
   if (isPendingTask(record)) return waiting(record.status === 'queued' ? '排队中' : record.progress ? `生成中 ${Math.round(record.progress)}%` : '生成中');
@@ -464,7 +471,7 @@ function Refs({ id, kind, model = '', limit = 0 }: { id: string; kind: NodeKind;
 
   async function upload(picked: File) {
     const kind = kindOfFile(picked);
-    if (kind !== 'image' && (forImage || kind !== 'video')) return toast(forImage ? '这里只能上传图片' : '这里只能上传图片和视频', 'info');
+    if (!kind || (forImage && kind !== 'image')) return toast(forImage ? '这里只能上传图片' : '这里只能上传图片、视频和音频', 'info');
     toast(`正在上传${MEDIA[kind].label}…`, 'info', 1800);
     try {
       const ref = await uploadLocalFile(picked, kind);
@@ -479,7 +486,7 @@ function Refs({ id, kind, model = '', limit = 0 }: { id: string; kind: NodeKind;
     const sources = [...(state.app.features.library ? (['library'] as const) : []), ...(state.app.features.persons ? (['person'] as const) : [])];
     const kinds = Object.keys(MEDIA) as Kind[];
     const items = [
-      ...(canUpload ? [{ value: 'upload', label: forImage ? '上传参考图' : '上传图片或视频' }] : []),
+      ...(canUpload ? [{ value: 'upload', label: forImage ? '上传参考图' : '上传图片、视频或音频' }] : []),
       ...(hasLibrary ? kinds.map((item) => ({ value: item, label: `从素材库选${MEDIA[item].label}` })) : []),
       { value: 'text', label: '文本节点' },
     ];
@@ -542,7 +549,7 @@ function Refs({ id, kind, model = '', limit = 0 }: { id: string; kind: NodeKind;
       <input
         ref={file}
         type="file"
-        accept={forImage ? 'image/jpeg,image/png,image/webp' : 'image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm'}
+        accept={forImage ? 'image/jpeg,image/png,image/webp' : 'image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm,audio/mpeg,audio/wav,.mp3,.wav'}
         hidden
         onChange={(e) => {
           if (e.target.files?.[0]) upload(e.target.files[0]);

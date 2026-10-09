@@ -403,7 +403,7 @@ function requireKey() {
 // ---------- 本机文件 ----------
 
 const MEDIA_PATH = /^\/media\/(videos|images|audio|uploads)\/([\w-]+(?:\.[\w-]+)*\.(mp4|mov|webm|jpg|jpeg|png|webp|mp3|wav))$/;
-const UPLOAD_TYPES = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'video/mp4': 'mp4', 'video/quicktime': 'mov', 'video/webm': 'webm' };
+const UPLOAD_TYPES = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'video/mp4': 'mp4', 'video/quicktime': 'mov', 'video/webm': 'webm', 'audio/mpeg': 'mp3', 'audio/mp3': 'mp3', 'audio/wav': 'wav', 'audio/x-wav': 'wav', 'audio/wave': 'wav' };
 
 // 把页面传来的 /media/... 地址对应到本机文件。只认这几个目录下的文件名，不接受带路径的写法。
 function localMediaFile(url) {
@@ -993,7 +993,7 @@ route('POST', /^\/api\/audio\/music$/, async ({ req }) => {
 // 从本机选来当输入的文件先存到 data/uploads，之后用返回的地址引用它。
 route('POST', /^\/api\/uploads$/, async ({ req }) => {
   const ext = UPLOAD_TYPES[String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase()];
-  if (!ext) throw new HttpError(415, 'unsupported_media_type', '只支持 JPG、PNG、WebP 图片和 MP4、MOV、WebM 视频');
+  if (!ext) throw new HttpError(415, 'unsupported_media_type', '只支持 JPG、PNG、WebP 图片，MP4、MOV、WebM 视频，MP3、WAV 音频');
   const body = await readBody(req, MAX_UPLOAD_BYTES);
   if (!body.length) throw new HttpError(400, 'invalid_request', '文件是空的');
   const file = `${newId('up')}.${ext}`;

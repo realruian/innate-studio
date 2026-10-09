@@ -329,8 +329,12 @@ test('配乐：把本机视频传上去，轮询到完成，音乐存到本机',
   assert.equal((await call('POST', '/api/audio/music', { video: '/media/videos/../config.json', duration: 5 })).status, 400);
 });
 
-test('本机上传：只收图片和视频；/media 只给出这几个目录里的文件', async () => {
+test('本机上传：只收图片、视频和 MP3、WAV 音频；/media 只给出这几个目录里的文件', async () => {
   assert.equal((await upload(Buffer.from('x'), 'application/zip')).status, 415);
+  assert.equal((await upload(Buffer.from('x'), 'audio/ogg')).status, 415);
+  const sound = await upload(Buffer.from('ID3 fake'), 'audio/mpeg');
+  assert.equal(sound.status, 200);
+  assert.match(sound.data.url, /^\/media\/uploads\/[\w-]+\.mp3$/);
   assert.equal((await upload(Buffer.alloc(0), 'image/png')).status, 400);
   assert.equal((await fetch(`${base}/media/config.json`)).status, 404);
   assert.equal((await fetch(`${base}/media/uploads/..%2Fconfig.json`)).status, 404);

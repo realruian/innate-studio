@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { Background, BackgroundVariant, MiniMap, Panel, ReactFlow, ReactFlowProvider, SelectionMode, ViewportPortal, useEdgesState, useNodesState, useReactFlow, useViewport, type Connection, type Edge, type Node, type NodeChange, type OnConnectEnd, type Viewport } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { api, state, useStore, KINDS as MEDIA } from '../store.ts';
+import { api, canvasPath, state, useStore, KINDS as MEDIA } from '../store.ts';
 import { composer, imageRefLimit, traits } from '../composer/state.ts';
 import { kindOfFile, uploadLocalFile } from '../media.ts';
 import { openAssetPicker } from '../assets.tsx';
@@ -31,6 +31,8 @@ interface Snap {
 const nodeTypes = { text: TextNode, image: ImageNode, video: VideoNode, audio: AudioNode };
 const edgeTypes = { link: LinkEdge };
 const KINDS: NodeKind[] = ['text', 'image', 'video', 'audio'];
+// 画布上能上传的文件。音频只收 MP3 和 WAV。
+const UPLOAD_ACCEPT = 'image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm,audio/mpeg,audio/wav,.mp3,.wav';
 const SAVE_DELAY_MS = 600;
 const MAX_UNDO = 50;
 // 复制的节点放进系统剪贴板时用的类型。换一张画布、换一个标签页也能粘贴。
@@ -68,6 +70,8 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
   const [moved, setMoved] = useState(0);
   const [showMap, setShowMap] = useState(false);
   const [guides, setGuides] = useState<Guide[]>([]);
+  // 保存到哪一步了：saved 已保存，saving 有改动还没存上，failed 没存上（点一下重试）。
+  const [saving, setSaving] = useState<'saved' | 'saving' | 'failed'>('saved');
   // 正被拖着、在吸附的那个节点。
   const snapping = useRef('');
   const [, setUndoDepth] = useState(0);
@@ -97,7 +101,12 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
     try {
       await api('PUT', `/api/canvases/${id}`, JSON.parse(body));
       lastSaved.current = body;
+      // 存的这会儿又有了新改动，就还算没存完。
+      if (!pending.current) setSaving('saved');
     } catch (err) {
+      // 没存上的这一份留着，点「没存上」或者再有改动时重发。
+      if (!pending.current) pending.current = body;
+      setSaving('failed');
       toast(`画布没存上：${(err as Error).message}`, 'error', 6000);
     }
   }, [id]);
@@ -136,6 +145,7 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
     }
     if (body === lastSaved.current) return;
     pending.current = body;
+    setSaving('saving');
     clearTimeout(timer.current);
     timer.current = setTimeout(flush, SAVE_DELAY_MS);
   }, [ready, name, nodes, edges, moved, records, flow, flush]);
@@ -216,7 +226,7 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
 
   // link 是新节点要和哪个节点连上：from 是它的上游，to 是它的下游。extra 是节点一出来就带着的内容：上传的文件，或者从素材库选的素材。
   const addNode = useCallback(
-    (kind: NodeKind, at?: { x: number; y: number }, link?: { from?: Node; to?: Node }, extra?: Record<string, unknown>) => {
+    (kind: NodeKind, at?: { x: number; y: number }, link?: { from?: Node; also?: Node[]; to?: Node }, extra?: Record<string, unknown>) => {
       snap();
       const box = wrap.current!.getBoundingClientRect();
       const data = { ...newNodeData(kind, { form: composer.form, image: composer.studio.image, speech: composer.studio.speech }), ...extra };
@@ -237,7 +247,16 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
       const [node] = numbered([{ id: crypto.randomUUID(), type: kind, position, data, selected: true } as Node], flow.getNodes());
       setNodes((items) => [...items.map((n) => (n.selected ? { ...n, selected: false } : n)), node]);
       reveal(position, width);
-      if (link?.from) setEdges((items) => [...items, makeEdge(link.from!, node)]);
+      if (link?.from) {
+        // also：同时选中的其他节点，接得上的也一起连进来。图片连图片要看新节点的模型收几张参考图。
+        let room = kind === 'image' ? imageRefLimit((data as { model?: string }).model) : Infinity;
+        const sources = [link.from, ...(link.also || [])].filter((source) => {
+          if (!canLink(source.type as NodeKind, kind)) return false;
+          if (source.type === 'image' && kind === 'image') return room-- > 0;
+          return true;
+        });
+        setEdges((items) => [...items, ...sources.map((source) => makeEdge(source, node))]);
+      }
       if (link?.to) setEdges((items) => [...items, makeEdge(node, link.to!)]);
     },
     [flow, reveal, setEdges, setNodes, snap],
@@ -257,7 +276,7 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
 
   // 在鼠标的位置弹出「加什么节点」的菜单。菜单要贴着一个元素显示，这里用一个看不见的点。
   const menuAt = useCallback(
-    (x: number, y: number, kinds: NodeKind[], link?: { from?: Node; to?: Node }, place?: { x: number; y: number }) => {
+    (x: number, y: number, kinds: NodeKind[], link?: { from?: Node; also?: Node[]; to?: Node }, place?: { x: number; y: number }) => {
       const el = anchor.current!;
       el.style.left = `${x}px`;
       el.style.top = `${y}px`;
@@ -274,11 +293,12 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
   const upload = useCallback(
     async (picked: File, at?: { x: number; y: number }) => {
       const kind = kindOfFile(picked);
-      if (kind !== 'image' && kind !== 'video') return toast('画布上只能上传图片和视频', 'info');
+      if (!kind) return toast('画布上只能上传图片、视频和音频', 'info');
       toast(`正在上传${MEDIA[kind].label}…`, 'info', 1800);
       try {
         const ref = await uploadLocalFile(picked, kind);
         addNode(kind, at, undefined, { upload: { url: ref.url, name: ref.name } });
+        return;
       } catch (err) {
         toast((err as Error).message, 'error', 6000);
       }
@@ -406,11 +426,19 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
       }
     };
     const onKey = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey || !mine(e)) return;
+      // ⌘ + 在有的键盘上要同时按 Shift，所以这两个缩放键不拦 Shift。
       const key = e.key.toLowerCase();
+      if (!(e.metaKey || e.ctrlKey) || e.altKey || !mine(e) || (e.shiftKey && key !== '+' && key !== '=')) return;
       if (key === 'd') {
         e.preventDefault();
         duplicate();
+      } else if (key === '=' || key === '+') {
+        // ⌘ + 和 ⌘ - 缩放画布，不让浏览器去缩放整个页面。
+        e.preventDefault();
+        flow.zoomIn({ duration: reducedMotion() ? 0 : 160 });
+      } else if (key === '-') {
+        e.preventDefault();
+        flow.zoomOut({ duration: reducedMotion() ? 0 : 160 });
       } else if (key === 'a') {
         e.preventDefault();
         setNodes((items) => items.map((n) => (n.selected ? n : { ...n, selected: true })));
@@ -438,7 +466,7 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
     const at = flow.screenToFlowPosition({ x, y });
     openMenu(el, {
       label: '画布',
-      items: [...KINDS.map((kind) => ({ value: kind, label: `${NODE_LABELS[kind]}节点` })), { value: 'upload', label: '上传图片或视频' }, ...(copied ? [{ value: 'paste', label: '粘贴', note: '⌘ V' }] : []), ...(flow.getNodes().length ? [{ value: 'all', label: '全选', note: '⌘ A' }] : [])],
+      items: [...KINDS.map((kind) => ({ value: kind, label: `${NODE_LABELS[kind]}节点` })), { value: 'upload', label: '上传文件' }, ...(copied ? [{ value: 'paste', label: '粘贴', note: '⌘ V' }] : []), ...(flow.getNodes().length ? [{ value: 'all', label: '全选', note: '⌘ A' }] : [])],
       onSelect: (value) => {
         if (value === 'upload') {
           dropAt.current = at;
@@ -524,7 +552,9 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
         ? imageRefLimit(newNodeData('image', { form: composer.form, image: composer.studio.image, speech: composer.studio.speech }).model as string) > 0
         : flow.getEdges().filter((edge) => edge.target === node.id && (edge.data as unknown as LinkData)?.kind === 'image').length < imageRefLimit((node.data as { model?: string }).model);
       const kinds = (downstream ? targetsOf(node.type as NodeKind) : sourcesOf(node.type as NodeKind)).filter((kind) => !(kind === 'image' && node.type === 'image' && !imageOk));
-      menuAt(x, y, kinds, downstream ? { from: node } : { to: node }, place);
+      // 选中了好几个节点、从其中一个的右边接出去：新节点把选中的这些一起接上。
+      const also = downstream && node.selected ? flow.getNodes().filter((n) => n.selected && n.id !== node.id) : [];
+      menuAt(x, y, kinds, downstream ? { from: node, also } : { to: node }, place);
     },
     [flow, menuAt],
   );
@@ -539,13 +569,36 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
     [extend],
   );
 
+  // 点项目名旁边的箭头：列出别的画布，点一个就先存好当前的再换过去；最下面是新建。
+  async function switchCanvas(button: HTMLElement) {
+    let list: { id: string; name: string }[] = [];
+    try {
+      list = (await api<{ items: { id: string; name: string }[] }>('GET', '/api/canvases')).items;
+    } catch (err) {
+      return toast(`项目列表读不出来：${(err as Error).message}`, 'error', 6000);
+    }
+    openMenu(button, {
+      label: '切换画布',
+      items: [...list.map((item) => ({ value: item.id, label: item.id === id ? name || item.name : item.name, selected: item.id === id })), { value: 'new', label: '新建画布', selected: false }],
+      onSelect: async (value) => {
+        await flush();
+        try {
+          const next = value === 'new' ? (await api<{ id: string }>('POST', '/api/canvases', {})).id : value;
+          location.hash = canvasPath(next);
+        } catch (err) {
+          toast((err as Error).message, 'error', 6000);
+        }
+      },
+    });
+  }
+
   function openZoom(button: HTMLElement) {
     const actions: Record<string, () => void> = { in: () => flow.zoomIn(), out: () => flow.zoomOut(), fit: () => flow.fitView({ maxZoom: 1, padding: 0.2 }), full: () => flow.zoomTo(1) };
     openMenu(button, {
       label: '缩放',
       items: [
-        { value: 'in', label: '放大' },
-        { value: 'out', label: '缩小' },
+        { value: 'in', label: '放大', note: '⌘ +' },
+        { value: 'out', label: '缩小', note: '⌘ −' },
         { value: 'fit', label: '适应内容' },
         { value: 'full', label: '100%' },
       ],
@@ -625,6 +678,9 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
           selectionOnDrag
           panOnDrag={[1, 2]}
           selectionMode={SelectionMode.Partial}
+          // 按住 Shift 或 ⌘ 点击是多选。在空白处拖动本来就是框选，不需要再按 Shift。
+          multiSelectionKeyCode={['Shift', 'Meta', 'Control']}
+          selectionKeyCode={null}
         >
           <Background variant={BackgroundVariant.Dots} gap={24} size={1.5} />
           {guides.length > 0 && (
@@ -642,6 +698,18 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
               <Icon name="arrowLeft" />
             </button>
             <input className="canvas-name" value={name} aria-label="项目名称" maxLength={60} spellCheck={false} onChange={(e) => setName(e.target.value)} onBlur={() => !name.trim() && setName('未命名画布')} />
+            <button className="icon-btn canvas-switch" type="button" {...tip('切换画布')} aria-label="切换画布" aria-haspopup="listbox" aria-expanded="false" onClick={(e) => switchCanvas(e.currentTarget)}>
+              <Icon name="chevron" size={14} />
+            </button>
+            {saving === 'failed' ? (
+              <button className="canvas-saved is-failed" type="button" onClick={flush}>
+                没存上，点这里重试
+              </button>
+            ) : (
+              <span className="canvas-saved" role="status">
+                {saving === 'saving' ? '保存中…' : '已保存'}
+              </span>
+            )}
           </Panel>
           <Panel position="center-left" className="canvas-tools">
             {KINDS.map((kind) => (
@@ -657,7 +725,7 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
                 <span className="canvas-tool-name">素材库</span>
               </button>
             )}
-            <button className="icon-btn" type="button" aria-label="上传图片或视频" onClick={() => file.current!.click()}>
+            <button className="icon-btn" type="button" aria-label="上传图片、视频或音频" onClick={() => file.current!.click()}>
               <Icon name="upload" size={18} />
               <span className="canvas-tool-name">上传</span>
             </button>
@@ -690,7 +758,7 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
         <input
           ref={file}
           type="file"
-          accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm"
+          accept={UPLOAD_ACCEPT}
           multiple
           hidden
           onChange={(e) => {
