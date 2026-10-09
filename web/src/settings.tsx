@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, state, useStore, loadApp, loadModels, switchProvider, polishModel, setPolishModel } from './store.ts';
 import { PROVIDERS, DOUBAO_SPEECH, type ProviderId } from '../../shared/models.ts';
-import { currentTheme, setTheme } from './theme.ts';
+import { themeChoice, setTheme } from './theme.ts';
 import { Segmented, FormRow, Dropdown } from './ui/controls.tsx';
 import { toast, openModal, confirmDialog } from './ui/layers.tsx';
 
@@ -12,7 +12,7 @@ const message = (err: unknown) => (err as Error).message;
 
 function Settings() {
   useStore('app', 'models');
-  const [theme, setThemeState] = useState(currentTheme());
+  const [theme, setThemeState] = useState(themeChoice());
   const [polish, setPolish] = useState(polishModel());
   const [credits, setCredits] = useState('—');
   const [test, setTest] = useState({ tone: '', text: '' });
@@ -104,23 +104,30 @@ function Settings() {
   return (
     <div className="settings">
       <section className="settings-group">
-        <h3>通用</h3>
+        <h3>外观</h3>
         <div className="settings-card">
           <FormRow label="主题">
             <Segmented
               options={[
+                { value: 'system', label: '跟随系统' },
                 { value: 'light', label: '浅色' },
                 { value: 'dark', label: '深色' },
               ]}
               value={theme}
               onChange={(next) => {
                 setTheme(next);
-                setThemeState(currentTheme());
+                setThemeState(next);
               }}
             />
           </FormRow>
+        </div>
+      </section>
+
+      <section className="settings-group">
+        <h3>提示词润色</h3>
+        <div className="settings-card">
           {/* 润色提示词用哪个文本模型。账号里一个可用的都没有时，创作面板上不会出现「润色」。 */}
-          <FormRow label="润色模型">
+          <FormRow label="模型">
             {models.length ? (
               <Dropdown
                 label="润色模型"

@@ -6,7 +6,11 @@
   <meta name="color-scheme" content="dark light">
   <script>
     // 在样式生效前就定好主题，避免打开时先闪一下深色。
-    try { document.documentElement.dataset.theme = localStorage.getItem('seedance-studio.theme') === 'light' ? 'light' : 'dark'; } catch { document.documentElement.dataset.theme = 'dark'; }
+    try {
+      var saved = localStorage.getItem('seedance-studio.theme');
+      if (saved === 'system') saved = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+      document.documentElement.dataset.theme = saved === 'light' ? 'light' : 'dark';
+    } catch { document.documentElement.dataset.theme = 'dark'; }
   </script>
   <title>Innate Studio</title>
   <!-- 跟着浏览器自身的深浅色走，不跟应用内的主题开关：标签栏的底色由浏览器决定。 -->
