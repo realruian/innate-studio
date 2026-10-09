@@ -711,9 +711,6 @@ await must('选全能参考', clickText('.menu .menu-item', '全能参考'));
 await sleep(300);
 if ((await count('.ref-row .ref-tile:not(.ref-add)')) !== 1 || (await count('.frame-slot'))) problems.push('首尾帧换回全能参考，首帧应该回到参考图里');
 await must('移除参考图', click('.ref-row .ref-remove'));
-await must('打开生成方式', click(control('mode')));
-await sleep(200);
-await must('选文生视频', clickText('.menu .menu-item', '文生视频'));
 await sleep(200);
 
 // 语音：一个入口（音色）；面板里能筛语言、能试听；没有润色
@@ -823,13 +820,10 @@ for (const [label, lead, keep] of [['延长', '向后延长视频1：', '镜头�
   await must('回到创作记录', clickText('.nav-item', '创作记录'));
   await sleep(400);
 }
-// 收拾一下，免得影响后面的检查：移除视频素材，换回文生视频，清空提示词
+// 收拾一下，免得影响后面的检查：移除视频素材，清空提示词
 await must('回到创作', clickText('.nav-item', '创造'));
 await sleep(300);
 await must('移除视频素材', click('.ref-row .ref-remove'));
-await must('打开生成方式', click(control('mode')));
-await sleep(200);
-await must('选文生视频', clickText('.menu .menu-item', '文生视频'));
 await sleep(200);
 await pg.locator('textarea.prompt').fill('');
 

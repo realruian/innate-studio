@@ -35,7 +35,7 @@ export const RATIOS = [
 export const SR_RESOLUTIONS = ['720p', '1080p', '2k', '4k'];
 
 export const defaults = (): VideoForm => ({
-  mode: 'text',
+  mode: 'reference',
   prompt: '',
   model: 'seedance-2.0',
   resolution: '720p',
@@ -239,6 +239,8 @@ function fitModel() {
   if (!able.durations.includes(Number(form.duration))) form.duration = pick(able.durations, 5);
   const can = traits();
   if ((form.mode === 'reference' && !can.reference) || (form.mode === 'frames' && !can.frames)) form.mode = 'text';
+  // 能带参考素材的模型没有单独的「文生视频」：不加素材的参考生成就是它。
+  if (form.mode === 'text' && can.reference) form.mode = 'reference';
 }
 
 // 用到的素材里有真人素材就盯着那份档案，素材库里查不到的就去问一次。

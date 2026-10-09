@@ -416,10 +416,11 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 .composer-title { margin-bottom: var(--sp-12); font-size: var(--text-display); font-weight: var(--fw-medium); letter-spacing: -0.02em; text-align: center; line-height: var(--lh-tight); text-wrap: balance; }
 
 /* 卡片下方露出 8px 的灰色托边：同样的圆角形状向下错开一截，不占内容、不放东西。 */
-.composer-card { overflow: hidden; margin-bottom: var(--sp-8); background: var(--surface-1); border-radius: var(--r-lg); box-shadow: 0 8px 0 var(--lip); }
-.prompt { display: block; width: 100%; min-height: 72px; max-height: 280px; padding: var(--sp-16) var(--sp-16) var(--sp-8); border: 0; outline: 0; background: transparent; color: var(--text); font-size: var(--text-body); line-height: var(--lh-body); resize: none; }
+/* 两列：左边是素材，右边是提示词；工具栏在下面占满一行。没有素材这一块时左边那列不占地方。 */
+.composer-card { display: grid; grid-template-columns: auto minmax(0, 1fr); overflow: hidden; margin-bottom: var(--sp-8); background: var(--surface-1); border-radius: var(--r-lg); box-shadow: 0 8px 0 var(--lip); }
+.prompt { grid-column: 2; grid-row: 1; display: block; width: 100%; min-height: 72px; max-height: 280px; padding: var(--sp-16) var(--sp-16) var(--sp-8); border: 0; outline: 0; background: transparent; color: var(--text); font-size: var(--text-body); line-height: var(--lh-body); resize: none; }
 .prompt::placeholder { color: var(--text-3); }
-.composer-bar { display: flex; align-items: center; gap: var(--sp-8); padding: var(--sp-4) var(--sp-8) var(--sp-8); }
+.composer-bar { grid-column: 1 / -1; grid-row: 2; display: flex; align-items: center; gap: var(--sp-8); padding: var(--sp-4) var(--sp-8) var(--sp-8); }
 .composer-params { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); flex: 1; min-width: 0; }
 .composer-send { display: flex; align-items: center; gap: var(--sp-8); flex: none; }
 /* 配乐没有参数，工具栏的位置放一句说明，和提示词同一条左边线 */
@@ -432,14 +433,15 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 .send-btn .spinner { border-color: color-mix(in srgb, var(--bg) 30%, transparent); border-top-color: var(--bg); }
 
 
-/* 参考素材（在输入框内部、提示词上方） */
-.media-block { display: flex; flex-wrap: wrap; gap: var(--sp-12) var(--sp-24); padding: var(--sp-16) var(--sp-16) 0; }
+/* 参考素材（在输入框内部、提示词左边）。第一行素材的上边和提示词第一行文字的上边对齐。 */
+.media-block { grid-column: 1; grid-row: 1; align-self: start; display: flex; flex-wrap: wrap; gap: var(--sp-12) var(--sp-24); padding: var(--sp-16) 0 var(--sp-8) var(--sp-16); }
 .frames-row { display: flex; align-items: flex-start; gap: var(--sp-12); }
 .frame-slot { display: flex; flex-direction: column; align-items: center; gap: var(--sp-4); }
-.frame-slot .ref-tile { width: 112px; height: 72px; }
-.frames-swap { margin-top: var(--sp-24); }
+.frame-slot .ref-tile { width: 96px; height: 60px; }
+.frames-swap { margin-top: var(--sp-16); }
 .frames-swap:active:not(:disabled), .detail-nav-btn:active:not(:disabled) { scale: 0.96; }
-.ref-row { display: flex; flex-wrap: wrap; gap: var(--sp-8); }
+/* 素材多了往下排，一行最多三个，免得把提示词挤窄 */
+.ref-row { display: flex; flex-wrap: wrap; gap: var(--sp-8); max-width: calc(56px * 3 + var(--sp-8) * 2); }
 .ref-tile { position: relative; width: 56px; height: 56px; padding: 0; overflow: hidden; border: 1px solid transparent; border-radius: var(--r-sm); background: var(--surface-2); }
 .ref-tile.tone-error { border-color: var(--danger); }
 .thumb-img { display: block; width: 100%; height: 100%; object-fit: cover; }
@@ -694,13 +696,15 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 .character-images { flex-wrap: wrap; }
 
 /* ---------- 技能 ---------- */
-/* 输入框里选着的技能：提示词上面的一个小标签 */
-/* 标签的左边和提示词、工具栏第一个图标在同一条线上（16） */
-.skill-chip-row { display: flex; padding: var(--sp-16) var(--sp-16) 0; }
-.skill-chip { display: inline-flex; align-items: center; gap: var(--sp-4); max-width: 100%; height: var(--h-sm); padding: 0 var(--sp-4) 0 var(--sp-8); border-radius: var(--r-xs); background: var(--hover); color: var(--text-2); font-size: var(--text-ui); }
-.skill-chip > button { display: grid; place-items: center; flex: none; width: var(--sp-20); height: var(--sp-20); padding: 0; border: 0; border-radius: var(--r-xs); background: none; color: var(--text-3); cursor: pointer; }
-@media (hover: hover) { .skill-chip > button:hover { color: var(--text); } }
-.media-block:not([hidden]) + .skill-chip-row { padding-top: var(--sp-8); }
+/* 输入框里选着的技能：写在提示词第一行的开头，灰色的图标加名字，提示词接在它后面。 */
+/* 它和提示词叠在同一格里，提示词第一行按它的宽度缩进（宽度由 Composer 量了写到 text-indent 上）。字号、行高和提示词一样，两边才在一条线上。 */
+.skill-chip-row { grid-column: 2; grid-row: 1; align-self: start; justify-self: start; z-index: 1; display: flex; max-width: 60%; padding: var(--sp-16) 0 0 var(--sp-16); pointer-events: none; }
+.skill-chip { display: inline-flex; align-items: center; gap: var(--sp-4); min-width: 0; height: calc(var(--text-body) * var(--lh-body)); color: var(--text-3); font-size: var(--text-body); pointer-events: auto; }
+.skill-chip > .icon { flex: none; }
+.skill-chip > button { display: grid; place-items: center; flex: none; width: var(--sp-16); height: var(--sp-16); padding: 0; border: 0; border-radius: var(--r-xs); background: none; color: var(--text-3); cursor: pointer; opacity: 0; transition: opacity var(--t-fast) var(--ease), color var(--t-fast) var(--ease); }
+.skill-chip > button:focus-visible { opacity: 1; }
+@media (hover: hover) { .skill-chip:hover > button { opacity: 1; } .skill-chip > button:hover { color: var(--text); } }
+@media (hover: none) { .skill-chip > button { opacity: 1; } }
 .entry-action-btn.active { color: var(--text); }
 /* 技能面板：上面搜索，中间是技能，下面两个入口。一行技能是图标、名字加标记、一行说明，选中的那行右边打勾 */
 /* 面板里的行和菜单项同一条左边线（内边距 4 加行内 12）、同样的圆角 */
@@ -1027,4 +1031,12 @@ button.cnode-ref[aria-expanded='true'] { border-color: var(--text-3); }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+
+/* 很窄的屏幕上素材回到提示词上面，左右并排会把提示词挤得太窄 */
+@media (max-width: 560px) {
+  .media-block { grid-column: 1 / -1; padding-right: var(--sp-16); padding-bottom: 0; }
+  .ref-row { max-width: none; }
+  .prompt, .skill-chip-row { grid-column: 1 / -1; grid-row: 2; }
+  .composer-bar { grid-row: 3; }
 }

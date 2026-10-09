@@ -1,4 +1,4 @@
-// 创作输入框：上面选要生成什么（视频、图片、语音、音效、配乐），框里是素材、提示词和一排工具栏，右下角提交。
+// 创作输入框：上面选要生成什么（视频、图片、语音、音效、配乐），框里左边是素材、右边是提示词，下面一排工具栏，右下角提交。
 // 状态和动作在 state.ts。
 
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
@@ -30,14 +30,15 @@ const SR_SCENES = [
 const MODES: { value: VideoForm['mode']; label: string; icon: IconName; note: string }[] = [
   { value: 'text', label: '文生视频', icon: 'type', note: '只用文字' },
   { value: 'frames', label: '首尾帧', icon: 'frames', note: '指定首帧，尾帧可选' },
-  { value: 'reference', label: '参考生成', icon: 'layers', note: '图片、视频、音频作参考' },
+  { value: 'reference', label: '参考生成', icon: 'layers', note: '可以加参考素材，不加就只按文字生成' },
 ];
 // 只能给首帧、不能给尾帧的模型，第二种方式叫「图生视频」。
 const FIRST_FRAME_MODE: (typeof MODES)[number] = { value: 'frames', label: '图生视频', icon: 'frames', note: '给一张首帧' };
-// 当前模型能用的生成方式。第三种的名字跟着模型走：Seedance 叫「全能参考」，别的模型叫「参考生成」。
+// 当前模型能用的生成方式。默认是带参考素材的那种，名字跟着模型走：Seedance 叫「全能参考」，别的模型叫「参考生成」。
+// 它不加素材就是文生视频，所以不再单列「文生视频」；只有不支持参考素材的模型才有这一种。
 function modesFor() {
   const can = traits();
-  return [MODES[0], ...(can.frames ? [can.lastFrame ? MODES[1] : FIRST_FRAME_MODE] : []), ...(can.reference ? [{ ...MODES[2], label: referenceModeLabel(composer.form.model) }] : [])];
+  return [can.reference ? { ...MODES[2], label: referenceModeLabel(composer.form.model) } : MODES[0], ...(can.frames ? [can.lastFrame ? MODES[1] : FIRST_FRAME_MODE] : [])];
 }
 const INPUT_TYPES = [
   { value: 'auto', label: '自动判断', note: '推荐' },
@@ -679,6 +680,7 @@ export function Composer() {
   const types = useRef<HTMLDivElement>(null);
   const card = useRef<HTMLDivElement>(null);
   const params = useRef<HTMLDivElement>(null);
+  const chip = useRef<HTMLDivElement>(null);
   const resizing = useRef<Animation | null>(null);
   const settledHeight = useRef(0);
 
@@ -687,6 +689,8 @@ export function Composer() {
   useLayoutEffect(() => {
     const el = prompt.current!;
     if (el.value !== text) el.value = text;
+    // 选着技能时，第一行让出技能名的位置，字接在它后面。
+    el.style.textIndent = chip.current ? `${chip.current.offsetWidth - 12}px` : '';
     el.style.height = 'auto';
     el.style.height = `${Math.min(280, Math.max(72, el.scrollHeight))}px`;
   });
@@ -745,9 +749,9 @@ export function Composer() {
       </div>
       <div ref={card} className="composer-card">
         <MediaBlock />
-        {/* 选着的技能：一个小标签，在提示词上面。点叉取消。 */}
+        {/* 选着的技能：写在提示词第一行的开头。点叉取消，光标在最前面时按退格也取消。 */}
         {skill && (
-          <div className="skill-chip-row">
+          <div ref={chip} className="skill-chip-row">
             <span className="skill-chip">
               <Icon name="wand" />
               <span className="ellipsis">{skill.name}</span>
@@ -770,7 +774,14 @@ export function Composer() {
             if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
               e.preventDefault();
               if (state.app.hasKey && !composer.submitting) submit();
+            } else if (e.key === 'Backspace' && skill && e.currentTarget.selectionStart === 0 && e.currentTarget.selectionEnd === 0) {
+              e.preventDefault();
+              setSkill(null);
             }
+          }}
+          onScroll={(e) => {
+            // 提示词长到要滚动时，技能名跟着第一行一起滚上去。
+            if (chip.current) chip.current.style.translate = `0 ${-e.currentTarget.scrollTop}px`;
           }}
         />
         <div className="composer-bar">
