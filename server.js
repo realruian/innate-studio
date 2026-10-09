@@ -12,7 +12,7 @@ import crypto from 'node:crypto';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
-import { videoFamilyOf, polishGuide, POLISH_KINDS, PROVIDERS, isProvider, videoSpecOf, ARK_VIDEO_MODELS, ARK_IMAGE_MODELS, ARK_TEXT_MODELS } from './shared/models.ts';
+import { videoFamilyOf, polishGuide, POLISH_KINDS, PROVIDERS, isProvider, videoSpecOf, ARK_VIDEO_MODELS, ARK_IMAGE_MODELS, ARK_TEXT_MODELS, isBorrowedImageModel } from './shared/models.ts';
 import { OFFICIAL_SKILLS } from './shared/skills.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -747,6 +747,20 @@ async function arkModels() {
     imageRefs[id] = refs;
   }
   const rest = { imageModels: Object.keys(ARK_IMAGE_MODELS), imageRatios, imageRefs, audio: { speech: false, sfx: false, music: false } };
+  // 存了 OpenRouter 的 Key 时，把方舟上没有的 GPT Image 2 和 Nano Banana 也列进图片模型，排在 Seedream 后面。
+  // 这一步读不到不影响方舟自己的模型，只是这几个不出现，原因放在 borrowedError 里。
+  if (apiKey('openrouter')) {
+    try {
+      const { data } = await callUpstream('GET', '/v1/images/models', { timeoutMs: 20000, provider: 'openrouter' });
+      for (const model of listOf(data).filter((m) => m?.id && isBorrowedImageModel(m)).sort((a, b) => a.id.localeCompare(b.id))) {
+        openrouterImageRatios[model.id] = imageRatios[model.id] = (model.supported_parameters?.aspect_ratio?.values || []).map(String);
+        openrouterImageRefs[model.id] = imageRefs[model.id] = Number(model.supported_parameters?.input_references?.max) || 0;
+        rest.imageModels.push(model.id);
+      }
+    } catch (err) {
+      rest.borrowedError = err.message;
+    }
+  }
   try {
     await callUpstream('GET', `${VIDEO_TASKS_PATH.ark}?page_num=1&page_size=1`, { timeoutMs: 20000, provider: 'ark' });
     polishAvailable = POLISH_MODELS.ark;
@@ -896,7 +910,7 @@ route('POST', /^\/api\/images$/, async ({ req }) => {
   const refs = Array.isArray(payload.input_references) ? payload.input_references.filter((entry) => typeof entry?.image_url?.url === 'string') : [];
   if (refs.length) {
     if (currentProvider() === 'flatkey') throw new HttpError(400, 'not_on_provider', '参考图生图在 Flatkey 上用不了，OpenRouter 和火山方舟可以');
-    const limit = currentProvider() === 'ark' ? ARK_IMAGE_MODELS[model]?.refs : openrouterImageRefs[model];
+    const limit = imageProviderOf(model) === 'ark' ? ARK_IMAGE_MODELS[model]?.refs : openrouterImageRefs[model];
     if (limit === 0) throw new HttpError(400, 'invalid_request', `${model} 不收参考图`);
     if (limit && refs.length > limit) throw new HttpError(400, 'invalid_request', `${model} 最多收 ${limit} 张参考图`);
     request.input_references = withLocalImages({ input_references: refs }).input_references;
@@ -906,7 +920,7 @@ route('POST', /^\/api\/images$/, async ({ req }) => {
   const items = Array.from({ length: count }, () =>
     newItem({ id: newId('img'), kind: 'image', model, prompt, payload: { model, prompt, aspect_ratio: request.aspect_ratio, ...(refs.length ? { input_references: refs } : {}) }, form: form || null }),
   );
-  const provider = currentProvider();
+  const provider = imageProviderOf(model);
   runDirect(items, async () => {
     const { images, cost } = await { flatkey: flatkeyImages, openrouter: openrouterImages, ark: arkImages }[provider](request);
     if (!images.length) throw new HttpError(502, 'bad_upstream_response', `${labelOf(provider)} 没有返回图片`);
@@ -934,6 +948,13 @@ route('POST', /^\/api\/images$/, async ({ req }) => {
 });
 
 const IMAGE_EXT = { 'image/png': 'png', 'image/webp': 'webp', 'image/jpeg': 'jpg' };
+
+// 这张图交给哪个平台生成。一般就是当前平台；用火山方舟时，方舟没有的型号（带厂商前缀的，像 openai/gpt-image-2）走 OpenRouter，前提是存了它的 Key。
+function imageProviderOf(model) {
+  const provider = currentProvider();
+  if (provider === 'ark' && !Object.hasOwn(ARK_IMAGE_MODELS, model) && model.includes('/') && apiKey('openrouter')) return 'openrouter';
+  return provider;
+}
 
 // 上游给的费用单位是 tick，一美元是 1e10 个 tick。
 async function flatkeyImages(request) {

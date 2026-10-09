@@ -11,10 +11,13 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startMock as startFlatkey } from './mock-flatkey.js';
 import { startMock as startArk, MOCK_ARK_KEY } from './mock-ark.js';
+import { startMock as startOpenRouter, MOCK_OR_KEY } from './mock-openrouter.js';
+import { isBorrowedImageModel } from '../shared/models.ts';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 let flatkey;
 let ark;
+let openrouter;
 let app;
 let base;
 let dataDir;
@@ -69,6 +72,7 @@ const upload = async () => (await (await fetch(`${base}/api/uploads`, { method: 
 before(async () => {
   flatkey = await startFlatkey({ taskSeconds: 0.5, assetSeconds: 0.5 });
   ark = await startArk({ taskSeconds: 0.8 });
+  openrouter = await startOpenRouter({ taskSeconds: 0.8 });
   dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'seedance-test-'));
   const port = await freePort();
   base = `http://127.0.0.1:${port}`;
@@ -76,7 +80,7 @@ before(async () => {
     cwd: root,
     stdio: 'ignore',
     // Key 的环境变量都置空：即使本机设置了真实 Key，测试也绝不会用到它。
-    env: { ...process.env, PORT: String(port), FLATKEY_BASE_URL: flatkey.url, ARK_BASE_URL: ark.url, SEEDANCE_DATA_DIR: dataDir, FLATKEY_API_KEY: '', OPENROUTER_API_KEY: '', ARK_API_KEY: '' },
+    env: { ...process.env, PORT: String(port), FLATKEY_BASE_URL: flatkey.url, ARK_BASE_URL: ark.url, OPENROUTER_BASE_URL: openrouter.url, SEEDANCE_DATA_DIR: dataDir, FLATKEY_API_KEY: '', OPENROUTER_API_KEY: '', ARK_API_KEY: '' },
   });
   await waitFor(async () => (await fetch(`${base}/api/state`)).ok, '服务启动');
 });
@@ -85,6 +89,7 @@ after(async () => {
   app?.kill();
   await flatkey?.close();
   await ark?.close();
+  await openrouter?.close();
   if (dataDir) fs.rmSync(dataDir, { recursive: true, force: true });
 });
 
@@ -238,6 +243,44 @@ test('方舟上没有的功能被拒绝：语音、音效、配乐、素材库',
     assert.equal(res.status, 400, url);
     assert.equal(res.data.error.code, 'not_on_provider', url);
   }
+});
+
+test('存了 OpenRouter 的 Key：图片模型里多出 GPT Image 2 和 Nano Banana，用它们生图走 OpenRouter，Seedream 照常走方舟', async () => {
+  assert.equal(isBorrowedImageModel({ id: 'openai/gpt-image-2', name: 'OpenAI: GPT Image 2' }), true);
+  assert.equal(isBorrowedImageModel({ id: 'google/gemini-nano-banana-2.1', name: 'Google: Nano Banana 2.1' }), true);
+  assert.equal(isBorrowedImageModel({ id: 'openai/gpt-image-2.5-flare', name: 'OpenAI: GPT Image 2.5 Flare' }), false);
+  assert.equal(isBorrowedImageModel({ id: 'x-ai/grok-imagine-image-2.0', name: 'xAI: Grok Imagine Image 2.0' }), false);
+
+  const saved = (await call('PUT', '/api/key', { apiKey: MOCK_OR_KEY, provider: 'openrouter' })).data;
+  assert.equal(saved.provider, 'ark');
+  const { data } = await call('GET', '/api/models');
+  const banana = 'google/gemini-3-pro-image';
+  // 只借这两类，OpenRouter 上别的图片模型不列。
+  assert.deepEqual(data.imageModels, ['doubao-seedream-5-0-pro-260628', 'doubao-seedream-5-0-flash-260915', 'doubao-seedream-5-0-260128', banana]);
+  assert.deepEqual(data.imageRatios[banana], ['1:1', '16:9', '9:16']);
+  assert.equal(data.imageRefs[banana], 14);
+  // 视频模型还是方舟的。
+  assert.equal(data.models.every((id) => id.startsWith('doubao-')), true);
+
+  const orImages = () => openrouter.log.filter((entry) => entry.method === 'POST' && entry.pathname === '/v1/images').map((entry) => JSON.parse(entry.body));
+  const arkBefore = sent('/images/generations').length;
+  const created = await call('POST', '/api/images', { payload: { model: banana, prompt: '香蕉船', n: 1, aspect_ratio: '16:9' } });
+  assert.equal(created.status, 200);
+  const done = await waitFor(async () => (await call('GET', '/api/history')).data.items.find((i) => i.id === created.data.items[0].id && i.status === 'completed'), '图生成完');
+  assert.deepEqual(orImages().at(-1), { model: banana, prompt: '香蕉船', aspect_ratio: '16:9' });
+  assert.equal(done.usage.cost_usd, 0.06);
+  assert.equal(sent('/images/generations').length, arkBefore);
+
+  const failed = await call('POST', '/api/images', { payload: { model: banana, prompt: 'FAIL', n: 1 } });
+  const item = await waitFor(async () => (await call('GET', '/api/history')).data.items.find((i) => i.id === failed.data.items[0].id && i.status === 'failed'), '生图失败');
+  assert.match(item.error.message, /OpenRouter 返回（500）/);
+
+  await call('POST', '/api/images', { payload: { model: IMAGE, prompt: '还是方舟', n: 1, aspect_ratio: '1:1' } });
+  await waitFor(() => sent('/images/generations').some((r) => r.prompt === '还是方舟'), 'Seedream 走方舟');
+
+  // 清掉 OpenRouter 的 Key，借来的模型就不再列。
+  await call('DELETE', '/api/key?provider=openrouter');
+  assert.equal((await call('GET', '/api/models')).data.imageModels.includes(banana), false);
 });
 
 test('切回 Flatkey 之后，方舟上没跑完的任务仍然回方舟查', async () => {

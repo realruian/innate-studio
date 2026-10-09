@@ -151,6 +151,11 @@ export const ARK_IMAGE_MODELS: Record<string, { refs: number; sizes: Record<stri
   'doubao-seedream-5-0-260128': { refs: 14, sizes: SEEDREAM_2K },
 };
 
+// 用火山方舟时，从 OpenRouter 借来用的图片模型：GPT Image 2 和 Nano Banana 这一系列，方舟上没有。
+// 存了 OpenRouter 的 Key 才会出现，生图时这几个走 OpenRouter，其余的照常走方舟。
+// Nano Banana 各代的型号写法不统一（gemini-nano-banana-2.1、gemini-3-pro-image），所以按 OpenRouter 给的名字认。
+export const isBorrowedImageModel = (model: { id?: string; name?: string }) => model.id === 'openai/gpt-image-2' || /nano banana/i.test(model.name || '');
+
 // 润色用的豆包文本模型：先便宜快的，再效果好的。
 export const ARK_TEXT_MODELS = ['doubao-seed-2-1-lite-260915', 'doubao-seed-2-1-turbo-260628', 'doubao-seed-2-1-pro-260915'];
 
