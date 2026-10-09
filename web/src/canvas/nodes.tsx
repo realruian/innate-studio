@@ -7,7 +7,7 @@ import { createContext, useContext, useEffect, useRef, useState, type ReactNode 
 import { BaseEdge, Handle, NodeToolbar, Position, getBezierPath, useConnection, useEdges, useInternalNode, useReactFlow, useStore as useFlowStore, useUpdateNodeInternals, type ConnectionLineComponentProps, type EdgeProps, type Node, type NodeProps } from '@xyflow/react';
 import { api, state, useStore, loadVoices, isPendingTask, polishModel, KINDS as MEDIA } from '../store.ts';
 import { RATIOS, capabilities, imageRatios, imageRefLimit, traits, voiceName } from '../composer/state.ts';
-import { modelNote } from '../../../shared/models.ts';
+import { modelLabel, modelNote } from '../../../shared/models.ts';
 import { kindOfFile, recordName, uploadLocalFile, uploadVirtualAsset } from '../media.ts';
 import { openAssetPicker } from '../assets.tsx';
 import { Icon, type IconName } from '../ui/Icon.tsx';
@@ -536,7 +536,7 @@ function NodeTools({ id, kind, data, onUpload }: { id: string; kind: Kind; data:
     }
   }
   async function extend() {
-    if (!traits((data as VideoData).model).frames) return toast(`${(data as VideoData).model} 不支持首帧，接不了。先在下面的面板里换一个模型`, 'info');
+    if (!traits((data as VideoData).model).frames) return toast(`${modelLabel((data as VideoData).model)} 不支持首帧，接不了。先在下面的面板里换一个模型`, 'info');
     toast('正在截取最后一帧…', 'info', 1800);
     try {
       continueVideo(id, await grabFrame(file!.url, 'last', `${file!.name}-尾帧`));
@@ -720,7 +720,7 @@ export function ImageNode({ id, data: raw, selected, dragging }: NodeProps) {
           <Prompt id={id} value={data.prompt} placeholder={promptHint(linked, hasRefs ? '想怎么改这张图？例如：把背景改成雪夜' : '描述想生成的图片：主体、环境、构图、光线和风格')} presets={{ refs: inputs.filter((i) => i.link.kind === 'image').length, limit: refLimit, run: (prompt) => generate(flow, id, snap, { prompt }) }} />
           {data.error && !data.busy && <p className="cnode-error">{data.error}</p>}
           <Bar working={working} ready={Boolean(data.prompt.trim()) || linked} action="生成图片" onSend={() => generate(flow, id, snap)}>
-            <Dropdown variant="tool" chevron label="模型" value={data.model} options={models.map((m) => ({ value: m, label: m }))} onChange={(model) => flow.updateNodeData(id, { model, ratio: imageRatios(model).includes(data.ratio) ? data.ratio : imageRatios(model)[0] || data.ratio })} />
+            <Dropdown variant="tool" chevron label="模型" value={data.model} options={models.map((m) => ({ value: m, label: modelLabel(m) }))} onChange={(model) => flow.updateNodeData(id, { model, ratio: imageRatios(model).includes(data.ratio) ? data.ratio : imageRatios(model)[0] || data.ratio })} />
             <Params
               label="参数"
               groups={[
@@ -902,7 +902,7 @@ export function VideoNode({ id, data: raw, selected, dragging }: NodeProps) {
           <Prompt id={id} value={data.prompt} placeholder={promptHint(linked, '描述想生成的视频：主体、动作、场景、镜头运动、光线和风格')} />
           {data.error && !data.busy && <p className="cnode-error">{data.error}</p>}
           <Bar working={working} ready={Boolean(data.prompt.trim()) || inputs.length > 0} action="生成视频" onSend={() => generate(flow, id, snap)}>
-            <Dropdown variant="tool" chevron label="模型" value={data.model} options={models.map((m) => ({ value: m, label: m, note: modelNote(m) || undefined }))} onChange={(model) => set(fitVideo({ ...data, model }))} />
+            <Dropdown variant="tool" chevron label="模型" value={data.model} options={models.map((m) => ({ value: m, label: modelLabel(m), note: modelNote(m) || undefined }))} onChange={(model) => set(fitVideo({ ...data, model }))} />
             <Params
               label="参数"
               groups={[

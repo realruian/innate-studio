@@ -63,6 +63,16 @@ export function modelNote(id: string): string {
   return '';
 }
 
+// ---------- 型号在界面上的名字 ----------
+// 火山方舟的型号又长又像（doubao-seedance-2-0-fast-260128），前面的 doubao- 和后面的版本日期对用户没用，
+// 界面上写成官方的叫法：Seedance 2.0 Fast、Seedream 5.0 Pro。请求里发的仍然是型号本身。认不出来的原样显示。
+export function modelLabel(id: string): string {
+  const m = /^doubao-(seedance|seedream)-(\d+)-(\d+)(?:-([a-z]+))?-\d{6}$/i.exec(id || '');
+  if (!m) return id;
+  const cap = (word: string) => word[0].toUpperCase() + word.slice(1).toLowerCase();
+  return `${cap(m[1])} ${m[2]}.${m[3]}${m[4] ? ` ${cap(m[4])}` : ''}`;
+}
+
 // ---------- 视频模型的参数范围 ----------
 
 export interface VideoCapabilities {

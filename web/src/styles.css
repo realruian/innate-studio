@@ -296,6 +296,24 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 
 /* 设置项列表：左名称右控件 */
 .form-section { display: flex; flex-direction: column; }
+/* 滑杆：一条 12 高的圆角槽，选过的一段颜色深一档，把手是一根比槽略高的白色竖条；槽里每个刻度一道短线，槽下面写着刻度的数 */
+.slider { flex: 1; min-width: 0; --thumb: 4px; --at: 0; }
+.slider-track { position: relative; height: 12px; border-radius: 4px; background: linear-gradient(to right, color-mix(in srgb, var(--text) 20%, var(--surface-2)) calc(var(--thumb) / 2 + (100% - var(--thumb)) * var(--fill)), var(--surface-2) 0); }
+.slider-tick, .slider-mark { position: absolute; left: calc(var(--thumb) / 2 + (100% - var(--thumb)) * var(--at)); translate: -50% 0; pointer-events: none; }
+.slider-tick { top: 4px; width: 1px; height: 4px; background: var(--text-off); opacity: 0.5; }
+.slider input { position: absolute; left: 0; top: -2px; width: 100%; height: 16px; margin: 0; appearance: none; -webkit-appearance: none; background: none; outline: 0; cursor: pointer; }
+.slider input::-webkit-slider-runnable-track { height: 16px; background: none; }
+.slider input::-webkit-slider-thumb { -webkit-appearance: none; width: var(--thumb); height: 16px; border: 0; border-radius: 2px; background: var(--switch-knob); box-shadow: 0 0 0 1px var(--border-strong), 0 1px 2px rgba(0, 0, 0, 0.12); }
+.slider input::-moz-range-track { height: 16px; background: none; }
+.slider input::-moz-range-thumb { width: var(--thumb); height: 16px; border: 0; border-radius: 2px; background: var(--switch-knob); box-shadow: 0 0 0 1px var(--border-strong), 0 1px 2px rgba(0, 0, 0, 0.12); }
+.slider input:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 60%, transparent); }
+.slider input:disabled { cursor: not-allowed; }
+.slider:has(input:disabled) { opacity: 0.4; }
+.slider-marks { position: relative; height: 16px; margin-top: var(--sp-8); color: var(--text-2); font-size: var(--text-micro); line-height: var(--lh-body); }
+/* 两头的数和槽的两端对齐，不居中 */
+.slider-mark:first-child { left: 0; translate: none; }
+.slider-mark:last-child { left: auto; right: 0; translate: none; }
+
 .form-row { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-16); min-height: 40px; }
 .form-label { display: flex; flex-direction: column; min-width: 0; font-size: var(--text-ui); }
 .form-desc { font-size: var(--text-caption); color: var(--text-3); }
@@ -352,6 +370,16 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 .voice-note { color: var(--text-4); font-size: var(--text-caption); }
 .frame-popover { width: 352px; padding: var(--sp-12) var(--sp-16) var(--sp-16); }
 .frame-popover .small { margin-top: var(--sp-8); }
+.duration-popover { width: 400px; padding: var(--sp-12) var(--sp-16) var(--sp-16); }
+.duration-popover .popover-title { padding-bottom: var(--sp-12); }
+.duration-row { display: flex; align-items: center; gap: var(--sp-24); }
+/* 数字框：没有边线的灰底，单位写在框里靠右，不显示浏览器的上下小箭头 */
+.duration-field { display: flex; align-items: center; gap: var(--sp-4); flex: none; width: 88px; border-color: transparent; background: var(--surface-2); color: var(--text-4); cursor: text; }
+.duration-field:focus-within { border-color: var(--border-strong); }
+.duration-field input { flex: 1; min-width: 0; width: 100%; padding: 0; border: 0; outline: 0; background: none; color: var(--text); font: inherit; appearance: textfield; -moz-appearance: textfield; }
+.duration-field input::-webkit-inner-spin-button, .duration-field input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.duration-field:has(input:disabled) { opacity: 0.5; cursor: not-allowed; }
+.duration-popover .form-row { margin-top: var(--sp-8); }
 .ratio-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: var(--sp-2); }
 .ratio-option { display: flex; flex-direction: column; align-items: center; gap: var(--sp-4); padding: var(--sp-8) 0; border: 0; border-radius: var(--r-xs); background: none; color: var(--text-2); font-size: var(--text-micro); white-space: nowrap; cursor: pointer; transition: background-color 120ms var(--ease), color 120ms var(--ease); }
 @media (hover: hover) { .ratio-option:hover:not(:disabled) { background: var(--hover); color: var(--text); } }
@@ -970,7 +998,7 @@ button.cnode-ref[aria-expanded='true'] { border-color: var(--text-3); }
   .detail-nav-btn .icon { rotate: -90deg; }
   .detail-nav-btn.is-prev .icon { rotate: 90deg; }
   .detail-info { overflow: visible; }
-  .more-popover, .frame-popover, .voice-popover { width: calc(100vw - 16px); }
+  .more-popover, .frame-popover, .duration-popover, .voice-popover { width: calc(100vw - 16px); }
 }
 
 @media (prefers-reduced-motion: reduce) {

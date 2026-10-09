@@ -2,7 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { modelNote, videoFamilyOf, referenceModeLabel, videoCapabilities, polishGuide, isProvider } from '../shared/models.ts';
+import { modelLabel, modelNote, videoFamilyOf, referenceModeLabel, videoCapabilities, polishGuide, isProvider } from '../shared/models.ts';
 
 test('型号附注：同一档的型号附注相同，没有分档的不加', () => {
   assert.equal(modelNote('seedance-2.0-fast'), '快速版');
@@ -52,4 +52,13 @@ test('参数范围：Grok 没有 1080p、21:9 和自动时长，seedance-2.5 没
   assert.equal(grok.autoDuration, false);
 
   assert.deepEqual(videoCapabilities('seedance-2.5').resolutions, ['480p', '720p']);
+});
+
+test('型号在界面上的名字：火山方舟的写成官方叫法，别的原样显示', () => {
+  assert.equal(modelLabel('doubao-seedance-2-5-260628'), 'Seedance 2.5');
+  assert.equal(modelLabel('doubao-seedance-2-0-260128'), 'Seedance 2.0');
+  assert.equal(modelLabel('doubao-seedance-2-0-fast-260128'), 'Seedance 2.0 Fast');
+  assert.equal(modelLabel('doubao-seedance-2-0-mini-260615'), 'Seedance 2.0 Mini');
+  assert.equal(modelLabel('doubao-seedream-5-0-pro-260628'), 'Seedream 5.0 Pro');
+  for (const id of ['seedance-2.0-fast', 'grok-imagine-video', 'doubao-seed-2-0-pro-260215', '']) assert.equal(modelLabel(id), id);
 });

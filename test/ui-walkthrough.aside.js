@@ -325,10 +325,19 @@ await must('再点一次画面按钮收起', click(control('frame')));
 await sleep(200);
 if (await count('.frame-popover')) problems.push('再点一次按钮没有收起画面面板');
 
-await must('打开时长菜单', click(control('duration')));
+await must('打开时长面板', click(control('duration')));
 await sleep(200);
-await audit('时长菜单');
-await must('选 8 秒', clickText('.menu .menu-item', '8 秒'));
+await audit('时长面板');
+// 时长是一条滑杆：把它拖到 8 秒，按钮上的字和旁边的数字框都要跟着变。
+await pg.evaluate(() => {
+  const slider = document.querySelector('.duration-popover .slider input');
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(slider, '8');
+  slider.dispatchEvent(new Event('input', { bubbles: true }));
+});
+await sleep(200);
+if (!(await text(control('duration'))).join('').includes('8 秒')) problems.push(`时长按钮没有更新：${(await text(control('duration'))).join('')}`);
+if ((await pg.evaluate(() => document.querySelector('.duration-popover input[type=number]').value)) !== '8') problems.push('拖动滑杆后，数字框里的秒数没有跟着变');
+await must('再点一次时长按钮收起', click(control('duration')));
 await sleep(200);
 
 await must('打开更多', click(control('more')));
@@ -986,8 +995,8 @@ if ((await count('.sidebar-foot .nav-item')) !== 1 || (await count('.sidebar-foo
 if ((await text('.sidebar-foot')).join('').includes('sk-')) problems.push('侧栏底部还显示着 Key');
 await must('打开设置', click('.sidebar-foot .nav-item'));
 await sleep(900);
-const settingRows = (await text('.modal .form-label')).join('|');
-if (!settingRows.includes('润色模型') || !settingRows.includes('账户余额')) problems.push(`设置里缺少润色模型或余额：${settingRows}`);
+const settingRows = (await text('.modal h3, .modal .form-label')).join('|');
+if (!settingRows.includes('提示词润色') || !settingRows.includes('账户余额')) problems.push(`设置里缺少润色模型或余额：${settingRows}`);
 if (!/剩余 [\d.,]+/.test((await text('.modal .form-row')).join(' '))) problems.push('设置里没有读到余额');
 await audit('设置');
 await shot('11-settings');

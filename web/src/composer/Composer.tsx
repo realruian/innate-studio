@@ -1,12 +1,12 @@
 // 创作输入框：上面选要生成什么（视频、图片、语音、音效、配乐），框里是素材、提示词和一排工具栏，右下角提交。
 // 状态和动作在 state.ts。
 
-import { useEffect, useLayoutEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { state, useStore, KINDS, polishModel, goTo, loadCharacters } from '../store.ts';
 import { RES_RANK } from '../request.ts';
-import { modelNote, referenceModeLabel } from '../../../shared/models.ts';
+import { modelLabel, modelNote, referenceModeLabel } from '../../../shared/models.ts';
 import { Icon, type IconName } from '../ui/Icon.tsx';
-import { Segmented, Toggle, Dropdown, FormRow, tip, clipTip } from '../ui/controls.tsx';
+import { Segmented, Slider, Toggle, Dropdown, FormRow, tip, clipTip } from '../ui/controls.tsx';
 import { openPopover, openMenu, toast } from '../ui/layers.tsx';
 import { enter, enterEach, reducedMotion, useOnChange, EASE_OUT } from '../ui/motion.ts';
 import { Thumb, openAssetPicker } from '../assets.tsx';
@@ -216,7 +216,7 @@ function VideoToolbar() {
   const mode = modes.find((m) => m.value === form.mode) || modes[0];
   const ratio = RATIOS.find((r) => r.value === form.ratio) || RATIOS[0];
   const models = state.models.includes(form.model) ? state.models : [form.model, ...state.models];
-  const { durations, autoDuration } = capabilities();
+  const duration = form.durationAuto ? '时长自动' : `${form.duration} 秒`;
   return (
     <>
       <Dropdown
@@ -229,23 +229,17 @@ function VideoToolbar() {
         options={modes.map((m) => ({ value: m.value, label: m.label, note: m.note }))}
         onChange={(value) => setMode(value as VideoForm['mode'])}
       />
-      <Dropdown key="model" variant="tool" control="model" icon="cube" label="模型" value={form.model} options={models.map((m) => ({ value: m, label: m, note: modelNote(m) || undefined }))} onChange={(model) => update({ model })} />
+      <Dropdown key="model" variant="tool" control="model" icon="cube" label="模型" value={form.model} options={models.map((m) => ({ value: m, label: modelLabel(m), note: modelNote(m) || undefined }))} onChange={(model) => update({ model })} />
       <PanelButton key="frame" name="frame" label="画面" ariaLabel={`画面：${ratio.label}，${form.resolution}`} className="frame-popover" panel={() => <FramePanel />}>
         <span className="ratio-box">
           <RatioShape value={form.ratio} />
         </span>
         <span>{`${ratio.label} · ${form.resolution}`}</span>
       </PanelButton>
-      <Dropdown
-        key="duration"
-        variant="tool"
-        control="duration"
-        icon="clock"
-        label="时长"
-        value={form.durationAuto ? 'auto' : String(form.duration)}
-        options={[...durations.map((d) => ({ value: String(d), label: `${d} 秒` })), ...(autoDuration ? [{ value: 'auto', label: '由模型决定', display: '时长自动' }] : [])]}
-        onChange={(value) => update(value === 'auto' ? { durationAuto: true } : { durationAuto: false, duration: Number(value) })}
-      />
+      <PanelButton key="duration" name="duration" label="时长" ariaLabel={`时长：${duration}`} className="duration-popover" panel={() => <DurationPanel />}>
+        <Icon name="clock" />
+        <span>{duration}</span>
+      </PanelButton>
       {/* 「更多」里的设置这个模型一项也用不上时，不显示入口。 */}
       {(can.audio || can.seed || can.seedanceExtras) && (
         <PanelButton key="more" name="more" label="更多设置" className="more-popover" panel={() => <MorePanel />}>
@@ -288,7 +282,7 @@ function ImageToolbar() {
   const models = known.includes(sub.model) || !known.length ? known : [sub.model, ...known];
   return (
     <>
-      <Dropdown key="image-model" variant="tool" control="model" icon="cube" label="模型" value={sub.model} options={(models.length ? models : [sub.model]).map((m) => ({ value: m, label: m }))} onChange={(model) => updateStudio('image', { model })} />
+      <Dropdown key="image-model" variant="tool" control="model" icon="cube" label="模型" value={sub.model} options={(models.length ? models : [sub.model]).map((m) => ({ value: m, label: modelLabel(m) }))} onChange={(model) => updateStudio('image', { model })} />
       <ImageRatioButton key="image-ratio" />
       <Dropdown key="count" variant="tool" control="count" icon="layers" label="数量" value={String(sub.count)} options={IMAGE_COUNTS.map((n) => ({ value: String(n), label: `${n} 张` }))} onChange={(value) => updateStudio('image', { count: Number(value) })} />
     </>
@@ -355,6 +349,41 @@ function FramePanel() {
       <Segmented options={resolutions.map((r) => ({ value: r, label: r, disabled: !allowed.includes(r) }))} value={form.resolution} onChange={(resolution) => update({ resolution })} />
       {!specDriven() && allowed.length < RESOLUTIONS.length && <div className="small muted">{form.model} 不支持 1080p</div>}
       {(isGrok() || specDriven()) && form.mode === 'frames' && <div className="small muted">有首帧时，画面比例跟着首帧走</div>}
+    </>
+  );
+}
+
+// 「时长」面板：一条带刻度的滑杆加一个数字框。有的模型能选 4 到 30 秒，一秒一项列成菜单太长。
+function DurationPanel() {
+  useStore('composer');
+  const { form } = composer;
+  const { durations, autoDuration } = capabilities();
+  const min = durations[0];
+  const max = durations[durations.length - 1];
+  // 槽从 0 画起，每 5 秒一个刻度。
+  const marks = Array.from({ length: Math.floor(max / 5) + 1 }, (_, i) => i * 5);
+  // 数字框里正在打的字。打到一半的（比如想输 12 先打了 1）不在范围里，先留在框里不生效。
+  const [draft, setDraft] = useState<string | null>(null);
+  const type = (text: string) => {
+    setDraft(text);
+    const seconds = Number(text);
+    if (Number.isInteger(seconds) && seconds >= min && seconds <= max) update({ durationAuto: false, duration: seconds });
+  };
+  return (
+    <>
+      <div className="popover-title">时长</div>
+      <div className="duration-row">
+        <Slider label="时长" from={0} min={min} max={max} marks={marks} value={form.duration} disabled={form.durationAuto} onChange={(duration) => (setDraft(null), update({ duration }))} />
+        <label className="input duration-field">
+          <input type="number" inputMode="numeric" min={min} max={max} step="1" value={draft ?? String(form.duration)} disabled={form.durationAuto} aria-label="时长（秒）" onChange={(e) => type(e.target.value)} onBlur={() => setDraft(null)} />
+          <span>秒</span>
+        </label>
+      </div>
+      {autoDuration && (
+        <FormRow label="由模型决定" desc="不指定秒数，模型按内容自己定">
+          <Toggle checked={form.durationAuto} onChange={(durationAuto) => update({ durationAuto })} label="时长由模型决定" />
+        </FormRow>
+      )}
     </>
   );
 }

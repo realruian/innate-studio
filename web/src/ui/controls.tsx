@@ -1,6 +1,6 @@
 // 表单控件。所有页面都只用这里的控件，不直接用浏览器原生的下拉框、勾选框和折叠标签。
 
-import { useEffect, useLayoutEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, type CSSProperties, type ReactNode } from 'react';
 import { Icon, type IconName } from './Icon.tsx';
 import { openMenu } from './layers.tsx';
 
@@ -66,6 +66,33 @@ export function Toggle({ checked, onChange, label }: { checked: boolean; onChang
     <label className="switch">
       <input type="checkbox" role="switch" checked={checked} onChange={(e) => onChange(e.target.checked)} aria-label={label} />
     </label>
+  );
+}
+
+// 滑杆：在一段连续的整数里选一个，选项多到列成菜单太长时用。键盘左右键能调。
+// marks 是刻度：槽里每个刻度画一道短线（两头的不画），槽下面写着数。from 是槽最左边代表的数，
+// 比 min 小时（槽从 0 画起，最少却要 4）拖不到 min 以下。
+export function Slider({ value, min, max, from = min, marks = [], onChange, label, disabled }: { value: number; min: number; max: number; from?: number; marks?: number[]; onChange: (value: number) => void; label: string; disabled?: boolean }) {
+  const at = (n: number) => ({ '--at': max > from ? (Math.min(max, Math.max(from, n)) - from) / (max - from) : 0 }) as CSSProperties;
+  const shown = Math.min(max, Math.max(min, value));
+  return (
+    <div className="slider" style={{ '--fill': (at(shown) as Record<string, number>)['--at'] } as CSSProperties}>
+      <div className="slider-track">
+        {marks.slice(1, -1).map((n) => (
+          <span key={n} className="slider-tick" style={at(n)} />
+        ))}
+        <input type="range" min={from} max={max} step={1} value={shown} disabled={disabled} aria-label={label} aria-valuemin={min} onChange={(e) => onChange(Math.max(min, Number(e.target.value)))} />
+      </div>
+      {marks.length > 0 && (
+        <div className="slider-marks" aria-hidden="true">
+          {marks.map((n) => (
+            <span key={n} className="slider-mark" style={at(n)}>
+              {n}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
