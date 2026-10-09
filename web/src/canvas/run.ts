@@ -134,8 +134,8 @@ export async function generate(flow: Flow, id: string) {
     const kind = node.type as NodeKind;
     const recordId = kind === 'video' ? await submitVideo(flow, node, sources, prompt, say) : kind === 'image' ? await submitImage(node, sources, prompt) : await submitAudio(node, prompt);
     // 换了新结果，之前上传的、从素材库选的、传进素材库的那份都不再是它的输出。
-    // 宽高比也清掉：生成完之前框回到按所选比例留的大小，出了结果再按实际的来。
-    flow.updateNodeData(id, { recordId, upload: undefined, asset: undefined, assetId: undefined, assetOf: undefined, aspect: undefined });
+    // 宽高比先留着：重新生成的时候框不来回变，出了新结果再按它实际的来。
+    flow.updateNodeData(id, { recordId, upload: undefined, asset: undefined, assetId: undefined, assetOf: undefined });
     await loadHistory().catch(() => {});
     startHistoryLoop();
   } catch (err) {

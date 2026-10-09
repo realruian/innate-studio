@@ -48,12 +48,17 @@ export const KINDS: Record<Kind, { label: string; type: string; accept: string; 
 
 export const kindOfType = (type?: string): Kind => (({ image: 'image', video: 'video', audio: 'audio' }) as Record<string, Kind>)[String(type || '').toLowerCase()] || 'image';
 
+// 画布有自己的地址：#/canvas 是项目列表，#/canvas/<id> 是一张画布。刷新之后还在原来那张画布里，也可以在新标签页里打开。
+export const canvasPath = (id = '') => `#/canvas${id ? `/${id}` : ''}`;
+const hash = () => (typeof location === 'undefined' ? '' : location.hash);
+export const canvasInPath = () => /^#\/canvas\/([\w-]+)$/.exec(hash())?.[1] || '';
+
 export const state = {
   // 读到 Key 的状态之后才画创作页。
   booted: false,
-  view: 'create' as ViewId,
+  view: (hash().startsWith('#/canvas') ? 'canvas' : 'create') as ViewId,
   // 正在一张画布里：侧栏收起来，整个窗口都给画布。
-  immersive: false,
+  immersive: Boolean(canvasInPath()),
   // 创作页当前选的是哪种内容（视频、图片、语音、音效、配乐）。下面的「最近生成」跟着它走。
   createType: 'video' as CreateType,
   // 记录页的类型筛选。放在这里是因为创作页的「查看全部」要带着类型过去。
@@ -111,6 +116,9 @@ export function useStore(...events: StoreEvent[]) {
 
 // 切换页面。重复去同一页也算一次：点「创作」要回到顶部并把光标放回输入框。
 export function goTo(view: ViewId) {
+  // 去别的页面时把地址里的画布去掉，不然刷新会回到画布页。
+  if (view !== 'canvas' && hash()) history.replaceState(null, '', location.pathname + location.search);
+  else if (view === 'canvas' && !hash().startsWith('#/canvas')) history.replaceState(null, '', canvasPath());
   state.view = view;
   emit('view');
 }

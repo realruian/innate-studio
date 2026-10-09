@@ -4,7 +4,7 @@
 // 跟着画布缩放的只有框和里面的内容；名字、加号、操作条、输入面板在屏幕上的大小不变，缩得再小也看得清、点得到。
 
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
-import { BaseEdge, Handle, NodeToolbar, Position, getBezierPath, useConnection, useEdges, useInternalNode, useReactFlow, useStore as useFlowStore, useUpdateNodeInternals, type EdgeProps, type Node, type NodeProps } from '@xyflow/react';
+import { BaseEdge, Handle, NodeToolbar, Position, getBezierPath, useConnection, useEdges, useInternalNode, useReactFlow, useStore as useFlowStore, useUpdateNodeInternals, type ConnectionLineComponentProps, type EdgeProps, type Node, type NodeProps } from '@xyflow/react';
 import { api, state, useStore, loadVoices, isPendingTask, polishModel, KINDS as MEDIA } from '../store.ts';
 import { RATIOS, capabilities, imageRatios, imageRefLimit, traits, voiceName } from '../composer/state.ts';
 import { modelNote } from '../../../shared/models.ts';
@@ -16,7 +16,7 @@ import { openMenu, toast } from '../ui/layers.tsx';
 import { VideoPlayer, AudioPlayer } from '../player.tsx';
 import { openDetail } from '../history.tsx';
 import type { Kind } from '../types.ts';
-import { NODE_LABELS, ROLE_LABELS, canLink, joinPrompt, linkLabel, type AudioData, type FrameRole, type ImageData, type LinkData, type NodeKind, type TextData, type VideoData } from './model.ts';
+import { BOX_HEIGHT, NODE_LABELS, ROLE_LABELS, canLink, nodeWidth, joinPrompt, linkLabel, type AudioData, type FrameRole, type ImageData, type LinkData, type NodeKind, type TextData, type VideoData } from './model.ts';
 import { fitVideo, generate, outputOf, recordOf } from './run.ts';
 
 // 画布页交给节点用的几件事。snap：会改动画布结构的操作，动手之前调一下，撤销时回到这一刻。
@@ -38,14 +38,6 @@ function useAlone(selected?: boolean) {
     return n;
   });
   return Boolean(selected) && count === 1;
-}
-
-// 所有节点的框一样高，宽度跟着内容的比例走：1:1 是方的，16:9 就宽一些。太窄太宽的比例收在一个范围里。
-const BOX_HEIGHT = 240;
-function boxWidth(ratio?: string, aspect?: number) {
-  const parts = /^(\d+):(\d+)$/.exec(ratio || '');
-  const shape = aspect || (parts ? Number(parts[1]) / Number(parts[2]) : 16 / 9);
-  return Math.round(Math.min(560, Math.max(150, BOX_HEIGHT * shape)));
 }
 
 function Frame({ id, kind, selected, width, tools, panel, children }: { id: string; kind: NodeKind; selected?: boolean; width: number; tools?: ReactNode; panel: ReactNode; children: ReactNode }) {
@@ -312,7 +304,7 @@ export function ImageNode({ id, data: raw, selected }: NodeProps) {
       id={id}
       kind="image"
       selected={selected}
-      width={boxWidth(data.ratio, data.aspect)}
+      width={nodeWidth('image', data)}
       tools={
         <>
           <button className="cnode-btn" type="button" {...tip('上传一张图片放进这个节点')} aria-label="上传图片" onClick={() => file.current!.click()}>
@@ -471,7 +463,7 @@ export function VideoNode({ id, data: raw, selected }: NodeProps) {
       id={id}
       kind="video"
       selected={selected}
-      width={boxWidth(data.ratio, data.aspect)}
+      width={nodeWidth('video', data)}
       tools={<DetailTool data={data} />}
       panel={
         <>
@@ -529,7 +521,7 @@ export function AudioNode({ id, data: raw, selected }: NodeProps) {
       id={id}
       kind="audio"
       selected={selected}
-      width={320}
+      width={nodeWidth('audio')}
       tools={<DetailTool data={data} />}
       panel={
         <>
@@ -568,4 +560,10 @@ export function LinkEdge({ id, source, target, sourceX, sourceY, targetX, target
   const endX = to ? to.internals.positionAbsolute.x : targetX;
   const [path] = getBezierPath({ sourceX: startX, sourceY, targetX: endX, targetY, sourcePosition, targetPosition });
   return <BaseEdge id={id} path={path} className={`clink ${selected || from?.selected || to?.selected ? 'is-lit' : ''}`} />;
+}
+
+// 正在拉的那条线：一直跟着鼠标走，拖到节点上也不提前吸过去，松手才连上。能不能连，看那个节点有没有浮起来。
+export function DragLine({ fromX, fromY, fromPosition, pointer }: ConnectionLineComponentProps) {
+  const [path] = getBezierPath({ sourceX: fromX, sourceY: fromY, sourcePosition: fromPosition, targetX: pointer.x, targetY: pointer.y, targetPosition: fromPosition === Position.Right ? Position.Left : Position.Right });
+  return <path d={path} fill="none" className="react-flow__connection-path" />;
 }

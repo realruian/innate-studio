@@ -125,3 +125,209 @@ export function stripNodeData<T extends object>(data: T): T {
   const { busy: _busy, error: _error, ...rest } = data as T & Generated;
   return rest as T;
 }
+
+// ---------- 节点的大小 ----------
+
+// 所有节点的框一样高。空着的时候形状是固定的：文本和图片是方的，视频是 16:9，音频宽 320，不跟着参数里选的比例变。
+// 图片、视频有了内容（上传的、素材库里的、生成出来的），框才按它实际的宽高比定宽，太窄太宽的收在一个范围里。
+export const BOX_HEIGHT = 240;
+// 节点的名字那一行加上它和框之间的空隙，一共占多高。
+export const TITLE_ROOM = 24;
+export function nodeWidth(kind: NodeKind, data: { aspect?: number } = {}) {
+  if (kind === 'text') return BOX_HEIGHT;
+  if (kind === 'audio') return 320;
+  const shape = data.aspect || (kind === 'video' ? 16 / 9 : 1);
+  return Math.round(Math.min(560, Math.max(150, BOX_HEIGHT * shape)));
+}
+
+// ---------- 拖动时对齐 ----------
+
+export interface Rect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+// 一条参考线：画布坐标里的一段横线或竖线。
+export interface Guide {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}
+
+// 拖着的那个框靠近别的框时吸过去：左、中、右和上、中、下各三条线，离得最近的一条在 reach 以内就对上。
+// 返回要挪多少，以及对上的那几条参考线。参考线画在两个框之间的空当里；两个框在那个方向上有重叠时，画满它们合起来的范围。
+export function snapTo(moving: Rect, others: Rect[], reach: number): { dx: number; dy: number; guides: Guide[] } {
+  const marks = (start: number, size: number) => [start, start + size / 2, start + size];
+  const nearest = (axis: 'x' | 'y') => {
+    const size = axis === 'x' ? 'width' : 'height';
+    let best = 0;
+    let gap = reach;
+    let found = false;
+    for (const other of others)
+      for (const mine of marks(moving[axis], moving[size]))
+        for (const theirs of marks(other[axis], other[size])) {
+          const d = Math.abs(theirs - mine);
+          if (d < gap || (d === gap && !found && d <= reach)) {
+            gap = d;
+            best = theirs - mine;
+            found = true;
+          }
+        }
+    return found ? best : null;
+  };
+  const dx = nearest('x');
+  const dy = nearest('y');
+  const moved = { ...moving, x: moving.x + (dx || 0), y: moving.y + (dy || 0) };
+  const guides: Guide[] = [];
+  const same = (a: number, b: number) => Math.abs(a - b) < 0.01;
+  const span = (aStart: number, aSize: number, bStart: number, bSize: number) => {
+    const inner = [Math.min(aStart + aSize, bStart + bSize), Math.max(aStart, bStart)];
+    return inner[0] < inner[1] ? inner : [Math.min(aStart, bStart), Math.max(aStart + aSize, bStart + bSize)];
+  };
+  for (const other of others) {
+    if (dx !== null)
+      for (const x of marks(other.x, other.width))
+        if (marks(moved.x, moved.width).some((mine) => same(mine, x))) {
+          const [y1, y2] = span(moved.y, moved.height, other.y, other.height);
+          guides.push({ x1: x, y1, x2: x, y2 });
+        }
+    if (dy !== null)
+      for (const y of marks(other.y, other.height))
+        if (marks(moved.y, moved.height).some((mine) => same(mine, y))) {
+          const [x1, x2] = span(moved.x, moved.width, other.x, other.width);
+          guides.push({ x1, y1: y, x2, y2: y });
+        }
+  }
+  return { dx: dx || 0, dy: dy || 0, guides };
+}
+
+// ---------- 一键整理 ----------
+
+const COLUMN_GAP = 120;
+const ROW_GAP = 56;
+const LOOSE_GAP = 80;
+// 零散的节点一行最多排几个。
+const LOOSE_PER_ROW = 6;
+
+// 把节点按连线排整齐：上游在左、下游在右，一列一列对齐；同一列里按上游的次序排，线尽量不交叉。
+// 连在一起的一串节点是一组，各组从上往下排；没有连线的零散节点在最下面排成一行。整理之后的左上角还在原来的左上角。
+export function tidy(nodes: { id: string; position: { x: number; y: number }; width: number }[], edges: { source: string; target: string }[]): Map<string, { x: number; y: number }> {
+  const placed = new Map<string, { x: number; y: number }>();
+  if (!nodes.length) return placed;
+  const byId = new Map(nodes.map((node) => [node.id, node]));
+  const links = edges.filter((edge) => byId.has(edge.source) && byId.has(edge.target));
+  const ins = new Map<string, string[]>(nodes.map((node) => [node.id, []]));
+  const outs = new Map<string, string[]>(nodes.map((node) => [node.id, []]));
+  for (const { source, target } of links) {
+    ins.get(target)!.push(source);
+    outs.get(source)!.push(target);
+  }
+  // 连在一起的分成一组。
+  const groupOf = new Map<string, number>();
+  let groups = 0;
+  for (const node of nodes) {
+    if (groupOf.has(node.id)) continue;
+    const stack = [node.id];
+    while (stack.length) {
+      const id = stack.pop()!;
+      if (groupOf.has(id)) continue;
+      groupOf.set(id, groups);
+      stack.push(...ins.get(id)!, ...outs.get(id)!);
+    }
+    groups++;
+  }
+  // 第几列：离最远的源头隔着几条线。连线不会成圈，所以算得完。
+  const column = new Map<string, number>();
+  const columnOf = (id: string): number => {
+    if (!column.has(id)) {
+      column.set(id, 0);
+      column.set(id, Math.max(0, ...ins.get(id)!.map((from) => columnOf(from) + 1)));
+    }
+    return column.get(id)!;
+  };
+  nodes.forEach((node) => columnOf(node.id));
+
+  const rowStep = TITLE_ROOM + BOX_HEIGHT + ROW_GAP;
+  const left = Math.min(...nodes.map((node) => node.position.x));
+  let top = Math.min(...nodes.map((node) => node.position.y));
+  const byPlace = (a: string, b: string) => byId.get(a)!.position.y - byId.get(b)!.position.y || byId.get(a)!.position.x - byId.get(b)!.position.x;
+  const members = Array.from({ length: groups }, () => [] as string[]);
+  for (const node of nodes) members[groupOf.get(node.id)!].push(node.id);
+  const linked = members.filter((ids) => ids.length > 1).sort((a, b) => Math.min(...a.map((id) => byId.get(id)!.position.y)) - Math.min(...b.map((id) => byId.get(id)!.position.y)));
+  const loose = members.filter((ids) => ids.length === 1).map((ids) => ids[0]).sort((a, b) => byId.get(a)!.position.x - byId.get(b)!.position.x || byPlace(a, b));
+
+  for (const ids of linked) {
+    const columns: string[][] = [];
+    for (const id of ids) (columns[column.get(id)!] ||= []).push(id);
+    const row = new Map<string, number>();
+    let x = left;
+    columns.forEach((list, index) => {
+      // 第一列按现在的上下次序；后面的每一列按上游节点排在第几行。
+      const weight = (id: string) => {
+        const from = ins.get(id)!.filter((source) => row.has(source));
+        return from.length ? from.reduce((sum, source) => sum + row.get(source)!, 0) / from.length : Infinity;
+      };
+      list.sort((a, b) => (index ? weight(a) - weight(b) : 0) || byPlace(a, b));
+      list.forEach((id, n) => {
+        row.set(id, n);
+        placed.set(id, { x, y: top + n * rowStep });
+      });
+      x += Math.max(...list.map((id) => byId.get(id)!.width)) + COLUMN_GAP;
+    });
+    top += Math.max(...columns.map((list) => list.length)) * rowStep;
+  }
+  let x = left;
+  loose.forEach((id, index) => {
+    if (index && index % LOOSE_PER_ROW === 0) {
+      x = left;
+      top += rowStep;
+    }
+    placed.set(id, { x, y: top });
+    x += byId.get(id)!.width + LOOSE_GAP;
+  });
+  return placed;
+}
+
+// ---------- 复制、粘贴 ----------
+
+interface Piece {
+  id: string;
+  type?: string;
+  position: { x: number; y: number };
+  data: Record<string, unknown>;
+}
+interface Wire {
+  id: string;
+  source: string;
+  target: string;
+  data?: Record<string, unknown>;
+}
+export interface Clip {
+  nodes: Piece[];
+  edges: Wire[];
+}
+
+// 复制下来的是选中的节点，和两头都在其中的连线；只连着一头的线不带走。
+export function clipOf(nodes: Piece[], edges: Wire[]): Clip {
+  const ids = new Set(nodes.map((node) => node.id));
+  return {
+    nodes: nodes.map(({ id, type, position, data }) => ({ id, type, position: { ...position }, data: stripNodeData(data) })),
+    edges: edges.filter((edge) => ids.has(edge.source) && ids.has(edge.target)).map(({ id, source, target, data }) => ({ id, source, target, data })),
+  };
+}
+
+// 把复制下来的一份放回画布：节点和连线都换新 id，相互的位置不变。
+// at 是这一份的左上角落在哪；没给就照原位置错开 by 这么多。
+export function pasteClip(clip: Clip, place: { at?: { x: number; y: number }; by?: { x: number; y: number } }, newId: () => string): Clip {
+  const left = Math.min(...clip.nodes.map((node) => node.position.x));
+  const top = Math.min(...clip.nodes.map((node) => node.position.y));
+  const dx = place.at ? place.at.x - left : place.by?.x || 0;
+  const dy = place.at ? place.at.y - top : place.by?.y || 0;
+  const ids = new Map(clip.nodes.map((node) => [node.id, newId()]));
+  return {
+    nodes: clip.nodes.map((node) => ({ ...node, id: ids.get(node.id)!, position: { x: node.position.x + dx, y: node.position.y + dy }, data: { ...node.data } })),
+    edges: clip.edges.filter((edge) => ids.has(edge.source) && ids.has(edge.target)).map((edge) => ({ ...edge, id: newId(), source: ids.get(edge.source)!, target: ids.get(edge.target)!, data: edge.data && { ...edge.data } })),
+  };
+}

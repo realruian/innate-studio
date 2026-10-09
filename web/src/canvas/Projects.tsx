@@ -1,7 +1,8 @@
-// 画布的项目列表：一个项目是一张画布。点进去之后整个窗口都是那张画布，侧栏收起来。
+// 画布的项目列表：一个项目是一张画布，在新标签页里打开，整个窗口都是那张画布，侧栏收起来。
+// 开着哪张画布看地址（#/canvas/<id>）：刷新之后还在那张画布里，浏览器的后退回到列表。
 
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
-import { api, setImmersive } from '../store.ts';
+import { api, canvasInPath, canvasPath, setImmersive } from '../store.ts';
 import { fmtTime } from '../format.ts';
 import { Icon } from '../ui/Icon.tsx';
 import { tip, clipTip } from '../ui/controls.tsx';
@@ -39,7 +40,7 @@ function Rename({ project, done }: { project: ProjectMeta; done: (name?: string)
 
 export function Projects() {
   const [list, setList] = useState<ProjectMeta[] | null>(null);
-  const [openId, setOpenId] = useState('');
+  const [openId, setOpenId] = useState(canvasInPath);
   const [query, setQuery] = useState('');
 
   const load = useCallback(() => {
@@ -49,23 +50,43 @@ export function Projects() {
   }, []);
   useEffect(load, [load]);
 
-  const enter = (id: string) => {
-    setOpenId(id);
-    setImmersive(true);
-  };
-  const leave = useCallback(() => {
-    setOpenId('');
-    setImmersive(false);
-    load();
+  // 地址变了（后退、前进、从画布返回）就跟着换。回到列表时重新读一遍，名字和封面可能改过。
+  useEffect(() => {
+    const sync = () => {
+      const id = canvasInPath();
+      setOpenId(id);
+      setImmersive(Boolean(id));
+      if (!id) load();
+    };
+    // 画布开在别的标签页里，回到这一页时列表也要更新。
+    const refresh = () => document.visibilityState === 'visible' && !canvasInPath() && load();
+    window.addEventListener('hashchange', sync);
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      window.removeEventListener('hashchange', sync);
+      document.removeEventListener('visibilitychange', refresh);
+    };
   }, [load]);
 
-  async function create() {
+  const leave = useCallback(() => {
+    location.hash = canvasPath();
+  }, []);
+
+  // 在新标签页里打开一张画布。标签页要在点击的当下就开出来，等请求回来再开会被浏览器当成弹窗拦掉；
+  // 真被拦了就在当前页打开。
+  async function open(id: string | Promise<string>) {
+    const tab = window.open('', '_blank');
     try {
-      enter((await api<ProjectMeta>('POST', '/api/canvases', {})).id);
+      const url = `${location.pathname}${location.search}${canvasPath(await id)}`;
+      if (tab) tab.location.replace(url);
+      else location.assign(url);
     } catch (err) {
+      tab?.close();
       toast((err as Error).message, 'error', 6000);
     }
   }
+  const create = () => open(api<ProjectMeta>('POST', '/api/canvases', {}).then((project) => project.id));
+  const enter = (id: string) => open(id);
 
   function more(button: HTMLElement, project: ProjectMeta) {
     openMenu(button, {

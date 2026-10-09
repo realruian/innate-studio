@@ -2,7 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { canLink, targetsOf, sourcesOf, linkLabel, joinPrompt, videoFormFrom, stripNodeData } from '../web/src/canvas/model.ts';
+import { canLink, targetsOf, sourcesOf, linkLabel, joinPrompt, videoFormFrom, stripNodeData, nodeWidth, clipOf, pasteClip, snapTo, tidy } from '../web/src/canvas/model.ts';
 import { buildRequest } from '../web/src/request.ts';
 
 const base = {
@@ -72,4 +72,87 @@ test('首尾帧摆不通的情况会说明原因', () => {
 
 test('存画布之前去掉只在页面上有意义的状态', () => {
   assert.deepEqual(stripNodeData({ prompt: 'a', recordId: 'r1', busy: '准备中', error: '失败了' }), { prompt: 'a', recordId: 'r1' });
+});
+
+test('节点的宽度：空着时形状固定，不跟着所选的比例变；有了内容按它实际的宽高比，收在范围里', () => {
+  assert.equal(nodeWidth('text'), 240);
+  assert.equal(nodeWidth('audio'), 320);
+  assert.equal(nodeWidth('image', { ratio: '9:16' }), 240);
+  assert.equal(nodeWidth('video', { ratio: '9:16' }), 427);
+  assert.equal(nodeWidth('video', { ratio: '9:16', aspect: 9 / 16 }), 150);
+  assert.equal(nodeWidth('image', { aspect: 1.5 }), 360);
+  assert.equal(nodeWidth('video', { aspect: 3 }), 560);
+});
+
+test('拖动对齐：靠近别的框的边线或中线就吸过去，参考线画在两个框之间；离得远不吸', () => {
+  const other = { x: 0, y: 0, width: 240, height: 240 };
+  // 在右边隔开 100，顶边差 4：吸到顶边，上、中、下三条线都对上（一样高）。
+  const near = snapTo({ x: 340, y: 4, width: 427, height: 240 }, [other], 6);
+  assert.deepEqual([near.dx, near.dy], [0, -4]);
+  assert.deepEqual(near.guides, [
+    { x1: 240, y1: 0, x2: 340, y2: 0 },
+    { x1: 240, y1: 120, x2: 340, y2: 120 },
+    { x1: 240, y1: 240, x2: 340, y2: 240 },
+  ]);
+  // 在下面，左边差 5：吸到左边线，竖着的参考线画在上下两个框之间。
+  const below = snapTo({ x: 5, y: 400, width: 150, height: 240 }, [other], 6);
+  assert.deepEqual([below.dx, below.dy], [-5, 0]);
+  assert.deepEqual(below.guides, [{ x1: 0, y1: 240, x2: 0, y2: 400 }]);
+  // 差得比 reach 多：不动，也没有参考线。
+  const far = snapTo({ x: 300, y: 30, width: 100, height: 240 }, [other], 6);
+  assert.deepEqual(far, { dx: 0, dy: 0, guides: [] });
+});
+
+test('一键整理：按连线从左到右分列，同一列上下排开；零散的节点排在最下面一行；左上角不动', () => {
+  const at = (x, y) => ({ x, y });
+  const nodes = [
+    { id: 'video', position: at(900, 700), width: 427 },
+    { id: 'text', position: at(130, 90), width: 240 },
+    { id: 'imgB', position: at(500, 600), width: 240 },
+    { id: 'imgA', position: at(480, 100), width: 360 },
+    { id: 'lonely', position: at(100, 900), width: 320 },
+    { id: 'lonely2', position: at(700, 950), width: 240 },
+  ];
+  const edges = [
+    { source: 'text', target: 'imgA' },
+    { source: 'text', target: 'imgB' },
+    { source: 'imgA', target: 'video' },
+    { source: 'imgB', target: 'video' },
+    { source: 'text', target: 'video' },
+  ];
+  const placed = tidy(nodes, edges);
+  assert.deepEqual(placed.get('text'), at(100, 90));
+  // 第二列在文本右边隔 120；两张图上下排，行距是节点的高度加 56。
+  assert.deepEqual(placed.get('imgA'), at(460, 90));
+  assert.deepEqual(placed.get('imgB'), at(460, 410));
+  // 视频直接连着文本，也连着图片：排在图片后面那一列，列的位置按这一列最宽的节点让开。
+  assert.deepEqual(placed.get('video'), at(940, 90));
+  // 零散的在这一组下面排成一行。
+  assert.deepEqual(placed.get('lonely'), at(100, 730));
+  assert.deepEqual(placed.get('lonely2'), at(500, 730));
+  assert.equal(tidy([], []).size, 0);
+});
+
+test('复制粘贴：只带走两头都选中的连线，粘贴出来的换了新 id、相互位置不变，不带页面上的临时状态', () => {
+  const nodes = [
+    { id: 'a', type: 'text', position: { x: 100, y: 50 }, data: { text: '你好', busy: '正在写', error: '出错了' } },
+    { id: 'b', type: 'image', position: { x: 400, y: 80 }, data: { prompt: '', model: 'm', ratio: '1:1', recordId: 'r1' } },
+  ];
+  const edges = [
+    { id: 'e1', source: 'a', target: 'b', data: { kind: 'text' } },
+    { id: 'e2', source: 'b', target: 'c', data: { kind: 'image', role: 'first' } },
+  ];
+  const clip = clipOf(nodes, edges);
+  assert.deepEqual(clip.edges.map((e) => e.id), ['e1']);
+  assert.deepEqual(clip.nodes[0].data, { text: '你好' });
+
+  let n = 0;
+  const pasted = pasteClip(clip, { at: { x: 0, y: 0 } }, () => `new${++n}`);
+  assert.deepEqual(pasted.nodes.map((node) => [node.id, node.position]), [['new1', { x: 0, y: 0 }], ['new2', { x: 300, y: 30 }]]);
+  assert.deepEqual(pasted.edges.map((e) => [e.source, e.target, e.data]), [['new1', 'new2', { kind: 'text' }]]);
+  assert.equal(pasted.nodes[1].data.recordId, 'r1');
+  assert.notEqual(pasted.nodes[1].data, clip.nodes[1].data);
+
+  const copy = pasteClip(clip, { by: { x: 40, y: 40 } }, () => `dup${++n}`);
+  assert.deepEqual(copy.nodes.map((node) => node.position), [{ x: 140, y: 90 }, { x: 440, y: 120 }]);
 });

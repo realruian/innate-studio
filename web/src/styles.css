@@ -33,6 +33,7 @@
   --switch-track: #3a3a3a;
   --switch-knob: #a3a3a3;
   --shadow-float: 0 8px 24px rgba(0, 0, 0, 0.5);
+  --shadow-lift: 0 16px 32px -12px rgba(0, 0, 0, 0.55);
 
   /* 版式：字号、行高、字重、间距都只从下面取，组件里不写数值。规则见 DESIGN.md 第 3 节。 */
   /* 字号按用途分六档：26、18、14、13、12、11 像素。写成 rem，用户在浏览器里调大默认字号时会跟着变 */
@@ -109,6 +110,7 @@
   --switch-track: #d9d9d9;
   --switch-knob: #ffffff;
   --shadow-float: 0 4px 12px rgba(0, 0, 0, 0.06);
+  --shadow-lift: 0 16px 32px -12px rgba(0, 0, 0, 0.12);
 }
 
 /* 悬停样式都包在 @media (hover: hover) 里：触屏上点一下会一直停在悬停状态，所以只在有鼠标的设备上生效。 */
@@ -759,13 +761,16 @@ button.cnode-ref[aria-expanded='true'] { border-color: var(--text-3); }
 @keyframes cnode-drop { from { opacity: 0; translate: 0 -6px; } }
 /* 拖着节点走的时候它浮起来一点 */
 .cnode-box { position: relative; transition: border-color 120ms var(--ease), translate 200ms var(--ease-out), box-shadow 200ms var(--ease-out), opacity 160ms var(--ease); }
-.react-flow__node.dragging .cnode-box { box-shadow: 0 10px 28px rgba(0, 0, 0, 0.22); }
+.react-flow__node.dragging .cnode-box { box-shadow: var(--shadow-lift); }
 /* 拉线的时候：接不住这条线的节点暗下去；线拖到接得住的节点上，那个节点浮起来、边线变亮，松手就连上 */
 .cnode.is-dimmed .cnode-box, .cnode.is-dimmed .cnode-title { opacity: 0.4; }
 .cnode-title { transition: opacity 160ms var(--ease); }
 /* 落点盖住整个框，看不见，只在拉线时才有 */
 .canvas .react-flow__handle.cnode-drop { top: auto; bottom: 0; left: 0; right: auto; width: 100%; height: 240px; min-width: 0; min-height: 0; border: 0; border-radius: var(--r-md); background: none; transform: none; opacity: 0; }
-.cnode:has(.cnode-drop.valid) .cnode-box { translate: 0 -6px; border-color: var(--text); box-shadow: 0 14px 32px rgba(0, 0, 0, 0.28); }
+.cnode:has(.cnode-drop.valid) .cnode-box { translate: 0 -6px; border-color: var(--text-2); box-shadow: var(--shadow-lift); }
+/* 拖动节点时的对齐参考线：画在画布坐标里，线宽和虚线的疏密不跟着缩放变。 */
+.canvas-guides { position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: visible; pointer-events: none; }
+.canvas-guides line { stroke: var(--accent); stroke-width: 1; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; }
 /* 正在生成：框上扫过一道淡淡的光 */
 .cnode-box:has(.spinner)::after { content: ""; position: absolute; inset: 0; background: linear-gradient(100deg, transparent 30%, color-mix(in srgb, var(--text) 7%, transparent) 50%, transparent 70%); background-size: 220% 100%; animation: cnode-sheen 1.6s linear infinite; pointer-events: none; }
 @keyframes cnode-sheen { from { background-position: 120% 0; } to { background-position: -100% 0; } }
