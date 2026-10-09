@@ -705,9 +705,9 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 .cnode-title { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-8); width: calc(100% * var(--zoom, 1)); height: var(--sp-16); padding: 0 var(--sp-2); color: var(--text-3); font-size: var(--text-ui); line-height: var(--lh-snug); white-space: nowrap; cursor: grab; transform-origin: left bottom; scale: var(--inv, 1); translate: 0 calc(var(--sp-8) - var(--sp-12) * var(--inv, 1)); }
 .cnode-name { display: flex; align-items: center; gap: var(--sp-4); min-width: 0; }
 .cnode-acts { display: flex; align-items: center; gap: var(--sp-2); flex: none; cursor: default; animation: fade 160ms var(--ease-out); }
-.cnode-box { display: grid; height: 240px; overflow: hidden; background: var(--surface-1); border-radius: var(--r-lg); box-shadow: 0 0 0 1px var(--border); outline: calc(1.5px * var(--inv, 1)) solid transparent; outline-offset: calc(3px * var(--inv, 1)); }
+.cnode-box { display: grid; height: 240px; overflow: hidden; background: var(--surface-1); border-radius: var(--r-lg); box-shadow: 0 0 0 1px var(--border); outline: var(--ring, 1.5px) solid transparent; outline-offset: var(--ring-gap, 3px); }
 @media (hover: hover) { .cnode:not(.selected):hover .cnode-box { box-shadow: 0 0 0 1px var(--border-strong); } }
-/* 选中：框外隔 3 像素套一圈 1.5 像素的线，粗细和间隔在屏幕上不变 */
+/* 选中：框外隔 3 像素套一圈 1.5 像素的线（屏幕上）。画布缩小时线和间隔跟着收细，到 1 像素为止，小节点上才不显得重 */
 .cnode.selected .cnode-box { outline-color: var(--text-2); }
 /* 名字行右端的小按钮：上传、看详情 */
 
@@ -762,7 +762,12 @@ button.cnode-ref[aria-expanded='true'] { border-color: var(--text-3); }
 
 /* 连线：一条细线，不带标签。两头的节点有一个被选中，或者线自己被选中时变亮 */
 .canvas .react-flow__edge-path.clink { transition: stroke 160ms var(--ease); animation: fade 240ms var(--ease-out); }
-.canvas .react-flow__edge-path.clink.is-lit { stroke: var(--text-2); }
+.canvas .react-flow__edge-path.clink.is-lit { stroke: color-mix(in srgb, var(--accent) 38%, transparent); }
+/* 流光：在同一条细线上再描一遍，描边是一条两头透明的渐变，顺着线滑过去（做法取自 Magic UI 的 Animated Beam）。只在两头有节点被选中时出现。 */
+.clink-beam { fill: none; pointer-events: none; stroke-width: 2; stroke-linecap: round; }
+.clink-beam-tail { stop-color: var(--accent); }
+.clink-beam-head { stop-color: var(--accent); }
+@media (prefers-reduced-motion: reduce) { .clink-beam { display: none; } }
 .canvas .react-flow__edge.selected .react-flow__edge-path.clink { stroke: var(--text); }
 /* 正在拉的那条线是流动的虚线 */
 .canvas .react-flow__connection-path { stroke-dasharray: 5 5; animation: clink-flow 480ms linear infinite; }

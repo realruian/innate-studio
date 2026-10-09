@@ -59,6 +59,8 @@ function makeEdge(source: Node, target: Node): Edge {
 function Board({ id, onExit }: { id: string; onExit: () => void }) {
   const flow = useReactFlow();
   const { zoom } = useViewport();
+  // 名字、加号这些在屏幕上大小不变，靠这个倒数把画布的缩放抵消掉；最多放大到 2 倍。
+  const inv = Math.min(1 / zoom, 2);
   const [ready, setReady] = useState(false);
   const [name, setName] = useState('');
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
@@ -560,7 +562,9 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
         ref={wrap}
         className="canvas"
         // 节点的名字和加号要在屏幕上保持大小不变，样式里用这个倒数把画布的缩放抵消掉。
-        style={{ '--inv': 1 / zoom, '--zoom': zoom } as CSSProperties}
+        // 50% 以下不再抵消：名字和加号跟着画布一起缩小，不然会比节点本身还大。
+        // --ring、--ring-gap 是选中那圈线的粗细和间隔（画布坐标）：屏幕上 100% 时是 1.5 和 3，缩小时收到 1 和 1 为止。
+        style={{ '--inv': inv, '--zoom': 1 / inv, '--ring': `${Math.min(1.5, Math.max(1, 1.5 * zoom)) / zoom}px`, '--ring-gap': `${Math.min(3, Math.max(1, 3 * zoom)) / zoom}px` } as CSSProperties}
         onDoubleClick={(e) => (e.target as Element).classList.contains('react-flow__pane') && menuAt(e.clientX, e.clientY, KINDS)}
         onClick={(e) => {
           // 直接点一下加号（没有拖动）：菜单出在加号外侧。
@@ -612,7 +616,7 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
             e.preventDefault();
             nodeMenu(e.clientX, e.clientY);
           }}
-          minZoom={0.2}
+          minZoom={0.1}
           maxZoom={2}
           deleteKeyCode={['Backspace', 'Delete']}
           zoomOnDoubleClick={false}

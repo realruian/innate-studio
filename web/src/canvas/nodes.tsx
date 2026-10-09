@@ -447,7 +447,7 @@ function pickRole(anchor: HTMLElement, model: string | undefined, current: Frame
 
 // 面板最上面一排：连进来的节点各一个小方块，写着它当什么用；最后一个加号是再加一份参考素材。
 // 连进来的文本节点也在这里（它的内容会拼进提示词）。视频节点收图片、视频、音频，图片可以点开改用途；
-// 图片节点只收图片（图生图），limit 是它的模型最多收几张；文本、音频节点只收文本，没有加号。什么都没有就不占地方。
+// 图片节点只收图片（图生图），limit 是它的模型最多收几张；文本、音频节点只收文本。这一排每种节点都有，最后一个加号一直在。
 function Refs({ id, kind, model = '', limit = 0 }: { id: string; kind: NodeKind; model?: string; limit?: number }) {
   const forImage = kind === 'image';
   const flow = useReactFlow();
@@ -458,8 +458,9 @@ function Refs({ id, kind, model = '', limit = 0 }: { id: string; kind: NodeKind;
   // 文本排在前面。这个节点的模型不收的素材也照样显示，方便看出问题在哪。
   const media = [...inputs.filter((i) => i.link.kind === 'text'), ...inputs.filter((i) => i.link.kind !== 'text')];
   const used = inputs.filter((i) => i.link.kind === 'image').length;
-  const canAdd = kind === 'video' || (forImage && used < limit);
-  const hasLibrary = !forImage && (state.app.features.library || state.app.features.persons);
+  const canUpload = kind === 'video' || (forImage && used < limit);
+  const hasLibrary = kind === 'video' && (state.app.features.library || state.app.features.persons);
+  const only = !canUpload && !hasLibrary;
 
   async function upload(picked: File) {
     const kind = kindOfFile(picked);
@@ -473,22 +474,24 @@ function Refs({ id, kind, model = '', limit = 0 }: { id: string; kind: NodeKind;
     }
   }
 
+  // 加号：这个节点还能接什么就列什么。文本哪种节点都能接；图片节点还能接参考图，视频节点还能接图片、视频、音频。只有一样时不弹菜单。
   function add(button: HTMLElement) {
-    // 图片节点只能加图片，直接选文件。
-    if (forImage) return file.current!.click();
     const sources = [...(state.app.features.library ? (['library'] as const) : []), ...(state.app.features.persons ? (['person'] as const) : [])];
     const kinds = Object.keys(MEDIA) as Kind[];
-    openMenu(button, {
-      label: '添加参考素材',
-      items: [{ value: 'upload', label: '上传图片或视频' }, ...(hasLibrary ? kinds.map((kind) => ({ value: kind, label: `从素材库选${MEDIA[kind].label}` })) : [])],
-      onSelect: (value) => {
-        if (value === 'upload') return file.current!.click();
-        openAssetPicker({ kind: value as Kind, remaining: 1, sources: [...sources], onPick: (asset) => addInput(id, value as NodeKind, { asset }) });
-      },
-    });
+    const items = [
+      ...(canUpload ? [{ value: 'upload', label: forImage ? '上传参考图' : '上传图片或视频' }] : []),
+      ...(hasLibrary ? kinds.map((item) => ({ value: item, label: `从素材库选${MEDIA[item].label}` })) : []),
+      { value: 'text', label: '文本节点' },
+    ];
+    const pick = (value: string) => {
+      if (value === 'upload') return file.current!.click();
+      if (value === 'text') return addInput(id, 'text');
+      openAssetPicker({ kind: value as Kind, remaining: 1, sources: [...sources], onPick: (asset) => addInput(id, value as NodeKind, { asset }) });
+    };
+    if (items.length === 1) return pick(items[0].value);
+    openMenu(button, { label: '接一个节点进来', items, onSelect: pick });
   }
 
-  if (!media.length && !canAdd) return null;
   return (
     <div className="cnode-refs">
       {media.map(({ edgeId, link, node }) => {
@@ -533,11 +536,9 @@ function Refs({ id, kind, model = '', limit = 0 }: { id: string; kind: NodeKind;
           </span>
         );
       })}
-      {canAdd && (
-        <button className="cnode-ref cnode-ref-add" type="button" {...tip(forImage ? '添加参考图，按提示词改这张图' : '添加参考素材')} aria-label={forImage ? '添加参考图' : '添加参考素材'} aria-haspopup={forImage ? undefined : 'menu'} aria-expanded={forImage ? undefined : 'false'} onClick={(e) => add(e.currentTarget)}>
-          <Icon name="plus" size={18} />
-        </button>
-      )}
+      <button className="cnode-ref cnode-ref-add" type="button" {...tip(only ? '接一个文本节点进来，它的内容会拼进提示词' : forImage ? '添加参考图或文本' : '添加参考素材或文本')} aria-label={only ? '接一个文本节点进来' : '接一个节点进来'} aria-haspopup={only ? undefined : 'menu'} aria-expanded={only ? undefined : 'false'} onClick={(e) => add(e.currentTarget)}>
+        <Icon name="plus" size={18} />
+      </button>
       <input
         ref={file}
         type="file"
@@ -663,8 +664,14 @@ export function AudioNode({ id, data: raw, selected }: NodeProps) {
 
 // ---------- 连线 ----------
 
+// 流光走一遍的节奏：用八成半的时间从上游匀着滑到下游（两头稍缓），剩下的停一下再来。
+// 不用原版那条「起步很快、后面几乎不动」的曲线：连线短，那样光一闪就过去了，大半时间看不见。
+const BEAM_DUR = '2.4s';
+const BEAM_TIMES = '0;0.85;1';
+const BEAM_EASE = '0.4 0 0.2 1;0 0 1 1';
+
 // 一条细线，上面不放标签：图片当参考图、首帧还是尾帧，在视频节点的输入面板里看和改。
-// 线两头的节点有一个被选中时，这条线变亮，看得出它连着谁。
+// 线两头的节点有一个被选中时，这条线变成彩色并带流光，看得出它连着谁；平时是普通的灰线。
 export function LinkEdge({ id, source, target, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, selected }: EdgeProps) {
   const from = useInternalNode(source);
   const to = useInternalNode(target);
@@ -672,7 +679,39 @@ export function LinkEdge({ id, source, target, sourceX, sourceY, targetX, target
   const startX = from ? from.internals.positionAbsolute.x + (from.measured.width || 0) : sourceX;
   const endX = to ? to.internals.positionAbsolute.x : targetX;
   const [path] = getBezierPath({ sourceX: startX, sourceY, targetX: endX, targetY, sourcePosition, targetPosition });
-  return <BaseEdge id={id} path={path} className={`clink ${selected || from?.selected || to?.selected ? 'is-lit' : ''}`} />;
+  // 流光那段渐变沿着起点到终点的方向走，长度是两点距离的一半，收在 100 到 320 之间。
+  const dx = endX - startX;
+  const dy = targetY - sourceY;
+  const span = Math.hypot(dx, dy) || 1;
+  const ux = dx / span;
+  const uy = dy / span;
+  const reach = Math.min(320, Math.max(100, span * 0.5));
+  // 两头的节点有一个被选中：线变成彩色，上面有一段光顺着线从上游流到下游。线自己被选中时不流，免得盖住选中的样子。
+  const lit = !selected && Boolean(from?.selected || to?.selected);
+  return (
+    <>
+      <BaseEdge id={id} path={path} className={`clink ${lit ? 'is-lit' : ''}`} />
+      {lit && (
+        <>
+          {/* 流光的做法取自 Magic UI 的 Animated Beam：不另画一段粗线，而是在原来的细线上再描一遍，
+              描边用一条两头透明的渐变，让这条渐变顺着上游到下游的方向滑过去。两头是淡出的，所以没有硬边。 */}
+          <defs>
+            <linearGradient id={`beam-${id}`} gradientUnits="userSpaceOnUse" x1={startX - reach * ux} y1={sourceY - reach * uy} x2={startX} y2={sourceY}>
+              <animate attributeName="x1" dur={BEAM_DUR} repeatCount="indefinite" calcMode="spline" keyTimes={BEAM_TIMES} keySplines={BEAM_EASE} values={`${startX - reach * ux};${endX};${endX}`} />
+              <animate attributeName="y1" dur={BEAM_DUR} repeatCount="indefinite" calcMode="spline" keyTimes={BEAM_TIMES} keySplines={BEAM_EASE} values={`${sourceY - reach * uy};${targetY};${targetY}`} />
+              <animate attributeName="x2" dur={BEAM_DUR} repeatCount="indefinite" calcMode="spline" keyTimes={BEAM_TIMES} keySplines={BEAM_EASE} values={`${startX};${endX + reach * ux};${endX + reach * ux}`} />
+              <animate attributeName="y2" dur={BEAM_DUR} repeatCount="indefinite" calcMode="spline" keyTimes={BEAM_TIMES} keySplines={BEAM_EASE} values={`${sourceY};${targetY + reach * uy};${targetY + reach * uy}`} />
+              <stop offset="0%" className="clink-beam-tail" stopOpacity="0" />
+              <stop offset="60%" className="clink-beam-tail" />
+              <stop offset="88%" className="clink-beam-head" />
+              <stop offset="100%" className="clink-beam-head" stopOpacity="0" />
+            </linearGradient>
+          </defs>
+          <path d={path} className="clink-beam" stroke={`url(#beam-${id})`} />
+        </>
+      )}
+    </>
+  );
 }
 
 // 正在拉的那条线：一直跟着鼠标走，拖到节点上也不提前吸过去，松手才连上。能不能连，看那个节点有没有浮起来。
