@@ -120,6 +120,7 @@ test('模型列表：带上每个模型支持什么，Seedance 在前且新型�
   assert.deepEqual(data.imageModels, ['x-ai/grok-imagine-image-2.0', 'google/gemini-3-pro-image', 'recraft/recraft-v4']);
   assert.deepEqual(data.imageRatios['x-ai/grok-imagine-image-2.0'], ['1:1', '16:9', '3:2']);
   assert.deepEqual(data.imageRatios['recraft/recraft-v4'], []);
+  assert.deepEqual(data.imageRefs, { 'google/gemini-3-pro-image': 14, 'x-ai/grok-imagine-image-2.0': 3, 'recraft/recraft-v4': 0 });
   assert.deepEqual(data.audio, { speech: true, sfx: false, music: false });
 });
 
@@ -178,6 +179,25 @@ test('润色：用 OpenRouter 的文本模型，不认 Flatkey 的型号', async
 });
 
 const imageRequests = () => openrouter.log.filter((entry) => entry.method === 'POST' && entry.pathname === '/v1/images').map((entry) => JSON.parse(entry.body));
+
+test('图生图：本机的参考图内嵌进请求，记录里存短地址；张数超了、模型不收的不发', async () => {
+  await call('GET', '/api/models');
+  const up = await fetch(`${base}/api/uploads`, { method: 'POST', headers: { 'Content-Type': 'image/png' }, body: PNG });
+  const { url } = await up.json();
+  const ref = { type: 'image_url', image_url: { url } };
+  const created = await call('POST', '/api/images', { payload: { model: 'x-ai/grok-imagine-image-2.0', prompt: '改成水彩', n: 1, aspect_ratio: '16:9', input_references: [ref] } });
+  assert.equal(created.status, 200);
+  assert.equal(created.data.items[0].payload.input_references[0].image_url.url, url);
+  await waitFor(() => imageRequests().some((r) => r.prompt === '改成水彩'), '请求发出');
+  assert.match(imageRequests().at(-1).input_references[0].image_url.url, /^data:image\/png;base64,/);
+
+  const tooMany = await call('POST', '/api/images', { payload: { model: 'x-ai/grok-imagine-image-2.0', prompt: '改', n: 1, input_references: [ref, ref, ref, ref] } });
+  assert.equal(tooMany.status, 400);
+  assert.match(tooMany.data.error.message, /最多收 3 张/);
+  const refused = await call('POST', '/api/images', { payload: { model: 'recraft/recraft-v4', prompt: '改', n: 1, input_references: [ref] } });
+  assert.equal(refused.status, 400);
+  assert.match(refused.data.error.message, /不收参考图/);
+});
 
 test('生图：要几张就发几次，每张一条记录，费用各算各的；模型不收的比例不发', async () => {
   const created = await call('POST', '/api/images', { payload: { model: 'x-ai/grok-imagine-image-2.0', prompt: '窗台上的猫', n: 2, aspect_ratio: '16:9' } });

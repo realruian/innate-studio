@@ -34,7 +34,7 @@ export const RATIOS = [
 ];
 export const SR_RESOLUTIONS = ['720p', '1080p', '2k', '4k'];
 
-const defaults = (): VideoForm => ({
+export const defaults = (): VideoForm => ({
   mode: 'text',
   prompt: '',
   model: 'seedance-2.0',
@@ -54,7 +54,7 @@ const defaults = (): VideoForm => ({
 
 const studioDefaults = (): Studio => ({
   type: 'video',
-  image: { prompt: '', model: 'grok-imagine-image-2.0', ratio: '16:9', count: 1 },
+  image: { prompt: '', model: 'grok-imagine-image-2.0', ratio: '16:9', count: 1, refs: [] },
   speech: { prompt: '', voiceId: '', voiceName: '' },
   sfx: { prompt: '', duration: 'auto', influence: '0.3' },
   music: { video: null },
@@ -141,7 +141,7 @@ export const isGrok = (model = composer.form.model) => !isOpenRouter() && videoF
 
 // OpenRouter 的模型支持什么，是从它的模型列表里读来的。列表还没读到时先按这一份保守的来。
 const FALLBACK_SPEC: VideoSpec = { resolutions: ['480p', '720p'], ratios: ['16:9', '4:3', '1:1', '3:4', '9:16'], durations: [4, 5, 6, 7, 8], autoDuration: false, frames: ['first_frame'], audio: false, seed: false };
-const specOf = (model: string) => state.videoSpecs[model] || FALLBACK_SPEC;
+export const specOf = (model: string) => state.videoSpecs[model] || FALLBACK_SPEC;
 
 // 当前模型能选的分辨率、比例、时长。Flatkey 的模型登记在 shared/models.ts，OpenRouter 的来自它的模型列表。
 export const capabilities = (model = composer.form.model): VideoCapabilities => (isOpenRouter() ? specOf(model) : videoCapabilities(model));
@@ -184,7 +184,7 @@ export function refStatus(ref: Ref): RefStatus & { label: string } {
 // 当前类型的请求和不能提交的原因。
 export function currentRequest(): BuiltRequest {
   const { studio } = composer;
-  if (studio.type === 'image') return buildImageRequest(studio.image);
+  if (studio.type === 'image') return buildImageRequest(studio.image, imageRefLimit());
   if (studio.type === 'speech') return buildSpeechRequest(studio.speech);
   if (studio.type === 'sfx') return buildSfxRequest(studio.sfx);
   if (studio.type === 'music') return buildMusicRequest(studio.music);
@@ -268,10 +268,13 @@ export function imageRatios(model = composer.studio.image.model) {
   const accepted = state.catalog.imageRatios[model];
   return accepted ? IMAGE_RATIOS.filter((r) => accepted.includes(r)) : IMAGE_RATIOS;
 }
-// 换了图片模型后，选着的比例它不收就换成它收的第一个。
+// 这个图片模型最多收几张参考图（图生图）。只有 OpenRouter 上有，数字来自它的模型列表；0 是不能带参考图。
+export const imageRefLimit = (model = composer.studio.image.model) => (isOpenRouter() ? state.catalog.imageRefs[model] || 0 : 0);
+// 换了图片模型后，选着的比例它不收就换成它收的第一个；参考图超出它收的张数，多的去掉。
 function fitImage() {
   const { image } = composer.studio;
   const ratios = imageRatios();
+  if (state.catalog.known && (image.refs?.length || 0) > imageRefLimit()) image.refs = (image.refs || []).slice(0, imageRefLimit());
   if (ratios.length && !ratios.includes(image.ratio)) image.ratio = ratios[0];
 }
 

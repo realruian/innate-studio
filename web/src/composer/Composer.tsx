@@ -14,7 +14,7 @@ import { openSettings } from '../settings.tsx';
 import type { Kind, Ref, VideoForm } from '../types.ts';
 import {
   composer, RESOLUTIONS, RATIOS, SR_RESOLUTIONS,
-  typeOf, draftPrompt, isGrok, isOpenRouter, traits, availableTypes, capabilities, imageRatios, usedAssetIds, refStatus, currentRequest,
+  typeOf, draftPrompt, isGrok, isOpenRouter, traits, availableTypes, capabilities, imageRatios, imageRefLimit, usedAssetIds, refStatus, currentRequest,
   update, setMode, swapFrames, updateSr, updateStudio, setType, typePrompt, polish, undoPolish, submit, registerPrompt,
   voiceName, voiceNote, togglePreview, setVoiceFilter, pickVoice, stopPreview,
 } from './state.ts';
@@ -89,11 +89,28 @@ function Slot({ item, label, onAdd, onRemove }: { item: Ref | null; label: strin
 function MediaBlock() {
   const { form, studio } = composer;
   const type = studio.type;
-  const hidden = !(type === 'music' || (type === 'video' && form.mode !== 'text'));
+  const imageRefs = type === 'image' ? imageRefLimit() : 0;
+  const hidden = !(type === 'music' || (type === 'video' && form.mode !== 'text') || imageRefs > 0);
   let content: ReactNode = null;
 
   if (hidden) {
     content = null;
+  } else if (type === 'image') {
+    // 图生图：这个模型收几张参考图，就能加几张。用的是本机的图片，不经过素材库。
+    const refs = studio.image.refs || [];
+    const setRefs = (next: Ref[]) => updateStudio('image', { refs: next });
+    content = (
+      <div className="ref-row">
+        {refs.map((ref, i) => (
+          <RefTile key={ref.uid} item={ref} label={`图片${i + 1}`} onRemove={() => setRefs(refs.filter((r) => r.uid !== ref.uid))} />
+        ))}
+        {refs.length < imageRefs && (
+          <button className="ref-tile ref-add" type="button" aria-label="添加参考图" {...tip('添加参考图，按提示词改这张图')} onClick={() => openAssetPicker({ kind: 'image', local: true, remaining: imageRefs - refs.length, onPick: (ref) => setRefs([...(composer.studio.image.refs || []), ref].slice(0, imageRefs)) })}>
+            <Icon name="plus" size={18} />
+          </button>
+        )}
+      </div>
+    );
   } else if (type === 'music') {
     const video = studio.music.video;
     const setVideo = (next: Ref | null) => updateStudio('music', { video: next });
@@ -585,7 +602,7 @@ export function Composer() {
 
   // 类型、生成方式、模型家族变了，输入框里的东西就不一样高。高度滑过去，下面的记录跟着挪，不是跳一下。
   // 只管这几种变化：打字撑高文本框时不做动效。
-  const shape = `${studio.type}:${composer.form.mode}:${modesFor().length}:${traits().lastFrame}`;
+  const shape = `${studio.type}:${composer.form.mode}:${modesFor().length}:${traits().lastFrame}:${studio.type === 'image' && imageRefLimit() > 0}`;
   useLayoutEffect(() => {
     const el = card.current!;
     // 上一次还没滑完就又变了，从现在停着的高度接着滑。

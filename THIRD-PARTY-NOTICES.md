@@ -32,3 +32,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ```
+
+## React Flow
+
+画布页用的是 [React Flow](https://reactflow.dev)（`@xyflow/react`，MIT 许可，版权归 webkid GmbH），通过 npm 安装，没有改动它的源码。许可全文在 `node_modules/@xyflow/react/LICENSE`。画布右下角保留了它的署名。

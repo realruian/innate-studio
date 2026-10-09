@@ -178,12 +178,20 @@ function buildGrokRequest(form: VideoForm): BuiltRequest {
   return { payload, problems };
 }
 
-export function buildImageRequest(form: ImageForm): BuiltRequest {
+// refLimit 是这个模型最多收几张参考图，0 是不收。参考图只能是本机的图片或公网链接，本地服务会把本机的内嵌进请求。
+export function buildImageRequest(form: ImageForm, refLimit = 0): BuiltRequest {
   const prompt = form.prompt.trim();
-  return {
-    payload: { model: form.model, prompt, n: Number(form.count) || 1, aspect_ratio: form.ratio },
-    problems: prompt ? [] : ['请填写提示词'],
-  };
+  const refs = form.refs || [];
+  const problems: string[] = [];
+  const payload: Record<string, unknown> = { model: form.model, prompt, n: Number(form.count) || 1, aspect_ratio: form.ratio };
+  if (!prompt) problems.push(refs.length ? '请写下想怎么改这张图' : '请填写提示词');
+  if (refs.length) {
+    if (!refLimit) problems.push(`${form.model} 不收参考图，请移除参考图或换一个模型`);
+    else if (refs.length > refLimit) problems.push(`${form.model} 最多收 ${refLimit} 张参考图`);
+    if (refs.some((r) => r.source === 'asset')) problems.push('有参考图来自 Flatkey 的素材库，这里读不到，请移除后重新添加');
+    payload.input_references = refs.map((ref) => ({ type: 'image_url', image_url: { url: ref.url } }));
+  }
+  return { payload, problems };
 }
 
 export function buildSpeechRequest(form: SpeechForm): BuiltRequest {

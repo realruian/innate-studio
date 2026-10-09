@@ -71,10 +71,12 @@ function writeJson(name, value, mode) {
 const config = readJson('config.json', {});
 const history = readJson('history.json', []);
 const assets = readJson('assets.json', {});
+const canvases = readJson('canvases.json', []);
 
 const saveConfig = () => writeJson('config.json', config, 0o600);
 const saveHistory = () => writeJson('history.json', history);
 const saveAssets = () => writeJson('assets.json', assets);
+const saveCanvases = () => writeJson('canvases.json', canvases);
 
 // Key 要放进 HTTP 请求头，只能由可见的 ASCII 字符组成。
 const isUsableKey = (value) => /^[\x21-\x7e]+$/.test(value);
@@ -655,6 +657,8 @@ route('PUT', /^\/api\/provider$/, async ({ req }) => {
 
 // OpenRouter 每个图片模型收哪些画面比例。提交生图时，模型不收的比例不发。读到模型列表之后才有。
 let openrouterImageRatios = {};
+// OpenRouter 每个图片模型最多收几张参考图（图生图）。0 是不收。
+let openrouterImageRefs = {};
 
 // OpenRouter 的视频、图片模型各有专门的列表接口，里面写着每个模型支持什么：视频的整理成 videoSpecs，图片的比例整理成 imageRatios，一起交给页面。
 // 视频里 Seedance 排在前面，新的型号在前；图片里 Grok 排在前面（和 Flatkey 上默认用的是同一个）；其余按名字排。
@@ -664,14 +668,19 @@ async function openrouterModels() {
     const get = (pathname) => callUpstream('GET', pathname, { timeoutMs: 20000 });
     const [videos, texts, images, speech] = await Promise.all([get('/v1/videos/models'), get('/v1/models'), get('/v1/images/models'), get('/v1/models?output_modalities=speech')]);
     const imageRatios = {};
+    const imageRefs = {};
     for (const model of listOf(images.data)) {
-      if (model?.id) imageRatios[model.id] = (model.supported_parameters?.aspect_ratio?.values || []).map(String);
+      if (!model?.id) continue;
+      imageRatios[model.id] = (model.supported_parameters?.aspect_ratio?.values || []).map(String);
+      imageRefs[model.id] = Number(model.supported_parameters?.input_references?.max) || 0;
     }
     openrouterImageRatios = imageRatios;
+    openrouterImageRefs = imageRefs;
     const isGrokImage = (id) => /\/grok-imagine-image/i.test(id);
     const rest = {
       imageModels: Object.keys(imageRatios).sort((a, b) => isGrokImage(b) - isGrokImage(a) || a.localeCompare(b)),
       imageRatios,
+      imageRefs,
       audio: { speech: listOf(speech.data).some((m) => m?.id === SPEECH_MODEL.openrouter), sfx: false, music: false },
     };
     const videoSpecs = {};
@@ -801,10 +810,19 @@ route('POST', /^\/api\/images$/, async ({ req }) => {
   const count = Math.min(MAX_IMAGES, Math.max(1, Math.round(Number(payload.n)) || 1));
   const request = { model, prompt, n: count, response_format: 'b64_json' };
   if (payload.aspect_ratio) request.aspect_ratio = String(payload.aspect_ratio);
+  // 参考图（图生图）。只有 OpenRouter 的生图接口收（2026-10-09 用 Grok 实测：本机图片内嵌进请求可以用），每个模型收几张看它的模型列表。
+  const refs = Array.isArray(payload.input_references) ? payload.input_references.filter((entry) => typeof entry?.image_url?.url === 'string') : [];
+  if (refs.length) {
+    if (currentProvider() !== 'openrouter') throw new HttpError(400, 'not_on_provider', '参考图生图只在 OpenRouter 上可用');
+    const limit = openrouterImageRefs[model];
+    if (limit === 0) throw new HttpError(400, 'invalid_request', `${model} 不收参考图`);
+    if (limit && refs.length > limit) throw new HttpError(400, 'invalid_request', `${model} 最多收 ${limit} 张参考图`);
+    request.input_references = withLocalImages({ input_references: refs }).input_references;
+  }
 
   // 一次请求出几张，就建几条记录，每张图各自一条。
   const items = Array.from({ length: count }, () =>
-    newItem({ id: newId('img'), kind: 'image', model, prompt, payload: { model, prompt, aspect_ratio: request.aspect_ratio }, form: form || null }),
+    newItem({ id: newId('img'), kind: 'image', model, prompt, payload: { model, prompt, aspect_ratio: request.aspect_ratio, ...(refs.length ? { input_references: refs } : {}) }, form: form || null }),
   );
   const provider = currentProvider();
   runDirect(items, async () => {
@@ -843,8 +861,9 @@ async function flatkeyImages(request) {
 
 // OpenRouter 的生图接口。很多模型一次只出一张，所以要几张就发几次、同时进行，各出一张；有一次失败了，其余成功的照样留下。
 // 模型不收的画面比例不发，由它用自己的默认比例。
-async function openrouterImages({ model, prompt, n, aspect_ratio }) {
+async function openrouterImages({ model, prompt, n, aspect_ratio, input_references }) {
   const request = { model, prompt };
+  if (input_references) request.input_references = input_references;
   const ratios = openrouterImageRatios[model];
   if (aspect_ratio && (!ratios || ratios.includes(aspect_ratio))) request.aspect_ratio = aspect_ratio;
   const results = await Promise.allSettled(Array.from({ length: n }, () => callUpstream('POST', '/v1/images', { json: request, timeoutMs: 5 * 60 * 1000, provider: 'openrouter' })));
@@ -978,6 +997,53 @@ route('POST', /^\/api\/uploads$/, async ({ req }) => {
   return { url: `/media/uploads/${file}`, size: body.length };
 });
 
+// ---------- 画布 ----------
+// 一张画布是一组节点和连线，原样存、原样取，里面的内容由页面决定。节点只记生成记录的 id，结果还是在 history 里。
+
+// 列表里只给名字、封面和时间，节点和连线点进去才读。封面是画布里最近生成的一张图或一段视频的地址。
+const canvasMeta = (canvas) => ({ id: canvas.id, name: canvas.name, cover: canvas.cover || null, updatedAt: canvas.updatedAt });
+const canvasName = (name) => String(name || '').trim().slice(0, 60) || '未命名画布';
+function findCanvas(id) {
+  const canvas = canvases.find((c) => c.id === id);
+  if (!canvas) throw new HttpError(404, 'not_found', '没有这张画布');
+  return canvas;
+}
+
+route('GET', /^\/api\/canvases$/, async () => ({ items: canvases.map(canvasMeta).sort((a, b) => b.updatedAt - a.updatedAt) }));
+
+route('POST', /^\/api\/canvases$/, async ({ req }) => {
+  const { name } = await readJsonBody(req);
+  const now = Date.now();
+  const canvas = { id: newId('cv'), name: canvasName(name), nodes: [], edges: [], viewport: null, cover: null, createdAt: now, updatedAt: now };
+  canvases.push(canvas);
+  saveCanvases();
+  return canvas;
+});
+
+route('GET', /^\/api\/canvases\/([\w-]+)$/, async ({ params }) => findCanvas(params[0]));
+
+route('PUT', /^\/api\/canvases\/([\w-]+)$/, async ({ req, params }) => {
+  const canvas = findCanvas(params[0]);
+  const body = await readJsonBody(req);
+  for (const field of ['nodes', 'edges']) {
+    if (body[field] === undefined) continue;
+    if (!Array.isArray(body[field])) throw new HttpError(400, 'invalid_request', `${field} 需要是数组`);
+    canvas[field] = body[field];
+  }
+  if (body.name !== undefined) canvas.name = canvasName(body.name);
+  if (body.viewport !== undefined) canvas.viewport = body.viewport;
+  if (body.cover !== undefined) canvas.cover = typeof body.cover?.url === 'string' ? { url: body.cover.url, kind: body.cover.kind === 'video' ? 'video' : 'image' } : null;
+  canvas.updatedAt = Date.now();
+  saveCanvases();
+  return canvasMeta(canvas);
+});
+
+route('DELETE', /^\/api\/canvases\/([\w-]+)$/, async ({ params }) => {
+  canvases.splice(canvases.indexOf(findCanvas(params[0])), 1);
+  saveCanvases();
+  return null;
+});
+
 // ---------- 提示词润色 ----------
 
 // 发给文本模型的系统提示词按要用的生成模型来选，规则都在 shared/models.ts。
@@ -1000,6 +1066,12 @@ route('POST', /^\/api\/polish$/, async ({ req }) => {
   const known = POLISH_MODELS[currentProvider()];
   if (!known.includes(model)) throw new HttpError(400, 'invalid_request', '不支持用这个模型润色');
 
+  return askTextModel(model, [{ role: 'system', content: guide }, { role: 'user', content: draft }], 1200);
+});
+
+// 问文本模型要一段文字。选中的模型不行就按上面说的顺序换下一个，返回文字和实际用的模型。
+async function askTextModel(model, messages, maxTokens) {
+  const known = POLISH_MODELS[currentProvider()];
   const others = (polishAvailable || known).filter((id) => id !== model);
   const fresh = (id) => Date.now() - (polishFailedAt.get(id) || 0) > POLISH_RETRY_MS;
   // 先试没失败过的；全都刚失败过，就还是从选中的那个试起。
@@ -1007,14 +1079,11 @@ route('POST', /^\/api\/polish$/, async ({ req }) => {
   let lastError;
   for (const candidate of candidates.length ? candidates : [model, ...others]) {
     try {
-      const { data } = await callUpstream('POST', '/v1/chat/completions', {
-        json: { model: candidate, max_tokens: 1200, messages: [{ role: 'system', content: guide }, { role: 'user', content: draft }] },
-        timeoutMs: 90000,
-      });
-      const polished = String(data?.choices?.[0]?.message?.content || '').trim();
-      if (!polished) throw new HttpError(502, 'bad_upstream_response', '模型没有返回内容', data);
+      const { data } = await callUpstream('POST', '/v1/chat/completions', { json: { model: candidate, max_tokens: maxTokens, messages }, timeoutMs: 90000 });
+      const text = String(data?.choices?.[0]?.message?.content || '').trim();
+      if (!text) throw new HttpError(502, 'bad_upstream_response', '模型没有返回内容', data);
       polishFailedAt.delete(candidate);
-      return { text: polished, model: candidate };
+      return { text, model: candidate };
     } catch (err) {
       // Key 有问题或者连不上平台，换模型也没用。
       if (!(err instanceof HttpError) || err.status === 401 || err.code === 'upstream_unreachable') throw err;
@@ -1023,6 +1092,20 @@ route('POST', /^\/api\/polish$/, async ({ req }) => {
     }
   }
   throw lastError;
+}
+
+// 画布上的文本节点让模型写一段文字：剧本、分镜、提示词都行。context 是连进来的文本和节点里已有的内容。
+// 用的是和润色同一组文本模型，结果直接回到节点里，不进创作记录。
+const WRITER_GUIDE = '你是影视和短视频创作的写作助手。按用户的要求写出内容本身：不要寒暄，不要解释你做了什么，不要用 Markdown 标题和加粗。用户给了参考内容时，在它的基础上写。用用户提要求时用的语言回答。';
+route('POST', /^\/api\/text$/, async ({ req }) => {
+  const { prompt, context, model } = await readJsonBody(req);
+  const ask = String(prompt || '').trim();
+  const given = String(context || '').trim();
+  if (!ask) throw new HttpError(400, 'invalid_request', '请先写下想让模型写什么');
+  if (ask.length + given.length > 12000) throw new HttpError(400, 'invalid_request', '内容太长，要求和参考内容加起来最多 12000 字');
+  if (!POLISH_MODELS[currentProvider()].includes(model)) throw new HttpError(400, 'invalid_request', '不支持用这个模型写');
+  const user = given ? `参考内容：\n${given}\n\n要求：\n${ask}` : ask;
+  return askTextModel(model, [{ role: 'system', content: WRITER_GUIDE }, { role: 'user', content: user }], 3000);
 });
 
 // ---------- 素材库、真人档案 ----------

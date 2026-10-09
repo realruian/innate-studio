@@ -24,8 +24,8 @@ const VIDEO_MODELS = [
 const TEXT_MODELS = ['anthropic/claude-haiku-5.5', 'x-ai/grok-4.7', 'openai/gpt-6-sol'];
 const ratios = (...values) => ({ aspect_ratio: { type: 'enum', values } });
 const IMAGE_MODELS = [
-  { id: 'google/gemini-3-pro-image', supported_parameters: { ...ratios('1:1', '16:9', '9:16'), n: { type: 'range', min: 1, max: 1 } } },
-  { id: 'x-ai/grok-imagine-image-2.0', supported_parameters: { ...ratios('1:1', '16:9', '3:2'), n: { type: 'range', min: 1, max: 1 } } },
+  { id: 'google/gemini-3-pro-image', supported_parameters: { ...ratios('1:1', '16:9', '9:16'), n: { type: 'range', min: 1, max: 1 }, input_references: { type: 'range', min: 0, max: 14 } } },
+  { id: 'x-ai/grok-imagine-image-2.0', supported_parameters: { ...ratios('1:1', '16:9', '3:2'), n: { type: 'range', min: 1, max: 1 }, input_references: { type: 'range', min: 0, max: 3 } } },
   // 不收画面比例的模型。
   { id: 'recraft/recraft-v4', supported_parameters: {} },
 ];

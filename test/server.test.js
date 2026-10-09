@@ -485,3 +485,49 @@ test('真人档案：创建、认证链接、添加素材都带幂等键', async
   }, '真人素材变成 Active');
   assert.equal(assets[0].id, asset.data.id);
 });
+
+test('画布：新建、保存、读回、改名、删除', async () => {
+  const created = await call('POST', '/api/canvases', {});
+  assert.equal(created.status, 200);
+  assert.match(created.data.id, /^cv_/);
+  assert.equal(created.data.name, '未命名画布');
+  const { id } = created.data;
+
+  const nodes = [{ id: 'n1', type: 'text', position: { x: 10, y: 20 }, data: { text: '一只猫' } }, { id: 'n2', type: 'video', position: { x: 400, y: 20 }, data: { prompt: '', model: 'seedance-2.0' } }];
+  const edges = [{ id: 'e1', source: 'n1', target: 'n2', type: 'link', data: { kind: 'text' } }];
+  const saved = await call('PUT', `/api/canvases/${id}`, { name: '  分镜一  ', nodes, edges, viewport: { x: 1, y: 2, zoom: 0.5 }, cover: { url: '/media/images/a.png', kind: 'image', extra: 1 } });
+  assert.deepEqual(saved.data.cover, { url: '/media/images/a.png', kind: 'image' });
+  assert.equal(saved.status, 200);
+  assert.equal(saved.data.name, '分镜一');
+
+  const read = await call('GET', `/api/canvases/${id}`);
+  assert.deepEqual(read.data.nodes, nodes);
+  assert.deepEqual(read.data.edges, edges);
+  assert.deepEqual(read.data.viewport, { x: 1, y: 2, zoom: 0.5 });
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dataDir, 'canvases.json'), 'utf8')).find((c) => c.id === id).nodes, nodes);
+
+  // 只改名字不动内容；节点不是数组的请求不收。
+  await call('PUT', `/api/canvases/${id}`, { name: '' });
+  assert.equal((await call('GET', `/api/canvases/${id}`)).data.nodes.length, 2);
+  assert.equal((await call('PUT', `/api/canvases/${id}`, { nodes: 'x' })).status, 400);
+
+  const list = await call('GET', '/api/canvases');
+  assert.deepEqual(list.data.items.find((c) => c.id === id).name, '未命名画布');
+  assert.equal(list.data.items.find((c) => c.id === id).nodes, undefined);
+  assert.deepEqual(list.data.items.find((c) => c.id === id).cover, { url: '/media/images/a.png', kind: 'image' });
+  assert.equal((await call('PUT', `/api/canvases/${id}`, { cover: null })).data.cover, null);
+
+  assert.equal((await call('DELETE', `/api/canvases/${id}`)).status, 204);
+  assert.equal((await call('GET', `/api/canvases/${id}`)).status, 404);
+});
+
+test('文本节点：让文本模型写一段文字，参考内容和要求一起发过去', async () => {
+  const before = mock.log.length;
+  const res = await call('POST', '/api/text', { prompt: '写成三句分镜', context: '一只猫在窗台上', model: 'claude-haiku-5-5' });
+  assert.equal(res.status, 200);
+  assert.ok(res.data.text.length > 0);
+  const sent = mock.log.slice(before).find((l) => l.path === '/v1/chat/completions');
+  assert.ok(sent, '应当调了对话接口');
+  assert.equal((await call('POST', '/api/text', { prompt: '', model: 'claude-haiku-5-5' })).status, 400);
+  assert.equal((await call('POST', '/api/text', { prompt: '写点什么', model: 'not-a-model' })).status, 400);
+});

@@ -598,6 +598,150 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 .copyable { cursor: pointer; }
 @media (hover: hover) { .copyable:hover { color: var(--accent); } }
 
+/* ---------- 画布 ---------- */
+
+/* 项目列表：一个项目一张卡片，封面是画布里最近生成的图或视频 */
+.project-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--sp-24) var(--sp-20); align-items: start; }
+.project { display: flex; flex-direction: column; min-width: 0; }
+.project-media { position: relative; }
+.project-cover { display: grid; place-items: center; width: 100%; aspect-ratio: 16 / 9; padding: 0; overflow: hidden; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-1); color: var(--text-off); cursor: pointer; transition: border-color 120ms var(--ease), scale 150ms var(--ease-out); }
+.project-cover > img, .project-cover > video { display: block; width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
+@media (hover: hover) { .project-cover:hover { border-color: var(--border-hover); } }
+.project-cover:active { scale: 0.98; }
+.project-new { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--sp-8); border-color: var(--border-strong); background: var(--surface-2); color: var(--text); font-size: var(--text-ui); font-weight: var(--fw-medium); }
+.project-name { margin-top: var(--sp-12); font-size: var(--text-body); font-weight: var(--fw-medium); }
+.project-hint { margin-top: var(--sp-12); color: var(--text-3); font-size: var(--text-body); }
+.project-date { margin-top: var(--sp-4); color: var(--text-3); font-size: var(--text-caption); font-variant-numeric: tabular-nums; }
+/* 卡片右上角的「更多」：鼠标移上来才出现，盖在封面上所以用半透明黑底白字 */
+.project-more { position: absolute; top: var(--sp-8); right: var(--sp-8); display: grid; place-items: center; width: var(--h-sm); height: var(--h-sm); padding: 0; border: 0; border-radius: var(--r-xs); background: rgba(0, 0, 0, 0.55); color: #fff; cursor: pointer; opacity: 0; transition: opacity 120ms var(--ease), background-color 120ms var(--ease); }
+.project-more:focus-visible, .project-more[aria-expanded='true'] { opacity: 1; background: rgba(0, 0, 0, 0.75); }
+@media (hover: hover) { .project-media:hover .project-more { opacity: 1; } }
+@media (hover: none) { .project-more { opacity: 1; } }
+
+/* 进了一张画布：侧栏收起，整个窗口都是画布。画布自己管平移和缩放，这一页不滚动，也不用给滚动条留位置 */
+#app:has(> .sidebar[hidden]) { grid-template-columns: minmax(0, 1fr); }
+#app:has(> .sidebar[hidden]) .main { border-left: 0; }
+.view-canvas:has(> .canvas) { overflow: hidden; scrollbar-gutter: auto; }
+.canvas { position: relative; width: 100%; height: 100%; }
+/* React Flow 的配色全部换成这里的变量，深色浅色跟着主题走 */
+.canvas .react-flow {
+  --xy-background-color: var(--bg);
+  --xy-background-pattern-color: var(--border-strong);
+  --xy-edge-stroke: var(--text-off);
+  --xy-edge-stroke-selected: var(--text);
+  --xy-edge-stroke-width: 1.5;
+  --xy-connectionline-stroke: var(--text-2);
+  --xy-connectionline-stroke-width: 1.5;
+  --xy-handle-background-color: var(--surface-1);
+  --xy-handle-border-color: var(--text-3);
+  --xy-selection-background-color: color-mix(in srgb, var(--accent) 8%, transparent);
+  --xy-selection-border: 1px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  --xy-minimap-background-color: var(--surface-1);
+  --xy-minimap-mask-background-color: color-mix(in srgb, var(--bg) 72%, transparent);
+  --xy-minimap-node-background-color: var(--surface-3);
+  --xy-attribution-background-color: transparent;
+  font: inherit;
+}
+/* 小地图点开才显示，叠在左下角那一条的上面 */
+.canvas .react-flow__minimap { overflow: hidden; margin-bottom: var(--sp-64); border: 1px solid var(--border-float); border-radius: var(--r-sm); }
+.canvas .react-flow__attribution a { color: var(--text-4); }
+/* 连接点：节点左右两侧各一个带加号的小圆，鼠标移到节点上、选中节点或者正在拉线时才出现 */
+.canvas .react-flow__handle.cnode-port { display: grid; place-items: center; width: 22px; height: 22px; margin-top: var(--sp-12); scale: var(--inv, 1); border: 1px solid var(--text-off); background: var(--bg); color: var(--text-3); opacity: 0; transition: opacity 120ms var(--ease), border-color 120ms var(--ease), color 120ms var(--ease), background-color 120ms var(--ease); }
+/* 加号在屏幕上大小不变，离框的距离也按屏幕上的 22 像素算 */
+.canvas .react-flow__handle-left.cnode-port { left: calc(-22px * var(--inv, 1)); }
+.canvas .react-flow__handle-right.cnode-port { right: calc(-22px * var(--inv, 1)); }
+.cnode-port > .icon { pointer-events: none; }
+.cnode.selected .cnode-port, .canvas:has(.react-flow__connectionline) .cnode-port { opacity: 1; }
+@media (hover: hover) { .react-flow__node:hover .cnode-port { opacity: 1; } .canvas .cnode-port:hover { border-color: var(--text); color: var(--text); } }
+@media (hover: none) { .canvas .cnode-port { opacity: 1; } }
+.canvas .react-flow__handle.cnode-port.connectingto, .canvas .react-flow__handle.cnode-port.valid { border-color: var(--text); background: var(--text); color: var(--bg); opacity: 1; }
+
+/* 左上角：返回项目列表，后面是项目的名字，直接点上去改 */
+.canvas-title { display: flex; align-items: center; gap: var(--sp-2); }
+.canvas-name { width: 220px; height: var(--h-md); padding: 0 var(--sp-8); border: 1px solid transparent; border-radius: var(--r-sm); background: none; color: var(--text); font-size: var(--text-body); font-weight: var(--fw-medium); outline: 0; text-overflow: ellipsis; transition: border-color 120ms var(--ease), background-color 120ms var(--ease); }
+@media (hover: hover) { .canvas-name:hover { background: var(--hover); } }
+.canvas-name:focus { border-color: var(--border-hover); background: var(--surface-1); }
+/* 左侧竖排工具栏：上面四个是加节点，分隔线下面是素材库和上传。只有图标，悬停显示名字 */
+.canvas-tools, .canvas-foot { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-4); background: var(--surface-float); border: 1px solid var(--border-float); border-radius: var(--r-md); box-shadow: var(--shadow-float); }
+.canvas-tools { flex-direction: column; gap: var(--sp-4); }
+.canvas-tools .icon-btn { position: relative; width: 36px; height: 36px; }
+/* 鼠标移到工具栏上，每个图标右边浮出它的名字；指着的那一个更亮。名字底下垫一层从底色淡出去的渐变，压在节点上也看得清 */
+.canvas-tools { position: relative; }
+.canvas-tools::after { content: ""; position: absolute; top: 0; bottom: 0; left: 100%; width: 132px; background: linear-gradient(to right, var(--bg), transparent); opacity: 0; pointer-events: none; transition: opacity 160ms var(--ease); }
+.canvas-tool-name { position: absolute; left: calc(100% + var(--sp-16)); top: 50%; z-index: 1; translate: calc(var(--sp-4) * -1) -50%; color: var(--text-3); font-size: var(--text-ui); white-space: nowrap; opacity: 0; pointer-events: none; transition: opacity 160ms var(--ease), translate 160ms var(--ease-out), color 120ms var(--ease); }
+@media (hover: hover) {
+  .canvas-tools:hover::after { opacity: 0.92; }
+  .canvas-tools:hover .canvas-tool-name { opacity: 1; translate: 0 -50%; }
+  .canvas-tools .icon-btn:hover .canvas-tool-name { color: var(--text); }
+}
+.canvas-tools:focus-within .canvas-tool-name { opacity: 1; translate: 0 -50%; }
+.canvas-tools-split { width: var(--sp-16); height: 1px; margin: var(--sp-4) 0; background: var(--border-strong); }
+/* 左下角：撤销、重做、小地图、缩放比例 */
+.canvas-foot .icon-btn, .canvas-zoom { height: var(--h-sm); border-radius: var(--r-xs); }
+.canvas-foot .icon-btn { width: var(--h-sm); }
+.icon-btn.active { background: var(--hover); color: var(--text); }
+.icon-btn:disabled { opacity: 0.4; cursor: default; background: none; color: var(--text-2); }
+.canvas-zoom { min-width: 52px; padding: 0 var(--sp-8); border: 0; background: none; color: var(--text-2); font-size: var(--text-caption); font-variant-numeric: tabular-nums; cursor: pointer; transition: background-color 120ms var(--ease), color 120ms var(--ease); }
+.canvas-zoom[aria-expanded='true'] { background: var(--hover); color: var(--text); }
+@media (hover: hover) { .canvas-zoom:hover { background: var(--hover); color: var(--text); } }
+/* 空画布正中间的一句提示，加了第一个节点就消失 */
+.canvas-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: var(--sp-16); color: var(--text-3); font-size: var(--text-title); pointer-events: none; }
+.canvas-empty .brand-mark { width: 28px; height: 28px; }
+/* 在鼠标位置弹菜单时用的定位点，看不见 */
+.canvas-anchor { position: fixed; width: 0; height: 0; pointer-events: none; }
+
+/* 节点：上面一行名字，下面一个框放内容。所有节点的框一样高，宽度由内容的比例定（写在节点上）。框的底色和输入框一样，选中时边线变亮 */
+.cnode { position: relative; display: flex; flex-direction: column; gap: var(--sp-8); }
+/* 名字在屏幕上大小不变：以左下角为准把画布的缩放抵消掉 */
+.cnode-title { display: flex; align-items: center; align-self: flex-start; gap: var(--sp-4); padding: 0 var(--sp-2); color: var(--text-3); font-size: var(--text-caption); line-height: var(--lh-snug); white-space: nowrap; cursor: grab; transform-origin: left bottom; scale: var(--inv, 1); }
+.cnode-box { display: grid; height: 240px; overflow: hidden; background: var(--surface-1); border: 1px solid var(--border-float); border-radius: var(--r-md); transition: border-color 120ms var(--ease); }
+@media (hover: hover) { .cnode:hover .cnode-box { border-color: var(--border-strong); } }
+.cnode.selected .cnode-box { border-color: var(--text-2); }
+/* 选中后浮在节点上方的一小条操作：上传、看详情、删除 */
+.cnode-tools { display: flex; gap: var(--sp-2); padding: var(--sp-4); background: var(--surface-float); border: 1px solid var(--border-float); border-radius: var(--r-md); box-shadow: var(--shadow-float); animation: fade 120ms var(--ease-out); }
+.cnode-btn { display: grid; place-items: center; flex: none; width: var(--h-sm); height: var(--h-sm); padding: 0; border: 0; border-radius: var(--r-xs); background: none; color: var(--text-2); cursor: pointer; transition: background-color 120ms var(--ease), color 120ms var(--ease); }
+@media (hover: hover) { .cnode-btn:hover { background: var(--hover); color: var(--text); } }
+/* 框里的内容都铺满这个框：图片、视频完整显示，音频是一行播放条 */
+.cnode-pic { display: block; width: 100%; height: 100%; min-height: 0; object-fit: contain; background: var(--surface-2); }
+.cnode-clip { display: grid; width: 100%; height: 100%; min-height: 0; overflow: hidden; background: var(--surface-2); }
+.cnode-sound { height: 100%; min-height: 0; }
+/* 从素材库选的素材只有缩略图，左下角标一下来历 */
+.cnode-library { position: relative; display: grid; height: 100%; min-height: 0; }
+.cnode-badge { position: absolute; left: var(--sp-8); bottom: var(--sp-8); padding: var(--sp-2) var(--sp-8); border-radius: var(--r-xs); background: rgba(0, 0, 0, 0.55); color: #fff; font-size: var(--text-micro); }
+/* 还没有内容、正在生成、失败：正中一个淡淡的图标或一句话 */
+.cnode-state { display: flex; align-items: center; justify-content: center; gap: var(--sp-8); height: 100%; min-height: 0; padding: var(--sp-16); color: var(--text-off); font-size: var(--text-caption); font-variant-numeric: tabular-nums; text-align: center; overflow: hidden; overflow-wrap: anywhere; }
+.cnode-state:has(.spinner), .cnode-state.is-failed { color: var(--text-2); }
+.cnode-state.is-failed .icon { color: var(--danger); }
+/* 文本节点：平时是一段文字，双击进去改。写多了在框里滚动 */
+.cnode-text-view, .cnode-text-edit { display: block; width: 100%; height: 100%; min-height: 0; padding: var(--sp-12); overflow-y: auto; color: var(--text); font-size: var(--text-ui); line-height: var(--lh-body); white-space: pre-wrap; overflow-wrap: anywhere; }
+.cnode-text-view { cursor: grab; }
+.cnode-text-view.is-empty { color: var(--text-off); }
+.cnode-text-edit { border: 0; outline: 0; background: transparent; resize: none; cursor: text; }
+
+/* 输入面板：只在选中一个节点时出现在它正下方。它不跟着画布缩放，大小一直不变。和创作页的输入框是同一种卡片 */
+.cnode-panel { display: flex; flex-direction: column; width: 480px; background: var(--surface-1); border: 1px solid var(--border-float); border-radius: var(--r-lg); box-shadow: var(--shadow-float); cursor: default; animation: fade 120ms var(--ease-out); }
+/* 参考素材：连进来的素材各一张小图，角上写着用途；最后一个加号是再加一份 */
+.cnode-refs { display: flex; flex-wrap: wrap; gap: var(--sp-8); padding: var(--sp-12) var(--sp-12) 0; }
+.cnode-ref { position: relative; display: grid; place-items: center; flex: none; width: 56px; height: 56px; padding: 0; overflow: hidden; border: 1px solid var(--border-float); border-radius: var(--r-sm); background: var(--surface-2); color: var(--text-3); }
+.cnode-ref > img { width: 100%; height: 100%; object-fit: cover; }
+button.cnode-ref { cursor: pointer; transition: border-color 120ms var(--ease), color 120ms var(--ease); }
+@media (hover: hover) { button.cnode-ref:hover { border-color: var(--border-hover); color: var(--text); } }
+button.cnode-ref[aria-expanded='true'] { border-color: var(--text-3); }
+.cnode-ref-tag { position: absolute; left: 0; right: 0; bottom: 0; padding: var(--sp-2) 0; background: rgba(0, 0, 0, 0.55); color: #fff; font-size: var(--text-micro); line-height: 1; text-align: center; }
+.cnode-prompt { display: block; width: 100%; min-height: 72px; max-height: 220px; padding: var(--sp-12) var(--sp-16) var(--sp-8); border: 0; outline: 0; background: transparent; color: var(--text); font-size: var(--text-body); line-height: var(--lh-body); resize: none; field-sizing: content; cursor: text; }
+.cnode-prompt::placeholder { color: var(--text-3); }
+.cnode-error { padding: 0 var(--sp-16) var(--sp-4); color: var(--danger); font-size: var(--text-caption); overflow-wrap: anywhere; }
+.cnode-bar { display: flex; align-items: center; gap: var(--sp-8); padding: var(--sp-4) var(--sp-8) var(--sp-8); }
+.cnode-params { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); flex: 1; min-width: 0; }
+.cnode-note { padding: 0 var(--sp-8); color: var(--text-3); font-size: var(--text-caption); }
+
+/* 连线上的标签：说明这份素材在下游当什么用。图片的可以点开改 */
+.clink-label { position: absolute; pointer-events: all; }
+.clink-tag { display: flex; align-items: center; height: var(--sp-20); padding: 0 var(--sp-8); border: 1px solid var(--border-float); border-radius: var(--sp-12); background: var(--surface-1); color: var(--text-2); font-size: var(--text-micro); line-height: 1; white-space: nowrap; }
+button.clink-tag { cursor: pointer; transition: border-color 120ms var(--ease), color 120ms var(--ease); }
+@media (hover: hover) { button.clink-tag:hover { border-color: var(--border-hover); color: var(--text); } }
+.clink-label.selected .clink-tag, button.clink-tag[aria-expanded='true'] { border-color: var(--text-3); color: var(--text); }
+
 /* ---------- 窄屏 ---------- */
 
 @media (max-width: 900px) {

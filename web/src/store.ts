@@ -52,6 +52,8 @@ export const state = {
   // 读到 Key 的状态之后才画创作页。
   booted: false,
   view: 'create' as ViewId,
+  // 正在一张画布里：侧栏收起来，整个窗口都给画布。
+  immersive: false,
   // 创作页当前选的是哪种内容（视频、图片、语音、音效、配乐）。下面的「最近生成」跟着它走。
   createType: 'video' as CreateType,
   // 记录页的类型筛选。放在这里是因为创作页的「查看全部」要带着类型过去。
@@ -63,7 +65,8 @@ export const state = {
   modelsInfo: { source: 'default', error: '', note: '' },
   // 视频之外账号还能用什么。known 为 false 表示还没读到模型列表，这时不拦任何一种创作。
   // imageRatios 是 OpenRouter 每个图片模型收哪些画面比例；Flatkey 上没有这一项，比例不受限。
-  catalog: { known: false, image: [] as string[], imageRatios: {} as Record<string, string[]>, polish: [] as string[], audio: { speech: false, sfx: false, music: false } },
+  // imageRefs 是 OpenRouter 每个图片模型最多收几张参考图；Flatkey 上没有，生图不能带参考图。
+  catalog: { known: false, image: [] as string[], imageRatios: {} as Record<string, string[]>, imageRefs: {} as Record<string, number>, polish: [] as string[], audio: { speech: false, sfx: false, music: false } },
   voices: null as Voice[] | null,
   history: [] as HistoryItem[],
   historyLoaded: false,
@@ -75,7 +78,7 @@ export const state = {
   watchedPersonView: '',
 };
 
-export type StoreEvent = 'boot' | 'view' | 'app' | 'models' | 'history' | 'assets' | 'persons' | 'createType' | 'recordsType' | 'composer';
+export type StoreEvent = 'boot' | 'view' | 'app' | 'models' | 'history' | 'assets' | 'persons' | 'createType' | 'recordsType' | 'composer' | 'immersive';
 
 const listeners: Partial<Record<StoreEvent, Set<() => void>>> = {};
 const versions: Partial<Record<StoreEvent, number>> = {};
@@ -109,6 +112,12 @@ export function goTo(view: ViewId) {
   emit('view');
 }
 
+export function setImmersive(on: boolean) {
+  if (state.immersive === on) return;
+  state.immersive = on;
+  emit('immersive');
+}
+
 export async function loadApp() {
   // 本地服务还是改之前的版本时，返回里没有平台那几项，这时保留默认的（Flatkey）。
   state.app = { ...state.app, ...(await api('GET', '/api/state')) };
@@ -120,7 +129,7 @@ export async function loadModels() {
   state.models = data.models;
   state.videoSpecs = data.videoSpecs || {};
   state.modelsInfo = { source: data.source, error: data.error || '', note: data.note || '' };
-  state.catalog = { known: !data.error, image: data.imageModels || [], imageRatios: data.imageRatios || {}, polish: data.polishModels || [], audio: data.audio || {} };
+  state.catalog = { known: !data.error, image: data.imageModels || [], imageRatios: data.imageRatios || {}, imageRefs: data.imageRefs || {}, polish: data.polishModels || [], audio: data.audio || {} };
   emit('models');
 }
 
@@ -129,7 +138,7 @@ export async function switchProvider(provider: AppInfo['provider']) {
   state.app = await api('PUT', '/api/provider', { provider });
   state.voices = null;
   // 新平台的模型列表读到之前，先不按旧平台的列表拦着。
-  state.catalog = { ...state.catalog, known: false, polish: [], imageRatios: {} };
+  state.catalog = { ...state.catalog, known: false, polish: [], imageRatios: {}, imageRefs: {} };
   emit('app');
   if (state.app.hasKey) await loadModels();
 }

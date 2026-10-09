@@ -4,7 +4,7 @@ import type { Features, ProviderId } from '../../shared/models.ts';
 
 export type Kind = 'image' | 'video' | 'audio';
 export type CreateType = 'video' | 'image' | 'speech' | 'sfx' | 'music';
-export type ViewId = 'create' | 'records' | 'library' | 'persons';
+export type ViewId = 'create' | 'canvas' | 'records' | 'library' | 'persons';
 export type Tone = 'ok' | 'pending' | 'error';
 
 // 一份参考素材：素材库里的、公网链接，或者只存在本机的文件。
@@ -53,6 +53,8 @@ export interface ImageForm {
   model: string;
   ratio: string;
   count: number;
+  // 参考图（图生图）。只有 OpenRouter 上收参考图的模型才用得上。
+  refs?: Ref[];
 }
 
 export interface SpeechForm {

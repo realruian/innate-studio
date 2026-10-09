@@ -196,6 +196,16 @@ test('生图：模型、提示词、张数、比例', () => {
     problems: [],
   });
   assert.deepEqual(buildImageRequest({ prompt: '', model: 'm', ratio: '1:1', count: 1 }).problems, ['请填写提示词']);
+
+  // 图生图：参考图放进 input_references；模型不收、超了张数、来自素材库都说明原因。
+  const local = { uid: 'a', kind: 'image', source: 'local', url: '/media/images/a.png', name: 'a', thumb: null };
+  const edit = buildImageRequest({ prompt: '改成水彩', model: 'm', ratio: '1:1', count: 1, refs: [local] }, 3);
+  assert.deepEqual(edit.problems, []);
+  assert.deepEqual(edit.payload.input_references, [{ type: 'image_url', image_url: { url: '/media/images/a.png' } }]);
+  assert.match(buildImageRequest({ prompt: '改', model: 'm', ratio: '1:1', count: 1, refs: [local] }).problems[0], /不收参考图/);
+  assert.match(buildImageRequest({ prompt: '改', model: 'm', ratio: '1:1', count: 1, refs: [local, local] }, 1).problems[0], /最多收 1 张/);
+  assert.match(buildImageRequest({ prompt: '', model: 'm', ratio: '1:1', count: 1, refs: [local] }, 3).problems[0], /想怎么改/);
+  assert.match(buildImageRequest({ prompt: '改', model: 'm', ratio: '1:1', count: 1, refs: [{ ...local, source: 'asset' }] }, 3).problems[0], /素材库/);
 });
 
 test('语音：要有文字和音色', () => {
