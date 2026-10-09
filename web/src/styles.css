@@ -666,7 +666,7 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 
 /* 左上角：返回项目列表，后面是项目的名字，直接点上去改 */
 .canvas-title { display: flex; align-items: center; gap: var(--sp-2); }
-.canvas-name { width: 220px; height: var(--h-md); padding: 0 var(--sp-8); border: 1px solid transparent; border-radius: var(--r-sm); background: none; color: var(--text); font-size: var(--text-body); font-weight: var(--fw-medium); outline: 0; text-overflow: ellipsis; transition: border-color 120ms var(--ease), background-color 120ms var(--ease); }
+.canvas-name { width: auto; min-width: 72px; max-width: 280px; field-sizing: content; height: var(--h-md); padding: 0 var(--sp-8); border: 1px solid transparent; border-radius: var(--r-sm); background: none; color: var(--text); font-size: var(--text-body); font-weight: var(--fw-medium); outline: 0; text-overflow: ellipsis; transition: border-color 120ms var(--ease), background-color 120ms var(--ease); }
 @media (hover: hover) { .canvas-name:hover { background: var(--hover); } }
 .canvas-name:focus { border-color: var(--border-hover); background: var(--surface-1); }
 /* 项目名后面：切换画布的箭头，和保存到哪一步了 */
@@ -702,6 +702,36 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 /* 在鼠标位置弹菜单时用的定位点，看不见 */
 .canvas-anchor { position: fixed; width: 0; height: 0; pointer-events: none; }
 
+/* 抓手开着：整张画布是抓的手势，节点点不中 */
+.canvas.is-hand .react-flow__pane, .canvas.is-hand .react-flow__node { cursor: grab; }
+.canvas.is-hand .react-flow__pane.dragging { cursor: grabbing; }
+.canvas.is-hand .react-flow__node { pointer-events: none !important; }
+/* 节点搜索：顶上居中的一块浮层，输入框加结果列表 */
+.cfind { display: flex; flex-direction: column; gap: var(--sp-4); width: 420px; max-width: calc(100vw - var(--sp-48)); padding: var(--sp-8); background: var(--surface-float); border: 1px solid var(--border-float); border-radius: var(--r-md); box-shadow: var(--shadow-float); animation: cnode-rise 200ms var(--ease-out); }
+.cfind .search { width: 100%; }
+.cfind-list { display: flex; flex-direction: column; max-height: 320px; overflow-y: auto; }
+.cfind-item { display: flex; align-items: center; gap: var(--sp-8); flex: none; height: var(--h-md); padding: 0 var(--sp-8); border: 0; border-radius: var(--r-xs); background: none; color: var(--text-2); font-size: var(--text-ui); text-align: left; cursor: pointer; }
+.cfind-item > .icon { flex: none; color: var(--text-3); }
+.cfind-item.active { background: var(--hover); color: var(--text); }
+.cfind-name { flex: none; }
+.cfind-text { flex: 1; min-width: 0; color: var(--text-4); font-size: var(--text-caption); }
+.cfind-empty { padding: var(--sp-16) var(--sp-8); color: var(--text-3); font-size: var(--text-caption); text-align: center; }
+/* 搜到的节点闪一下 */
+.react-flow__node.is-found .cnode-box { animation: cnode-found 1.2s var(--ease-out); }
+@keyframes cnode-found { 0%, 60% { box-shadow: 0 0 0 calc(4px * var(--inv, 1)) color-mix(in srgb, var(--accent) 45%, transparent); } }
+/* 生成历史：筛选一行，下面是三列小图，点一个放回画布 */
+.chist { gap: var(--sp-12); width: 348px; padding: var(--sp-4); }
+.chist-head { display: flex; flex-direction: column; gap: var(--sp-8); }
+.chist-head .search { width: 100%; }
+.chist-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--sp-8); max-height: 420px; overflow-y: auto; }
+.chist-grid > .cfind-empty { grid-column: 1 / -1; }
+.chist-item { position: relative; display: grid; place-items: center; aspect-ratio: 1; padding: 0; overflow: hidden; border: 1px solid var(--border-float); border-radius: var(--r-sm); background: var(--surface-2); color: var(--text-3); cursor: pointer; transition: border-color 120ms var(--ease); }
+.chist-item > img, .chist-item > video { width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
+@media (hover: hover) { .chist-item:hover { border-color: var(--border-hover); } }
+.chist-cap { position: absolute; left: 0; right: 0; bottom: 0; padding: var(--sp-2) var(--sp-4); background: rgba(0, 0, 0, 0.55); color: #fff; font-size: var(--text-micro); line-height: var(--lh-snug); text-align: center; }
+/* 全屏查看上传的文件 */
+.cnode-view { display: grid; place-items: center; min-height: 0; }
+.cnode-view > img { max-width: 100%; max-height: 76vh; border-radius: var(--r-sm); }
 /* 节点：上面一行名字，下面一个框放内容。所有节点的框一样高，宽度由内容的比例定（写在节点上）。框没有描边，靠底色从画布上分出来；选中时框外隔开一点再套一圈线 */
 .cnode { position: relative; display: flex; flex-direction: column; gap: var(--sp-8); }
 /* 名字那一行在屏幕上大小不变：以左下角为准把画布的缩放抵消掉。它占的位置固定是 16 高加 8 的空隙（TITLE_ROOM），实际离框 12 像素（屏幕上）。

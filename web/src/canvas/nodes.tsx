@@ -8,11 +8,11 @@ import { BaseEdge, Handle, NodeToolbar, Position, getBezierPath, useConnection, 
 import { api, state, useStore, loadVoices, isPendingTask, polishModel, KINDS as MEDIA } from '../store.ts';
 import { RATIOS, capabilities, imageRatios, imageRefLimit, traits, voiceName } from '../composer/state.ts';
 import { modelNote } from '../../../shared/models.ts';
-import { kindOfFile, uploadLocalFile } from '../media.ts';
+import { kindOfFile, recordName, uploadLocalFile, uploadVirtualAsset } from '../media.ts';
 import { openAssetPicker } from '../assets.tsx';
 import { Icon, type IconName } from '../ui/Icon.tsx';
 import { Dropdown, tip } from '../ui/controls.tsx';
-import { openMenu, openPopover, toast } from '../ui/layers.tsx';
+import { openMenu, openModal, openPopover, toast } from '../ui/layers.tsx';
 import { VideoPlayer, AudioPlayer } from '../player.tsx';
 import { openDetail } from '../history.tsx';
 import type { Kind } from '../types.ts';
@@ -260,15 +260,74 @@ function Clip({ src, label, onShape }: { src: string; label: string; onShape?: (
   );
 }
 
-// 生成的结果可以点开看详情。
-function DetailTool({ data }: { data: MediaData }) {
-  useStore('history');
+// 名字行右端的操作：有内容时一个「全屏查看」，再加一个「更多」（下载、存到素材库、换一张图）。
+// onUpload：图片节点可以上传一张图放进来；节点还空着的时候只有这一个按钮。
+function NodeTools({ id, kind, data, onUpload }: { id: string; kind: Kind; data: MediaData; onUpload?: () => void }) {
+  const flow = useReactFlow();
+  useStore('history', 'app');
   const record = recordOf(data);
-  if (record?.status !== 'completed') return null;
+  // 这个节点里现在放着的东西：生成的结果、上传的文件，或者素材库里的素材。
+  const done = record?.status === 'completed' && record.mediaUrl ? record : null;
+  const file = data.asset ? null : done ? { url: done.mediaUrl!, name: recordName(done), local: Boolean(done.savedLocally) } : data.upload ? { ...data.upload, local: true } : null;
+  const canSave = Boolean(file?.local) && state.app.features.library;
+
+  function view() {
+    if (done) return openDetail(done.id);
+    const url = data.upload?.url || data.asset?.url;
+    if (!url) return;
+    openModal({ title: data.upload?.name || data.asset?.name || MEDIA[kind].label, size: 'detail', content: <div className="cnode-view">{kind === 'image' ? <img src={url} alt="" /> : kind === 'video' ? <VideoPlayer src={url} label={MEDIA[kind].label} /> : <AudioPlayer src={url} />}</div> });
+  }
+
+  function download() {
+    if (!file) return;
+    const link = document.createElement('a');
+    // 存在本机的文件让服务按附件给出；还在平台上的就在新标签页里打开。
+    link.href = file.local ? `${file.url}?download=1` : file.url;
+    if (file.local) link.download = file.name;
+    else link.target = '_blank';
+    link.rel = 'noopener';
+    link.click();
+  }
+
+  async function save() {
+    if (!file) return;
+    toast('正在存到素材库…', 'info', 1800);
+    try {
+      const res = await fetch(file.url);
+      if (!res.ok) throw new Error('这个文件已经不在本机了');
+      const blob = await res.blob();
+      const asset = await uploadVirtualAsset(new File([blob], `${file.name}.${file.url.split('.').pop()}`, { type: blob.type }), kind);
+      // 记在节点上：之后拿它去给 Seedance 当参考，不用再传一遍。
+      flow.updateNodeData(id, { assetId: asset.id, assetOf: file.url });
+      toast('已存到素材库', 'success');
+    } catch (err) {
+      toast((err as Error).message, 'error', 6000);
+    }
+  }
+
+  const items = [...(file ? [{ value: 'download', label: '下载' }] : []), ...(canSave ? [{ value: 'save', label: '存到素材库' }] : []), ...(onUpload ? [{ value: 'upload', label: file || data.asset ? '换一张图' : '上传图片' }] : [])];
+  const act = (value: string) => (value === 'download' ? download() : value === 'save' ? save() : onUpload?.());
+  const hasContent = Boolean(done || data.upload || data.asset);
+  if (!hasContent && !onUpload) return null;
   return (
-    <button className="cnode-btn" type="button" {...tip('查看详情')} aria-label="查看详情" onClick={() => openDetail(record.id)}>
-      <Icon name="expand" size={16} />
-    </button>
+    <>
+      {hasContent && (
+        <button className="cnode-btn" type="button" {...tip('全屏查看')} aria-label="全屏查看" onClick={view}>
+          <Icon name="expand" size={16} />
+        </button>
+      )}
+      {!hasContent && onUpload ? (
+        <button className="cnode-btn" type="button" {...tip('上传一张图片放进这个节点')} aria-label="上传图片" onClick={onUpload}>
+          <Icon name="upload" size={16} />
+        </button>
+      ) : (
+        items.length > 0 && (
+          <button className="cnode-btn" type="button" {...tip('更多')} aria-label="更多操作" aria-haspopup="menu" aria-expanded="false" onClick={(e) => openMenu(e.currentTarget, { label: '更多操作', items, onSelect: act })}>
+            <Icon name="more" size={16} />
+          </button>
+        )
+      )}
+    </>
   );
 }
 
@@ -401,14 +460,7 @@ export function ImageNode({ id, data: raw, selected }: NodeProps) {
       no={data.no}
       selected={selected}
       width={nodeWidth('image', data)}
-      tools={
-        <>
-          <button className="cnode-btn" type="button" {...tip('上传一张图片放进这个节点')} aria-label="上传图片" onClick={() => file.current!.click()}>
-            <Icon name="upload" size={16} />
-          </button>
-          <DetailTool data={data} />
-        </>
-      }
+      tools={<NodeTools id={id} kind="image" data={data} onUpload={() => file.current!.click()} />}
       panel={
         <>
           <Refs id={id} kind="image" model={data.model} limit={refLimit} />
@@ -578,7 +630,7 @@ export function VideoNode({ id, data: raw, selected }: NodeProps) {
       no={data.no}
       selected={selected}
       width={nodeWidth('video', data)}
-      tools={<DetailTool data={data} />}
+      tools={<NodeTools id={id} kind="video" data={data} />}
       panel={
         <>
           <Refs id={id} kind="video" model={data.model} />
@@ -642,7 +694,7 @@ export function AudioNode({ id, data: raw, selected }: NodeProps) {
       no={data.no}
       selected={selected}
       width={nodeWidth('audio')}
-      tools={<DetailTool data={data} />}
+      tools={<NodeTools id={id} kind="audio" data={data} />}
       panel={
         <>
           <Refs id={id} kind="audio" />

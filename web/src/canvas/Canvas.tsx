@@ -9,12 +9,13 @@ import { kindOfFile, uploadLocalFile } from '../media.ts';
 import { openAssetPicker } from '../assets.tsx';
 import { Icon } from '../ui/Icon.tsx';
 import { tip } from '../ui/controls.tsx';
-import { openMenu, toast } from '../ui/layers.tsx';
+import { openMenu, openPopover, toast } from '../ui/layers.tsx';
 import { reducedMotion } from '../ui/motion.ts';
-import type { Kind } from '../types.ts';
+import type { HistoryItem, Kind } from '../types.ts';
 import { BOX_HEIGHT, NODE_LABELS, TITLE_ROOM, canLink, clipOf, nodeWidth, numbered, pasteClip, snapTo, sourcesOf, stripNodeData, targetsOf, tidy, type Clip, type Guide, type LinkData, type NodeKind, type Rect } from './model.ts';
 import { coverOf, newNodeData } from './run.ts';
 import { AudioNode, CanvasActions, DragLine, ImageNode, LinkEdge, NODE_ICONS, TextNode, VideoNode } from './nodes.tsx';
+import { Finder, HistoryPicker } from './panels.tsx';
 
 interface Doc {
   id: string;
@@ -69,6 +70,9 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [moved, setMoved] = useState(0);
   const [showMap, setShowMap] = useState(false);
+  // 抓手：开着的时候左键拖动是平移画布，节点点不中也拖不动。
+  const [hand, setHand] = useState(false);
+  const [finding, setFinding] = useState(false);
   const [guides, setGuides] = useState<Guide[]>([]);
   // 保存到哪一步了：saved 已保存，saving 有改动还没存上，failed 没存上（点一下重试）。
   const [saving, setSaving] = useState<'saved' | 'saving' | 'failed'>('saved');
@@ -316,6 +320,41 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
     });
   }
 
+  // ---------- 搜索、生成历史 ----------
+
+  // 跳到一个节点：只选中它，把它挪到视野中间，闪一下。缩得太小看不清就放大到 60%。
+  const jumpTo = useCallback(
+    (nodeId: string) => {
+      const node = flow.getNode(nodeId);
+      if (!node) return;
+      setFinding(false);
+      setNodes((items) => items.map((n) => ({ ...n, selected: n.id === nodeId, className: n.id === nodeId ? 'is-found' : undefined })));
+      const box = boxOf(node);
+      flow.setCenter(box.x + box.width / 2, box.y + box.height / 2 + PANEL_ROOM / 4, { zoom: Math.max(flow.getZoom(), 0.6), duration: reducedMotion() ? 0 : 320 });
+      setTimeout(() => setNodes((items) => items.map((n) => (n.className ? { ...n, className: undefined } : n))), 1400);
+    },
+    [flow, setNodes],
+  );
+
+  // 把一条生成记录放回画布：一个带着这份结果的新节点，放在视野中间并选中。原来的提示词也带上。
+  const restore = useCallback(
+    (item: HistoryItem) => {
+      const extra: Record<string, unknown> = { recordId: item.id, prompt: item.prompt || '' };
+      if (item.kind === 'audio') extra.tool = item.tool === 'speech' ? 'speech' : 'sfx';
+      addNode(item.kind, undefined, undefined, extra);
+    },
+    [addNode],
+  );
+
+  // 生成历史出在工具栏的右边、和工具栏顶对齐，不盖住工具栏。浮层要贴着一个元素显示，用那个看不见的点。
+  function openHistory(button: HTMLElement) {
+    const bar = button.closest('.canvas-tools')!.getBoundingClientRect();
+    const el = anchor.current!;
+    el.style.left = `${bar.right + 12}px`;
+    el.style.top = `${bar.top - 6}px`;
+    openPopover(el, <HistoryPicker onPick={restore} />, { label: '生成历史' });
+  }
+
   // ---------- 对齐 ----------
 
   // 拖着一个节点靠近别的节点时，把它吸到对方的边线或中线上，并画出参考线。一次拖着好几个时不吸。
@@ -428,6 +467,13 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
     const onKey = (e: KeyboardEvent) => {
       // ⌘ + 在有的键盘上要同时按 Shift，所以这两个缩放键不拦 Shift。
       const key = e.key.toLowerCase();
+      // H 是抓手，V 回到选择（和 Figma 一样）。
+      if (!e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey && (key === 'h' || key === 'v') && mine(e)) return setHand(key === 'h');
+      // ⌘ F 搜索节点，正在打字时也管用（否则会弹出浏览器自己的查找）。
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && key === 'f' && wrap.current?.offsetParent && (e.target === document.body || wrap.current.contains(e.target as HTMLElement))) {
+        e.preventDefault();
+        return setFinding(true);
+      }
       if (!(e.metaKey || e.ctrlKey) || e.altKey || !mine(e) || (e.shiftKey && key !== '+' && key !== '=')) return;
       if (key === 'd') {
         e.preventDefault();
@@ -613,7 +659,7 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
     <CanvasActions.Provider value={actions}>
       <div
         ref={wrap}
-        className="canvas"
+        className={`canvas ${hand ? 'is-hand' : ''}`}
         // 节点的名字和加号要在屏幕上保持大小不变，样式里用这个倒数把画布的缩放抵消掉。
         // 50% 以下不再抵消：名字和加号跟着画布一起缩小，不然会比节点本身还大。
         // --ring、--ring-gap 是选中那圈线的粗细和间隔（画布坐标）：屏幕上 100% 时是 1.5 和 3，缩小时收到 1 和 1 为止。
@@ -675,8 +721,10 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
           zoomOnDoubleClick={false}
           connectOnClick={false}
           panOnScroll
-          selectionOnDrag
-          panOnDrag={[1, 2]}
+          selectionOnDrag={!hand}
+          nodesDraggable={!hand}
+          elementsSelectable={!hand}
+          panOnDrag={hand ? true : [1, 2]}
           selectionMode={SelectionMode.Partial}
           // 按住 Shift 或 ⌘ 点击是多选。在空白处拖动本来就是框选，不需要再按 Shift。
           multiSelectionKeyCode={['Shift', 'Meta', 'Control']}
@@ -693,6 +741,11 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
             </ViewportPortal>
           )}
           {showMap && <MiniMap pannable zoomable position="bottom-left" style={{ width: 168, height: 112 }} />}
+          {finding && (
+            <Panel position="top-center" className="canvas-find">
+              <Finder nodes={nodes} onJump={jumpTo} onClose={() => setFinding(false)} />
+            </Panel>
+          )}
           <Panel position="top-left" className="canvas-title">
             <button className="icon-btn" type="button" {...tip('返回项目列表')} aria-label="返回项目列表" onClick={exit}>
               <Icon name="arrowLeft" />
@@ -729,6 +782,14 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
               <Icon name="upload" size={18} />
               <span className="canvas-tool-name">上传</span>
             </button>
+            <button className="icon-btn" type="button" aria-label="生成历史" aria-haspopup="dialog" aria-expanded="false" onClick={(e) => openHistory(e.currentTarget)}>
+              <Icon name="history" size={18} />
+              <span className="canvas-tool-name">生成历史</span>
+            </button>
+            <button className={`icon-btn ${finding ? 'active' : ''}`} type="button" aria-label="搜索节点" aria-pressed={finding} onClick={() => setFinding((on) => !on)}>
+              <Icon name="search" size={18} />
+              <span className="canvas-tool-name">搜索节点</span>
+            </button>
           </Panel>
           <Panel position="bottom-left" className="canvas-foot">
             <button className="icon-btn" type="button" {...tip('撤销（⌘ Z）')} aria-label="撤销" disabled={!past.current.length} onClick={undo}>
@@ -736,6 +797,9 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
             </button>
             <button className="icon-btn" type="button" {...tip('重做（⇧ ⌘ Z）')} aria-label="重做" disabled={!future.current.length} onClick={redo}>
               <Icon name="redo" />
+            </button>
+            <button className={`icon-btn ${hand ? 'active' : ''}`} type="button" {...tip(hand ? '抓手：拖动是平移画布。再点一下或按 V 回到选择' : '抓手（H）')} aria-label="抓手" aria-pressed={hand} onClick={() => setHand((on) => !on)}>
+              <Icon name="hand" />
             </button>
             <button className="icon-btn" type="button" {...tip('整理节点')} aria-label="整理节点" disabled={nodes.length < 2} onClick={arrange}>
               <Icon name="grid" />
