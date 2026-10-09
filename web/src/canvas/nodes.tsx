@@ -17,7 +17,7 @@ import { VideoPlayer, AudioPlayer } from '../player.tsx';
 import { openDetail } from '../history.tsx';
 import type { Kind } from '../types.ts';
 import { BOX_HEIGHT, NODE_LABELS, ROLE_LABELS, canLink, nodeWidth, joinPrompt, linkLabel, type AudioData, type FrameRole, type ImageData, type LinkData, type NodeKind, type TextData, type VideoData } from './model.ts';
-import { fitVideo, generate, outputOf, recordOf } from './run.ts';
+import { deliver, fitVideo, generate, outputOf, recordOf } from './run.ts';
 
 // 画布页交给节点用的几件事。snap：会改动画布结构的操作，动手之前调一下，撤销时回到这一刻。
 // addInput：在某个节点左边加一个节点并连进它，extra 是新节点一出来就带着的内容（上传的文件、素材库里的素材）。
@@ -349,6 +349,7 @@ export function TextNode({ id, data: raw, selected }: NodeProps) {
   const [editing, setEditing] = useState(false);
   const area = useRef<HTMLTextAreaElement>(null);
   const draft = useDraft(data.text || '', (text) => flow.updateNodeData(id, { text }));
+  const { snap } = useContext(CanvasActions);
   useStore('models', 'app');
   const models = state.catalog.polish;
   const model = models.includes(data.model || '') ? data.model! : polishModel();
@@ -369,7 +370,8 @@ export function TextNode({ id, data: raw, selected }: NodeProps) {
     try {
       const upstream = inputs.filter((i) => i.link.kind === 'text').map((i) => (i.node.data as unknown as TextData).text || '');
       const result = await api<{ text: string }>('POST', '/api/text', { prompt, context: joinPrompt(upstream, data.text || ''), model });
-      flow.updateNodeData(id, { text: result.text });
+      // 框里已经有内容：原来的留着，写出来的放进下面一个新的文本节点。
+      deliver(flow, id, [{ text: result.text }], snap);
     } catch (err) {
       flow.updateNodeData(id, { error: (err as Error).message });
       toast((err as Error).message, 'error', 6000);
@@ -438,6 +440,7 @@ export function ImageNode({ id, data: raw, selected }: NodeProps) {
   const ratios = imageRatios(data.model);
   // 这个模型收几张参考图。不收的模型不显示参考图那一排；已经连进来的仍然显示，方便看出问题在哪。
   const refLimit = imageRefLimit(data.model);
+  const { snap } = useContext(CanvasActions);
   const hasRefs = inputs.some((i) => i.link.kind === 'image');
 
   async function upload(picked?: File) {
@@ -466,9 +469,15 @@ export function ImageNode({ id, data: raw, selected }: NodeProps) {
           <Refs id={id} kind="image" model={data.model} limit={refLimit} />
           <Prompt id={id} value={data.prompt} placeholder={promptHint(linked, hasRefs ? '想怎么改这张图？例如：把背景改成雪夜' : '描述想生成的图片：主体、环境、构图、光线和风格')} />
           {data.error && !data.busy && <p className="cnode-error">{data.error}</p>}
-          <Bar working={working} ready={Boolean(data.prompt.trim()) || linked} action="生成图片" onSend={() => generate(flow, id)}>
+          <Bar working={working} ready={Boolean(data.prompt.trim()) || linked} action="生成图片" onSend={() => generate(flow, id, snap)}>
             <Dropdown variant="tool" chevron label="模型" value={data.model} options={models.map((m) => ({ value: m, label: m }))} onChange={(model) => flow.updateNodeData(id, { model, ratio: imageRatios(model).includes(data.ratio) ? data.ratio : imageRatios(model)[0] || data.ratio })} />
-            <Params label="参数" groups={[{ label: '比例', value: data.ratio, options: ratios.map((r) => ({ value: r, label: r })), onChange: (ratio) => flow.updateNodeData(id, { ratio }) }]} />
+            <Params
+              label="参数"
+              groups={[
+                { label: '比例', value: data.ratio, options: ratios.map((r) => ({ value: r, label: r })), onChange: (ratio) => flow.updateNodeData(id, { ratio }) },
+                { label: '张数', value: String(data.count || 1), options: IMAGE_COUNTS.map((n) => ({ value: String(n), label: `${n} 张` })), onChange: (count) => flow.updateNodeData(id, { count: Number(count) }) },
+              ]}
+            />
           </Bar>
         </>
       }
@@ -491,6 +500,9 @@ export function ImageNode({ id, data: raw, selected }: NodeProps) {
 // ---------- 视频 ----------
 
 const ROLES: FrameRole[] = ['reference', 'first', 'last'];
+// 一次最多出几份：图片是接口一次能出的张数，视频是连着提交几次。
+const IMAGE_COUNTS = [1, 2, 3, 4];
+const VIDEO_COUNTS = [1, 2, 3, 4];
 
 
 // 改一条图片连线的用途。连线上的标签和输入面板里的小图都能点开它。
@@ -623,6 +635,7 @@ export function VideoNode({ id, data: raw, selected }: NodeProps) {
   const able = capabilities(data.model);
   const ratioLabel = (value: string) => RATIOS.find((r) => r.value === value)?.label || value;
   const set = (patch: Partial<VideoData>) => flow.updateNodeData(id, patch);
+  const { snap } = useContext(CanvasActions);
   return (
     <Frame
       id={id}
@@ -636,7 +649,7 @@ export function VideoNode({ id, data: raw, selected }: NodeProps) {
           <Refs id={id} kind="video" model={data.model} />
           <Prompt id={id} value={data.prompt} placeholder={promptHint(linked, '描述想生成的视频：主体、动作、场景、镜头运动、光线和风格')} />
           {data.error && !data.busy && <p className="cnode-error">{data.error}</p>}
-          <Bar working={working} ready={Boolean(data.prompt.trim()) || inputs.length > 0} action="生成视频" onSend={() => generate(flow, id)}>
+          <Bar working={working} ready={Boolean(data.prompt.trim()) || inputs.length > 0} action="生成视频" onSend={() => generate(flow, id, snap)}>
             <Dropdown variant="tool" chevron label="模型" value={data.model} options={models.map((m) => ({ value: m, label: m, note: modelNote(m) || undefined }))} onChange={(model) => set(fitVideo({ ...data, model }))} />
             <Params
               label="参数"
@@ -644,6 +657,7 @@ export function VideoNode({ id, data: raw, selected }: NodeProps) {
                 { label: '比例', value: data.ratio, options: able.ratios.map((r) => ({ value: r, label: ratioLabel(r) })), onChange: (ratio) => set({ ratio }) },
                 { label: '分辨率', value: data.resolution, options: able.resolutions.map((r) => ({ value: r, label: r })), onChange: (resolution) => set({ resolution }) },
                 { label: '时长', value: String(data.duration), options: able.durations.map((d) => ({ value: String(d), label: `${d} 秒` })), onChange: (duration) => set({ duration: Number(duration) }) },
+                { label: '段数', value: String(data.count || 1), options: VIDEO_COUNTS.map((n) => ({ value: String(n), label: `${n} 段` })), onChange: (count) => set({ count: Number(count) }) },
               ]}
             />
           </Bar>

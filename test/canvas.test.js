@@ -2,7 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { canLink, targetsOf, sourcesOf, linkLabel, joinPrompt, videoFormFrom, stripNodeData, nodeWidth, clipOf, pasteClip, snapTo, tidy } from '../web/src/canvas/model.ts';
+import { canLink, targetsOf, sourcesOf, linkLabel, joinPrompt, videoFormFrom, stripNodeData, nodeWidth, clipOf, pasteClip, snapTo, tidy, placeResults } from '../web/src/canvas/model.ts';
 import { buildRequest } from '../web/src/request.ts';
 
 const base = {
@@ -155,4 +155,17 @@ test('复制粘贴：只带走两头都选中的连线，粘贴出来的换了�
 
   const copy = pasteClip(clip, { by: { x: 40, y: 40 } }, () => `dup${++n}`);
   assert.deepEqual(copy.nodes.map((node) => node.position), [{ x: 140, y: 90 }, { x: 440, y: 120 }]);
+});
+
+test('再次生成：空节点先装第一份，多出来的排在下面；已有内容的节点不动，结果全是新节点；下面有节点就跳过去', () => {
+  const source = { id: 's', position: { x: 100, y: 100 }, width: 240 };
+  // 空节点出 3 份：第一份进它自己，另外两份在下面，行距是节点的高度加 56（320）。
+  assert.deepEqual(placeResults(source, false, 3, [source]), { here: 0, spots: [{ x: 100, y: 420 }, { x: 100, y: 740 }] });
+  assert.deepEqual(placeResults(source, false, 1, [source]), { here: 0, spots: [] });
+  // 已有内容出 2 份：都在下面。
+  assert.deepEqual(placeResults(source, true, 2, [source]), { here: -1, spots: [{ x: 100, y: 420 }, { x: 100, y: 740 }] });
+  // 正下方已经有一个节点：跳过那一行。旁边隔得远的不算。
+  const below = { id: 'b', position: { x: 160, y: 430 }, width: 240 };
+  const aside = { id: 'c', position: { x: 900, y: 420 }, width: 240 };
+  assert.deepEqual(placeResults(source, true, 1, [source, below, aside]).spots, [{ x: 100, y: 740 }]);
 });

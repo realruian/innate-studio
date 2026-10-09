@@ -8,7 +8,7 @@ import { buildRequest as buildVideoRequest, buildOpenRouterRequest, buildImageRe
 import { recordName, refFromAsset, uploadVirtualAsset } from '../media.ts';
 import { toast } from '../ui/layers.tsx';
 import type { HistoryItem, Kind, Ref } from '../types.ts';
-import { NODE_LABELS, joinPrompt, videoFormFrom, type AudioData, type ImageData, type LinkData, type MediaInput, type NodeKind, type TextData, type VideoData } from './model.ts';
+import { NODE_LABELS, joinPrompt, nodeWidth, numbered, placeResults, stripNodeData, videoFormFrom, type AudioData, type ImageData, type LinkData, type MediaInput, type NodeKind, type TextData, type VideoData } from './model.ts';
 
 type Flow = ReactFlowInstance<Node, Edge>;
 type AnyData = Partial<ImageData & VideoData & AudioData & TextData>;
@@ -97,10 +97,10 @@ async function submitImage(node: Node, sources: { link: LinkData; node: Node }[]
       if (!output) throw new Error('连进来的图片节点还没有结果，先让它生成完');
       return output.asset ? { ...output.asset, uid: crypto.randomUUID() } : { uid: crypto.randomUUID(), kind: 'image' as const, source: 'local' as const, url: output.url, name: output.name, thumb: null };
     });
-  const form = { prompt, model: data.model, ratio: data.ratio, count: 1, refs };
+  const form = { prompt, model: data.model, ratio: data.ratio, count: data.count || 1, refs };
   const request = buildImageRequest(form, imageRefLimit(data.model));
   if (request.problems.length) throw new Error(request.problems[0]);
-  return (await api<{ items: HistoryItem[] }>('POST', '/api/images', { payload: request.payload, form: { type: 'image', ...form } })).items[0].id;
+  return (await api<{ items: HistoryItem[] }>('POST', '/api/images', { payload: request.payload, form: { type: 'image', ...form } })).items.map((item) => item.id);
 }
 
 async function submitAudio(node: Node, prompt: string) {
@@ -117,7 +117,32 @@ async function submitAudio(node: Node, prompt: string) {
   return (await api<HistoryItem>('POST', '/api/audio/speech', { ...request.body, form: { type: 'speech', ...form } })).id;
 }
 
-export async function generate(flow: Flow, id: string) {
+// 节点里是不是已经有内容了：上传的、素材库里的、生成出来的（生成失败的、记录已经删掉的不算）。
+export function isFilled(data: AnyData) {
+  const record = recordOf(data);
+  return Boolean(data.upload || data.asset || (record && record.status !== 'failed') || (data.text || '').trim());
+}
+
+// 把一批结果放上画布。节点还空着，第一份放进它自己；已经有内容，原来的留着不动。其余每份一个新节点：
+// 参数和提示词照抄原节点，连进原节点的线也照样连进它，排在原节点下面。snap 是撤销用的那一下。
+export function deliver(flow: Flow, id: string, results: Record<string, unknown>[], snap: () => void) {
+  const node = flow.getNode(id);
+  if (!node || !results.length) return;
+  const width = (n: Node) => n.measured?.width || nodeWidth(n.type as NodeKind, n.data);
+  const { here, spots } = placeResults({ id, position: node.position, width: width(node) }, isFilled(node.data as AnyData), results.length, flow.getNodes().map((n) => ({ id: n.id, position: n.position, width: width(n) })));
+  if (here >= 0) flow.updateNodeData(id, results[here]);
+  const rest = results.filter((_, index) => index !== here);
+  if (!rest.length) return;
+  snap();
+  // 新节点不带原节点的那份内容，也不带「一次几张」：再点它生成，默认只出一份。
+  const base = { ...stripNodeData(node.data), recordId: undefined, upload: undefined, asset: undefined, assetId: undefined, assetOf: undefined, aspect: undefined, count: undefined, no: undefined };
+  const fresh = numbered(rest.map((result, index) => ({ id: crypto.randomUUID(), type: node.type, position: spots[index], data: { ...base, ...result } }) as Node), flow.getNodes());
+  const incoming = flow.getEdges().filter((edge) => edge.target === id);
+  flow.addNodes(fresh);
+  flow.addEdges(fresh.flatMap((made) => incoming.map((edge) => ({ ...edge, id: crypto.randomUUID(), target: made.id, selected: false }))));
+}
+
+export async function generate(flow: Flow, id: string, snap: () => void = () => {}) {
   const node = flow.getNode(id);
   if (!node || (node.data as AnyData).busy) return;
   if (!state.app.hasKey) return toast('还没有设置 API Key，请先到「设置」里填写', 'info');
@@ -132,10 +157,25 @@ export async function generate(flow: Flow, id: string) {
     const upstream = sources.filter((s) => s.link.kind === 'text').map((s) => (s.node.data as AnyData).text || '');
     const prompt = joinPrompt(upstream, (node.data as AnyData).prompt || '');
     const kind = node.type as NodeKind;
-    const recordId = kind === 'video' ? await submitVideo(flow, node, sources, prompt, say) : kind === 'image' ? await submitImage(node, sources, prompt) : await submitAudio(node, prompt);
-    // 换了新结果，之前上传的、从素材库选的、传进素材库的那份都不再是它的输出。
-    // 宽高比先留着：重新生成的时候框不来回变，出了新结果再按它实际的来。
-    flow.updateNodeData(id, { recordId, upload: undefined, asset: undefined, assetId: undefined, assetOf: undefined });
+    const count = Math.max(1, Number((node.data as AnyData).count) || 1);
+    let ids: string[];
+    if (kind === 'image') ids = await submitImage(node, sources, prompt);
+    else if (kind === 'video') {
+      // 视频接口一次只出一段，要几段就提交几次。中途有一次没提交上，已经提交的照样放上画布。
+      ids = [];
+      for (let n = 0; n < count; n++) {
+        try {
+          ids.push(await submitVideo(flow, node, sources, prompt, (text) => say(count > 1 ? `${text}（${n + 1}/${count}）` : text)));
+        } catch (err) {
+          if (!ids.length) throw err;
+          toast(`第 ${n + 1} 段没提交上：${(err as Error).message}`, 'error', 6000);
+          break;
+        }
+      }
+    } else ids = [await submitAudio(node, prompt)];
+    // 音频还是在原节点上换成新的；图片、视频已经有内容时不覆盖，新结果放进新节点。
+    if (kind === 'audio') flow.updateNodeData(id, { recordId: ids[0], upload: undefined, asset: undefined, assetId: undefined, assetOf: undefined });
+    else deliver(flow, id, ids.map((recordId) => ({ recordId, upload: undefined, asset: undefined, assetId: undefined, assetOf: undefined })), snap);
     await loadHistory().catch(() => {});
     startHistoryLoop();
   } catch (err) {

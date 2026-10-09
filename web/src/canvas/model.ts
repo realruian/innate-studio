@@ -34,6 +34,8 @@ export interface ImageData extends Generated {
   prompt: string;
   model: string;
   ratio: string;
+  // 一次生成几张。不写就是一张。
+  count?: number;
   // 节点里那张图实际的宽高比，图片读出来之后记下，节点的框按它定宽度。
   aspect?: number;
 }
@@ -43,6 +45,8 @@ export interface VideoData extends Generated {
   resolution: string;
   ratio: string;
   duration: number;
+  // 一次生成几段。不写就是一段。
+  count?: number;
   // 节点里那段视频实际的宽高比，读到之后记下，节点的框按它定宽度。
   aspect?: number;
 }
@@ -307,6 +311,25 @@ export function numbered<T extends { type?: string; data: Record<string, unknown
     last.set(node.type || '', no);
     return { ...node, data: { ...node.data, no } };
   });
+}
+
+// ---------- 再次生成 ----------
+
+// 一个节点生成出 results 份结果，各放在哪。
+// 节点还空着：第一份放进它自己，多出来的每份一个新节点。节点里已经有内容：原来的留着不动，每份结果都是新节点。
+// 新节点和原节点左边对齐，从它下面一行一行往下排，跳过已经有节点的位置。返回的 here 是放进原节点的那一份是第几个（没有就是 -1），spots 是新节点的位置。
+const ROW_STEP = TITLE_ROOM + BOX_HEIGHT + 56;
+export function placeResults(source: { id: string; position: { x: number; y: number }; width: number }, filled: boolean, results: number, others: { id: string; position: { x: number; y: number }; width: number }[]): { here: number; spots: { x: number; y: number }[] } {
+  const spots: { x: number; y: number }[] = [];
+  const taken = others.filter((node) => node.id !== source.id).map((node) => ({ ...node.position, width: node.width }));
+  let y = source.position.y;
+  for (let n = filled ? 0 : 1; n < results; n++) {
+    do y += ROW_STEP;
+    while (taken.some((node) => Math.abs(node.y - y) < ROW_STEP - 60 && node.x < source.position.x + source.width + 40 && node.x + node.width + 40 > source.position.x));
+    spots.push({ x: source.position.x, y });
+    taken.push({ x: source.position.x, y, width: source.width });
+  }
+  return { here: filled ? -1 : 0, spots };
 }
 
 // ---------- 复制、粘贴 ----------
