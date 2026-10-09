@@ -75,7 +75,7 @@ before(async () => {
     cwd: root,
     stdio: 'ignore',
     // 两个 Key 的环境变量都置空：即使本机设置了真实 Key，测试也绝不会用到它。
-    env: { ...process.env, PORT: String(port), FLATKEY_BASE_URL: flatkey.url, OPENROUTER_BASE_URL: openrouter.url, SEEDANCE_DATA_DIR: dataDir, FLATKEY_API_KEY: '', OPENROUTER_API_KEY: '' },
+    env: { ...process.env, PORT: String(port), FLATKEY_BASE_URL: flatkey.url, OPENROUTER_BASE_URL: openrouter.url, SEEDANCE_DATA_DIR: dataDir, FLATKEY_API_KEY: '', OPENROUTER_API_KEY: '', ARK_API_KEY: '' },
   });
   await waitFor(async () => (await fetch(`${base}/api/state`)).ok, '服务启动');
 });
@@ -91,13 +91,13 @@ test('默认是 Flatkey；两个平台的 Key 各存各的，切换后说的是�
   const start = (await call('GET', '/api/state')).data;
   assert.equal(start.provider, 'flatkey');
   assert.equal(start.features.music, true);
-  assert.deepEqual(start.providers.map((p) => [p.id, p.hasKey]), [['flatkey', false], ['openrouter', false]]);
+  assert.deepEqual(start.providers.map((p) => [p.id, p.hasKey]), [['flatkey', false], ['openrouter', false], ['ark', false]]);
 
   await call('PUT', '/api/key', { apiKey: MOCK_KEY });
   // 不切换平台也能先把另一个平台的 Key 存好。
   const saved = (await call('PUT', '/api/key', { apiKey: MOCK_OR_KEY, provider: 'openrouter' })).data;
   assert.equal(saved.provider, 'flatkey');
-  assert.deepEqual(saved.providers.map((p) => p.hasKey), [true, true]);
+  assert.deepEqual(saved.providers.map((p) => p.hasKey), [true, true, false]);
   assert.equal(JSON.stringify(saved).includes(MOCK_OR_KEY), false);
 
   assert.equal((await call('PUT', '/api/provider', { provider: 'nowhere' })).status, 400);

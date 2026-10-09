@@ -6,10 +6,12 @@ export type VideoFamily = 'seedance' | 'grok';
 export type VideoMode = 'text' | 'frames' | 'reference';
 
 // ---------- 平台 ----------
-// 应用可以接两个平台，在设置里切换。Flatkey 是原来的那套；OpenRouter 的视频模型更多，但没有音效、配乐、素材库和真人档案。
+// 应用可以接三个平台，在设置里切换。Flatkey 是原来的那套；OpenRouter 的视频模型更多，但没有音效、配乐、素材库和真人档案；
+// 火山方舟是字节官方的接口，只有字节自己的模型：Seedance 视频、Seedream 图片，润色用豆包的文本模型。
 // features 是这个平台上能用的东西，页面按它决定显示哪些创作类型和页面。
+// keyPrefix 是这个平台的 Key 开头的那几个字符，用来提醒用户别贴错；火山方舟的 Key 没有固定的开头，留空。
 
-export type ProviderId = 'flatkey' | 'openrouter';
+export type ProviderId = 'flatkey' | 'openrouter' | 'ark';
 export interface Features {
   image: boolean;
   speech: boolean;
@@ -32,8 +34,14 @@ export const PROVIDERS: Record<ProviderId, { label: string; keyPrefix: string; k
     keysUrl: 'https://openrouter.ai/settings/keys',
     features: { image: true, speech: true, sfx: false, music: false, library: false, persons: false },
   },
+  ark: {
+    label: '火山方舟',
+    keyPrefix: '',
+    keysUrl: 'https://ark.volcengine.com/region:cn-beijing/apikey',
+    features: { image: true, speech: false, sfx: false, music: false, library: false, persons: false },
+  },
 };
-export const isProvider = (id: unknown): id is ProviderId => id === 'flatkey' || id === 'openrouter';
+export const isProvider = (id: unknown): id is ProviderId => typeof id === 'string' && Object.hasOwn(PROVIDERS, id);
 
 // ---------- 视频模型属于哪一族 ----------
 // Flatkey 上两族的请求格式不一样：Seedance 用 content 数组，Grok 用 prompt 字符串。
@@ -50,10 +58,11 @@ export const referenceModeLabel = (id?: string) => (videoFamilyOf(id) === 'seeda
 // 字节官方只分出 Fast 和 Mini 两档，附注是这两个词的直译。不带后缀的和带 -pro 的官方没有另外的叫法，不加附注
 // （「专业版」是 Flatkey 文档的说法，不是官方的）。Grok 也不加。
 
+// 火山方舟的型号前面带 doubao-，后面带一串日期（doubao-seedance-2-0-fast-260128），也认得出来。
 export function modelNote(id: string): string {
-  if (!/^seedance/i.test(id)) return '';
-  if (/-fast$/i.test(id)) return '快速版';
-  if (/-mini$/i.test(id)) return '轻量版';
+  if (!/^(doubao-)?seedance/i.test(id)) return '';
+  if (/-fast(-\d+)?$/i.test(id)) return '快速版';
+  if (/-mini(-\d+)?$/i.test(id)) return '轻量版';
   return '';
 }
 
@@ -110,6 +119,40 @@ export function videoCapabilities(id: string): VideoCapabilities {
   if (/^seedance-2\.5/i.test(id)) return { ...SEEDANCE, resolutions: ['480p', '720p'] };
   return SEEDANCE;
 }
+
+// ---------- 火山方舟的模型 ----------
+// 火山方舟没有能用 API Key 读的模型列表，所以登记在这里。出处是官方文档（2026-10-09 读的）：
+// 《模型列表》https://www.volcengine.com/docs/82379/1554680 、《Doubao Seedance 2.0 系列教程》https://www.volcengine.com/docs/ark/seedance-2-0 、
+// 《Doubao Seedream 4.0-5.0 教程》https://docs.volcengine.com/docs/ark/seedream-4-0-5-0
+// 型号后面那串数字是版本日期，官方出了新版本要来这里改。
+
+const ARK_RATIOS = ['16:9', '4:3', '1:1', '3:4', '9:16', '21:9'];
+const arkVideo = (resolutions: string[], maxSeconds: number): VideoSpec => ({ resolutions, ratios: ARK_RATIOS, durations: range(4, maxSeconds), autoDuration: false, frames: ['first_frame', 'last_frame'], audio: true, seed: true });
+
+// 按这个顺序列给用户：新的在前，同一代里品质高的在前。
+export const ARK_VIDEO_MODELS: Record<string, VideoSpec> = {
+  'doubao-seedance-2-5-260628': arkVideo(['480p', '720p', '1080p'], 30),
+  'doubao-seedance-2-0-260128': arkVideo(['480p', '720p', '1080p', '4k'], 15),
+  'doubao-seedance-2-0-fast-260128': arkVideo(['480p', '720p'], 15),
+  'doubao-seedance-2-0-mini-260615': arkVideo(['480p', '720p'], 15),
+};
+
+// 图片的大小要写成「宽x高」。下面是文档里各档分辨率对应每种画面比例的像素值。
+const SEEDREAM_PRO_1_5K = { '1:1': '1536x1536', '4:3': '1792x1344', '3:4': '1344x1792', '16:9': '2048x1152', '9:16': '1152x2048', '3:2': '1872x1248', '2:3': '1248x1872', '21:9': '2352x1008' };
+const SEEDREAM_PRO_2K = { '1:1': '2048x2048', '4:3': '2368x1776', '3:4': '1776x2368', '16:9': '2816x1584', '9:16': '1584x2816', '3:2': '2496x1664', '2:3': '1664x2496', '21:9': '3136x1344' };
+const SEEDREAM_2K = { '1:1': '2048x2048', '4:3': '2304x1728', '3:4': '1728x2304', '16:9': '2848x1600', '9:16': '1600x2848', '3:2': '2496x1664', '2:3': '1664x2496', '21:9': '3136x1344' };
+
+// refs 是最多收几张参考图；sizes 是每种画面比例发什么大小。
+// 5.0 pro 用 1.5K 这一档：按文档它和 1K 同价（0.30 元一张），效果更好；2K 是 0.60 元一张。
+// 5.0 flash 不分档计价，用 2K；5.0（原来叫 5.0 lite）最小就是 2K。即将下线的 4.5 和 4.0 不列。
+export const ARK_IMAGE_MODELS: Record<string, { refs: number; sizes: Record<string, string> }> = {
+  'doubao-seedream-5-0-pro-260628': { refs: 10, sizes: SEEDREAM_PRO_1_5K },
+  'doubao-seedream-5-0-flash-260915': { refs: 10, sizes: SEEDREAM_PRO_2K },
+  'doubao-seedream-5-0-260128': { refs: 14, sizes: SEEDREAM_2K },
+};
+
+// 润色用的豆包文本模型：先便宜快的，再效果好的。
+export const ARK_TEXT_MODELS = ['doubao-seed-2-1-lite-260915', 'doubao-seed-2-1-turbo-260628', 'doubao-seed-2-1-pro-260915'];
 
 // ---------- 润色提示词的规则 ----------
 // 发给文本模型的系统提示词。每个生成模型的官方提示词写法不一样，所以按要用的那个生成模型来选。

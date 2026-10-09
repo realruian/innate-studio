@@ -30,7 +30,9 @@ function Settings() {
     if (!state.app.hasKey) return setCredits('—');
     setCredits('读取中…');
     try {
-      const { remaining, used, unit } = await api('GET', '/api/credits');
+      const { remaining, used, unit, unavailable } = await api('GET', '/api/credits');
+      // 火山方舟没有查余额的接口。
+      if (unavailable) return setCredits('这里读不到，请到火山引擎控制台的费用中心查看');
       const sign = unit === 'usd' ? '$' : '';
       setCredits(`剩余 ${sign}${amount(remaining)} · 已用 ${sign}${amount(used)}`);
     } catch {
@@ -79,7 +81,7 @@ function Settings() {
     if (!value) return toast('请粘贴你的 API Key', 'error');
     if (/[^\x21-\x7e]/.test(value)) {
       setMasked(false);
-      return toast(`这不像是 API Key：里面有中文或空格，可能是剪贴板里的其他内容。请复制 ${platform} 控制台里以 ${keyPrefix} 开头的那一串。`, 'error', 8000);
+      return toast(`这不像是 API Key：里面有中文或空格，可能是剪贴板里的其他内容。请复制 ${platform} 控制台里${keyPrefix ? `以 ${keyPrefix} 开头的` : ''}那一串。`, 'error', 8000);
     }
     if (!value.startsWith(keyPrefix)) {
       const ok = await confirmDialog({ title: `这看起来不像 ${platform} 的 Key`, message: `${platform} 的 Key 通常以 ${keyPrefix} 开头，你粘贴的内容不是。仍然保存吗？`, okText: '仍然保存' });
@@ -156,13 +158,14 @@ function Settings() {
       </div>
       <div className="section-title">模型平台</div>
       <div className="form-section">
-        <FormRow label="用哪个平台生成" desc="两个平台的 Key 各存各的，随时可以换回来">
+        <FormRow label="用哪个平台生成" desc="每个平台的 Key 各存各的，随时可以换回来">
           <div>
             <Segmented options={(Object.keys(PROVIDERS) as ProviderId[]).map((id) => ({ value: id, label: PROVIDERS[id].label, disabled: switching }))} value={provider} onChange={changeProvider} />
           </div>
         </FormRow>
       </div>
       {provider === 'openrouter' && <p className="small muted">OpenRouter 上能生成视频、图片和语音，也能润色提示词。音效、配乐、素材库、真人档案只有 Flatkey 有，切换回去就能用；延长和编辑视频也只在 Flatkey 上。</p>}
+      {provider === 'ark' && <p className="small muted">火山方舟是字节官方的接口，能生成 Seedance 视频和 Seedream 图片，也能用豆包的文本模型润色提示词。Seedance 2.0、2.5 要账户余额大于 200 元才能开通。语音、音效、配乐、素材库、真人档案这里没有，延长和编辑视频只在 Flatkey 上。</p>}
       <div className="section-title">{platform} API Key</div>
       <div className="form-section">
         <FormRow label="当前 Key">
@@ -180,7 +183,7 @@ function Settings() {
           ref={input}
           className={`input mono${masked ? ' masked' : ''}`}
           type="text"
-          placeholder={`${keyPrefix}…`}
+          placeholder={keyPrefix ? `${keyPrefix}…` : `粘贴 ${platform} 的 API Key`}
           autoComplete="off"
           data-1p-ignore=""
           data-lpignore="true"

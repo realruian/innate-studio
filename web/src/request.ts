@@ -120,7 +120,8 @@ export function buildRequest(form: VideoForm, refStatus: (ref: Ref) => RefStatus
 // OpenRouter 的视频：提示词是 prompt 字符串，首尾帧在 frame_images，参考素材在 input_references。spec 是这个模型支持什么。
 // 图片可以用本机的文件（本地服务会把它内嵌进请求）；参考视频和音频只能用公网链接；Flatkey 素材库里的素材这边读不到。
 // 这些都在 2026-10-09 用 Seedance 2.5 实测过：文生视频、首帧、首尾帧、参考图能用，内嵌的视频会被拒绝。
-export function buildOpenRouterRequest(form: VideoForm, spec: VideoSpec): BuiltRequest {
+// 火山方舟用的也是这一种：本地服务把它换成方舟自己的格式再发出去。platform 是平台的名字，只用在提示里。
+export function buildOpenRouterRequest(form: VideoForm, spec: VideoSpec, platform = 'OpenRouter'): BuiltRequest {
   const problems: string[] = [];
   const text = form.prompt.trim();
   const payload: Record<string, unknown> = { model: form.model, duration: Number(form.duration), resolution: form.resolution };
@@ -146,7 +147,7 @@ export function buildOpenRouterRequest(form: VideoForm, spec: VideoSpec): BuiltR
   if (form.mode !== 'frames') payload.aspect_ratio = form.ratio;
 
   const used = refsInUse(form);
-  if (used.some((r) => r.source === 'asset')) problems.push('有素材来自 Flatkey 的素材库，OpenRouter 读不到，请移除后重新添加');
+  if (used.some((r) => r.source === 'asset')) problems.push(`有素材来自 Flatkey 的素材库，${platform} 读不到，请移除后重新添加`);
   else if (used.some((r) => r.kind !== 'image' && r.source === 'local')) problems.push('参考视频和音频需要用公网链接，本机的文件发不过去');
 
   if (spec.audio) payload.generate_audio = Boolean(form.generateAudio);

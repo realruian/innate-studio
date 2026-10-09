@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
 // Innate Studio 本地服务：托管页面、保管 API Key、转发请求给模型平台、轮询任务并保存历史。
-// 平台有两个，在设置里切换：Flatkey 能生成视频（Seedance、Grok）、图片、音频（语音、音效、配乐）；OpenRouter 能生成视频、图片和语音。两边都能润色提示词。
+// 平台有三个，在设置里切换：Flatkey 能生成视频（Seedance、Grok）、图片、音频（语音、音效、配乐）；OpenRouter 能生成视频、图片和语音；
+// 火山方舟是字节官方的接口，能生成视频（Seedance）和图片（Seedream）。三边都能润色提示词。
 // 服务本身不依赖第三方包。页面是 web/ 里的 React 源码，用 npm run build 构建到 web/dist 之后由这里托管。
 
 import http from 'node:http';
@@ -11,7 +12,7 @@ import crypto from 'node:crypto';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
-import { videoFamilyOf, polishGuide, POLISH_KINDS, PROVIDERS, isProvider, videoSpecOf } from './shared/models.ts';
+import { videoFamilyOf, polishGuide, POLISH_KINDS, PROVIDERS, isProvider, videoSpecOf, ARK_VIDEO_MODELS, ARK_IMAGE_MODELS, ARK_TEXT_MODELS } from './shared/models.ts';
 import { OFFICIAL_SKILLS } from './shared/skills.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -19,10 +20,12 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 5178;
 const HOST = '127.0.0.1';
 const trimSlash = (url) => url.replace(/\/+$/, '');
-// 两个平台各自的接口地址、Key 的环境变量名、Key 存在 config.json 里的哪个字段。平台的名字和各自能用的功能登记在 shared/models.ts。
+// 每个平台各自的接口地址、Key 的环境变量名、Key 存在 config.json 里的哪个字段。平台的名字和各自能用的功能登记在 shared/models.ts。
 const UPSTREAMS = {
   flatkey: { baseUrl: trimSlash(process.env.FLATKEY_BASE_URL || 'https://router.flatkey.ai'), envKey: 'FLATKEY_API_KEY', configKey: 'apiKey' },
   openrouter: { baseUrl: trimSlash(process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api'), envKey: 'OPENROUTER_API_KEY', configKey: 'openrouterKey' },
+  // 火山方舟的地址里已经带着版本号，所以它的接口路径前面没有 /v1。
+  ark: { baseUrl: trimSlash(process.env.ARK_BASE_URL || 'https://ark.cn-beijing.volces.com/api/v3'), envKey: 'ARK_API_KEY', configKey: 'arkKey' },
 };
 const DATA_DIR = path.resolve(process.env.SEEDANCE_DATA_DIR || path.join(__dirname, 'data'));
 // 生成结果按类型分目录存；uploads 放的是从本机选来当输入的文件（Grok 的首帧、要配乐的视频）。
@@ -38,7 +41,7 @@ const POLL_INTERVAL_MS = 6000;
 const MAX_PENDING_MS = Number(process.env.SEEDANCE_PENDING_LIMIT_MS) || 6 * 60 * 60 * 1000;
 const DOWNLOAD_RETRY_MS = 30000;
 const MAX_DOWNLOAD_ATTEMPTS = 6;
-const DEFAULT_MODELS = { flatkey: ['seedance-2.0', 'seedance-2.0-fast'], openrouter: ['bytedance/seedance-2.5', 'bytedance/seedance-2.0'] };
+const DEFAULT_MODELS = { flatkey: ['seedance-2.0', 'seedance-2.0-fast'], openrouter: ['bytedance/seedance-2.5', 'bytedance/seedance-2.0'], ark: Object.keys(ARK_VIDEO_MODELS) };
 // 语音两边用的是同一个 ElevenLabs 模型，只是型号的写法不同。
 const SPEECH_MODEL = { flatkey: 'eleven_multilingual_v2', openrouter: 'elevenlabs/eleven-multilingual-v2' };
 const SFX_MODEL = 'eleven_sound_v1';
@@ -47,6 +50,7 @@ const MUSIC_MODEL = 'sonilo-video-to-music';
 const POLISH_MODELS = {
   flatkey: ['claude-haiku-5-5', 'claude-sonnet-5-5', 'claude-opus-5-5', 'glm-5.3', 'grok-4.7'],
   openrouter: ['anthropic/claude-haiku-5.5', 'anthropic/claude-sonnet-5.5', 'anthropic/claude-opus-5.5', 'z-ai/glm-5.3', 'x-ai/grok-4.7'],
+  ark: ARK_TEXT_MODELS,
 };
 const MAX_IMAGES = 4;
 
@@ -87,7 +91,10 @@ const saveWorkflows = () => writeJson('workflows.json', workflows);
 
 // Key 要放进 HTTP 请求头，只能由可见的 ASCII 字符组成。
 const isUsableKey = (value) => /^[\x21-\x7e]+$/.test(value);
-const badKeyMessage = (provider) => `这不像是 API Key：里面有中文、空格或其他不能用的字符。请到 ${labelOf(provider)} 的控制台复制以 ${PROVIDERS[provider].keyPrefix} 开头的那一串，再粘贴进来。`;
+const badKeyMessage = (provider) => {
+  const { keyPrefix } = PROVIDERS[provider];
+  return `这不像是 API Key：里面有中文、空格或其他不能用的字符。请到 ${labelOf(provider)} 的控制台复制${keyPrefix ? `以 ${keyPrefix} 开头的` : ''}那一串，再粘贴进来。`;
+};
 
 // 当前用哪个平台。没选过就是 Flatkey。
 const currentProvider = () => (isProvider(config.provider) ? config.provider : 'flatkey');
@@ -117,7 +124,7 @@ function providerState(provider) {
   };
 }
 
-// 最外面几项说的是当前平台；providers 里是两个平台各自的 Key 状态，设置页用。
+// 最外面几项说的是当前平台；providers 里是每个平台各自的 Key 状态，设置页用。
 function keyState() {
   const provider = currentProvider();
   return {
@@ -146,6 +153,24 @@ const ERROR_HINTS = {
   model_not_found: '平台不认识这个模型 ID',
   rate_limit_exceeded: '请求太频繁，请稍后再试',
   upstream_unavailable: '模型服务暂时不可用，请稍后重试',
+  // 下面是火山方舟的错误码（官方文档《错误码》）。
+  AuthenticationError: 'API Key 无效或已被删除',
+  AccountOverdueError: '火山引擎账号欠费了，充值后才能继续用',
+  ModelNotOpen: '账号还没有开通这个模型。Seedance 2.0、2.5 要账户余额大于 200 元才能开通，到火山方舟控制台的「开通管理」里开',
+  'InvalidEndpointOrModel.NotFound': '火山方舟不认识这个模型，或者账号没有开通它',
+  'InvalidEndpointOrModel.ModelIDAccessDisabled': '账号关掉了直接用模型 ID 调用，到火山方舟控制台里打开',
+  ModelAccountRpmRateLimitExceeded: '请求太频繁，请稍后再试',
+  ModelAccountIpmRateLimitExceeded: '生图太频繁，请稍后再试',
+  APIAccountRpmRateLimitExceeded: '请求太频繁，请稍后再试',
+  SetLimitExceeded: '达到了账号里给这个模型设置的用量上限，到火山方舟控制台里调整',
+  InputTextSensitiveContentDetected: '提示词没有通过内容审核',
+  InputImageSensitiveContentDetected: '参考图片没有通过内容审核',
+  'InputImageSensitiveContentDetected.PrivacyInformation': '参考图片里有真人人脸，Seedance 不收',
+  InputVideoSensitiveContentDetected: '参考视频没有通过内容审核',
+  'InputVideoSensitiveContentDetected.PrivacyInformation': '参考视频里有真人人脸，Seedance 不收',
+  InputAudioSensitiveContentDetected: '参考音频没有通过内容审核',
+  OutputVideoSensitiveContentDetected: '生成的视频没有通过内容审核',
+  OutputImageSensitiveContentDetected: '生成的图片没有通过内容审核',
 };
 
 // 这几种错误都发生在连接建立之前，请求还没发出去，重试不会重复下单。
@@ -241,8 +266,8 @@ function applyTaskState(item, data) {
   // OpenRouter 的用量只有一个以美元计的 cost。
   if (data.usage) item.usage = typeof data.usage.cost === 'number' ? { cost_usd: data.usage.cost } : data.usage;
   if (data.completed_at) item.completedAt = data.completed_at * 1000;
-  // 视频的下载地址在 metadata.url，配乐的在 audio[0].url；OpenRouter 的在 unsigned_urls[0]。
-  const resultUrl = data.metadata?.url || data.audio?.[0]?.url || data.unsigned_urls?.[0];
+  // 视频的下载地址在 metadata.url，配乐的在 audio[0].url；OpenRouter 的在 unsigned_urls[0]，火山方舟的在 content.video_url。
+  const resultUrl = data.metadata?.url || data.audio?.[0]?.url || data.unsigned_urls?.[0] || data.content?.video_url;
   if (resultUrl) item.remoteUrl = resultUrl;
   if (item.status === 'completed') {
     item.progress = 100;
@@ -255,8 +280,14 @@ function applyTaskState(item, data) {
       message: (typeof e === 'string' ? e : e?.message) || '视频生成失败',
       code: (typeof e === 'object' && e?.code) || '',
     };
+    // 火山方舟的失败原因是英文的，认得的错误码在前面加一句中文说明。
+    const hint = providerOf(item) === 'ark' && ERROR_HINTS[item.error.code];
+    if (hint) item.error.message = `${hint}（${item.error.message}）`;
   }
 }
+
+// 每个平台提交和查询视频任务的接口路径。
+const VIDEO_TASKS_PATH = { flatkey: '/v1/videos', openrouter: '/v1/videos', ark: '/contents/generations/tasks' };
 
 const polling = new Set();
 const downloading = new Set();
@@ -266,7 +297,7 @@ async function pollTask(item) {
   polling.add(item.id);
   const provider = providerOf(item);
   try {
-    const { data } = await callUpstream('GET', `${isMusic(item) ? '/v1/video-to-music' : '/v1/videos'}/${encodeURIComponent(item.id)}`, { timeoutMs: 20000, provider });
+    const { data } = await callUpstream('GET', `${isMusic(item) ? '/v1/video-to-music' : VIDEO_TASKS_PATH[provider]}/${encodeURIComponent(item.id)}`, { timeoutMs: 20000, provider });
     applyTaskState(item, data);
     item.pollError = null;
   } catch (err) {
@@ -706,10 +737,30 @@ async function openrouterModels() {
   }
 }
 
+// 火山方舟没有能用 API Key 读的模型列表，型号登记在 shared/models.ts。
+// 这里只查一次最近的任务列表，用来确认 Key 能用；列表里有哪些任务不关心。账号有没有开通某个模型，要到提交时才知道。
+async function arkModels() {
+  const imageRatios = {};
+  const imageRefs = {};
+  for (const [id, { refs, sizes }] of Object.entries(ARK_IMAGE_MODELS)) {
+    imageRatios[id] = Object.keys(sizes);
+    imageRefs[id] = refs;
+  }
+  const rest = { imageModels: Object.keys(ARK_IMAGE_MODELS), imageRatios, imageRefs, audio: { speech: false, sfx: false, music: false } };
+  try {
+    await callUpstream('GET', `${VIDEO_TASKS_PATH.ark}?page_num=1&page_size=1`, { timeoutMs: 20000, provider: 'ark' });
+    polishAvailable = POLISH_MODELS.ark;
+    return { models: DEFAULT_MODELS.ark, videoSpecs: ARK_VIDEO_MODELS, polishModels: polishAvailable, ...rest, source: 'remote' };
+  } catch (err) {
+    return { models: DEFAULT_MODELS.ark, videoSpecs: ARK_VIDEO_MODELS, polishModels: [], ...rest, source: 'default', error: err.message, errorCode: err.code };
+  }
+}
+
 // 两类视频模型的请求格式不同：Seedance 用 content 数组，Grok 用 prompt 字符串。其他视频模型还没有接。
 // 账号能用的模型，按用途分好。models 是视频模型（Seedance 排在前面），其余是图片、润色用的文本模型和三种音频能力。
 route('GET', /^\/api\/models$/, async () => {
   if (currentProvider() === 'openrouter') return openrouterModels();
+  if (currentProvider() === 'ark') return arkModels();
   const none = { imageModels: [], polishModels: [], audio: { speech: false, sfx: false, music: false } };
   try {
     const { data } = await callUpstream('GET', '/v1/models', { timeoutMs: 20000 });
@@ -735,6 +786,8 @@ route('GET', /^\/api\/models$/, async () => {
 });
 
 route('GET', /^\/api\/credits$/, async () => {
+  // 火山方舟没有能用 API Key 查余额的接口，余额要到火山引擎控制台的费用中心看。
+  if (currentProvider() === 'ark') return { unavailable: true };
   const { data } = await callUpstream('GET', '/v1/credits', { timeoutMs: 20000 });
   // OpenRouter 给的是充值总额和已用金额，单位是美元。
   if (currentProvider() === 'openrouter') {
@@ -748,6 +801,7 @@ route('POST', /^\/api\/videos$/, async ({ req }) => {
   const { payload, form } = await readJsonBody(req);
   // Flatkey 上 Seedance 的提示词和素材在 content 数组里，Grok 的提示词是 prompt 字符串。
   // OpenRouter 上所有模型都是 prompt 字符串，素材在 frame_images 和 input_references 里，可以只给素材不写提示词。
+  // 火山方舟这边页面发来的也是 OpenRouter 那种格式，发出去之前在这里换成它自己的 content 数组。
   const hasContent = Array.isArray(payload?.content) && payload.content.length > 0;
   const hasPrompt = typeof payload?.prompt === 'string' && payload.prompt.trim() !== '';
   const hasMedia = ['frame_images', 'input_references'].some((field) => Array.isArray(payload?.[field]) && payload[field].length > 0);
@@ -755,7 +809,9 @@ route('POST', /^\/api\/videos$/, async ({ req }) => {
     throw new HttpError(400, 'invalid_request', '请求缺少 model 或 content');
   }
   const provider = currentProvider();
-  const { data } = await callUpstream('POST', '/v1/videos', { json: withLocalImages(payload), provider });
+  if (provider === 'ark' && !Object.hasOwn(ARK_VIDEO_MODELS, payload.model)) throw new HttpError(400, 'invalid_request', `火山方舟上没有 ${payload.model} 这个视频模型`);
+  const request = withLocalImages(payload);
+  const { data } = await callUpstream('POST', VIDEO_TASKS_PATH[provider], { json: provider === 'ark' ? arkVideoRequest(request) : request, provider });
   const id = data?.id || data?.task_id;
   if (!id) throw new HttpError(502, 'bad_upstream_response', `${labelOf(provider)} 没有返回任务 ID`, data);
 
@@ -781,6 +837,24 @@ route('POST', /^\/api\/videos$/, async ({ req }) => {
   saveHistory();
   return historyView(item);
 });
+
+// 把页面发来的视频请求换成火山方舟的格式：提示词和素材都放进 content 数组，每份素材用 role 说明它的用途。
+// 首帧、尾帧的 role 就是页面给的 frame_type（first_frame、last_frame），参考素材按类型是 reference_image、reference_video、reference_audio。
+// 没有指定画面比例时（给了首帧）用 adaptive，由模型跟着图片定。水印默认关着，这里写明。
+function arkVideoRequest(payload) {
+  const content = [];
+  const text = String(payload.prompt || '').trim();
+  if (text) content.push({ type: 'text', text });
+  for (const frame of payload.frame_images || []) content.push({ type: 'image_url', image_url: frame.image_url, role: frame.frame_type });
+  for (const ref of payload.input_references || []) {
+    const kind = ['image', 'video', 'audio'].find((k) => ref?.[`${k}_url`]);
+    if (kind) content.push({ type: `${kind}_url`, [`${kind}_url`]: ref[`${kind}_url`], role: `reference_${kind}` });
+  }
+  const request = { model: payload.model, content, resolution: payload.resolution, ratio: payload.aspect_ratio || 'adaptive', duration: payload.duration, watermark: false };
+  if (typeof payload.generate_audio === 'boolean') request.generate_audio = payload.generate_audio;
+  if (Number.isInteger(payload.seed)) request.seed = payload.seed;
+  return request;
+}
 
 route('GET', /^\/api\/history$/, async () => ({ items: history.map(historyView) }));
 
@@ -817,11 +891,12 @@ route('POST', /^\/api\/images$/, async ({ req }) => {
   const count = Math.min(MAX_IMAGES, Math.max(1, Math.round(Number(payload.n)) || 1));
   const request = { model, prompt, n: count, response_format: 'b64_json' };
   if (payload.aspect_ratio) request.aspect_ratio = String(payload.aspect_ratio);
-  // 参考图（图生图）。只有 OpenRouter 的生图接口收（2026-10-09 用 Grok 实测：本机图片内嵌进请求可以用），每个模型收几张看它的模型列表。
+  // 参考图（图生图）。OpenRouter 的生图接口收（2026-10-09 用 Grok 实测：本机图片内嵌进请求可以用），每个模型收几张看它的模型列表；
+  // 火山方舟的 Seedream 也收，张数登记在 shared/models.ts。Flatkey 的不收。
   const refs = Array.isArray(payload.input_references) ? payload.input_references.filter((entry) => typeof entry?.image_url?.url === 'string') : [];
   if (refs.length) {
-    if (currentProvider() !== 'openrouter') throw new HttpError(400, 'not_on_provider', '参考图生图只在 OpenRouter 上可用');
-    const limit = openrouterImageRefs[model];
+    if (currentProvider() === 'flatkey') throw new HttpError(400, 'not_on_provider', '参考图生图在 Flatkey 上用不了，OpenRouter 和火山方舟可以');
+    const limit = currentProvider() === 'ark' ? ARK_IMAGE_MODELS[model]?.refs : openrouterImageRefs[model];
     if (limit === 0) throw new HttpError(400, 'invalid_request', `${model} 不收参考图`);
     if (limit && refs.length > limit) throw new HttpError(400, 'invalid_request', `${model} 最多收 ${limit} 张参考图`);
     request.input_references = withLocalImages({ input_references: refs }).input_references;
@@ -833,7 +908,7 @@ route('POST', /^\/api\/images$/, async ({ req }) => {
   );
   const provider = currentProvider();
   runDirect(items, async () => {
-    const { images, cost } = provider === 'openrouter' ? await openrouterImages(request) : await flatkeyImages(request);
+    const { images, cost } = await { flatkey: flatkeyImages, openrouter: openrouterImages, ark: arkImages }[provider](request);
     if (!images.length) throw new HttpError(502, 'bad_upstream_response', `${labelOf(provider)} 没有返回图片`);
     // 费用按张平摊。
     const usage = cost ? { cost_usd: cost / images.length } : null;
@@ -844,7 +919,7 @@ route('POST', /^\/api\/images$/, async ({ req }) => {
         item.error = { message: '这一张没有生成出来', code: 'missing_image' };
         return;
       }
-      // 两个平台说明图片格式的字段名字不同；没写格式的按 JPG 存。
+      // 各平台说明图片格式的字段名字不同；没写格式的按 JPG 存（火山方舟的 Seedream 默认出 JPG）。
       const type = image.mime_type || image.media_type;
       const ext = type ? IMAGE_EXT[type] : 'jpg';
       if (!ext) {
@@ -882,11 +957,27 @@ async function openrouterImages({ model, prompt, n, aspect_ratio, input_referenc
   };
 }
 
+// 火山方舟的生图接口（Seedream）。5.0 pro 和 5.0 flash 一次只出一张，所以和 OpenRouter 一样，要几张就发几次、同时进行。
+// 图片大小写成「宽x高」，按画面比例查登记好的像素值；参考图放在 image 数组里，本机的图已经换成内嵌数据。
+// 返回的用量只有张数和 token，没有金额，所以不记费用。
+async function arkImages({ model, prompt, n, aspect_ratio, input_references }) {
+  const spec = ARK_IMAGE_MODELS[model];
+  if (!spec) throw new HttpError(400, 'invalid_request', `火山方舟上没有 ${model} 这个图片模型`);
+  const request = { model, prompt, size: spec.sizes[aspect_ratio] || spec.sizes['1:1'], response_format: 'b64_json', watermark: false };
+  if (input_references) request.image = input_references.map((ref) => ref.image_url.url);
+  const results = await Promise.allSettled(Array.from({ length: n }, () => callUpstream('POST', '/images/generations', { json: request, timeoutMs: 5 * 60 * 1000, provider: 'ark' })));
+  const done = results.filter((r) => r.status === 'fulfilled').map((r) => r.value.data);
+  if (!done.length) throw results[0].reason;
+  return { images: done.flatMap((data) => listOf(data).filter((image) => image?.b64_json)), cost: 0 };
+}
+
 // ---------- 音频 ----------
 
 let voices = null;
 
 route('GET', /^\/api\/voices$/, async () => {
+  // 火山方舟这条线还没有接语音。
+  if (currentProvider() === 'ark') return { items: [] };
   // OpenRouter 上音色只有一串名字，写在模型列表里，没有试听，也没有性别和语言。
   if (!voices && currentProvider() === 'openrouter') {
     const { data } = await callUpstream('GET', '/v1/models?output_modalities=speech', { timeoutMs: 20000 });
@@ -916,6 +1007,7 @@ route('POST', /^\/api\/audio\/speech$/, async ({ req }) => {
   if (!/^[\w-]+$/.test(voiceId || '')) throw new HttpError(400, 'invalid_request', '请选择音色');
   requireKey();
   const provider = currentProvider();
+  if (provider === 'ark') throw new HttpError(400, 'not_on_provider', '火山方舟这条线还没有接语音，可以在「设置」里切换到别的平台');
   const item = newItem({
     id: newId('aud'),
     kind: 'audio',
@@ -1240,6 +1332,14 @@ route('POST', /^\/api\/polish$/, async ({ req }) => {
   return askTextModel(model, [{ role: 'system', content: guide }, { role: 'user', content: draft }], 1200);
 });
 
+const CHAT_PATH = { ark: '/chat/completions' };
+// 豆包的文本模型默认会先深度思考再回答，润色用不上，还会把限定的输出长度占掉，所以在火山方舟上关掉。
+function chatRequest(model, messages, maxTokens) {
+  const request = { model, max_tokens: maxTokens, messages };
+  if (currentProvider() === 'ark') request.thinking = { type: 'disabled' };
+  return request;
+}
+
 // 问文本模型要一段文字。选中的模型不行就按上面说的顺序换下一个，返回文字和实际用的模型。
 async function askTextModel(model, messages, maxTokens) {
   const known = POLISH_MODELS[currentProvider()];
@@ -1250,7 +1350,7 @@ async function askTextModel(model, messages, maxTokens) {
   let lastError;
   for (const candidate of candidates.length ? candidates : [model, ...others]) {
     try {
-      const { data } = await callUpstream('POST', '/v1/chat/completions', { json: { model: candidate, max_tokens: maxTokens, messages }, timeoutMs: 90000 });
+      const { data } = await callUpstream('POST', CHAT_PATH[currentProvider()] || '/v1/chat/completions', { json: chatRequest(candidate, messages, maxTokens), timeoutMs: 90000 });
       const text = String(data?.choices?.[0]?.message?.content || '').trim();
       if (!text) throw new HttpError(502, 'bad_upstream_response', '模型没有返回内容', data);
       polishFailedAt.delete(candidate);

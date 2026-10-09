@@ -15,7 +15,7 @@ import { applyTemplate, saveCurrent } from '../templates.tsx';
 import type { Kind, Ref, VideoForm } from '../types.ts';
 import {
   composer, RESOLUTIONS, RATIOS, SR_RESOLUTIONS,
-  typeOf, draftPrompt, isGrok, isOpenRouter, traits, availableTypes, capabilities, imageRatios, imageRefLimit, usedAssetIds, refStatus, currentRequest,
+  typeOf, draftPrompt, isGrok, specDriven, traits, availableTypes, capabilities, imageRatios, imageRefLimit, usedAssetIds, refStatus, currentRequest,
   update, setMode, swapFrames, updateSr, updateStudio, setType, typePrompt, polish, undoPolish, submit, registerPrompt,
   voiceName, voiceNote, togglePreview, setVoiceFilter, pickVoice, stopPreview, useCharacter,
 } from './state.ts';
@@ -148,12 +148,12 @@ function MediaBlock() {
     const setList = (kind: Kind, next: Ref[]) => update({ refs: { ...composer.form.refs, [kind]: next } });
     // 三种素材共用一个「+」，不用先选类型：上传的、选中的是什么就放进哪一类。
     // OpenRouter 上只有图片能加：它的参考视频和音频只收公网链接，本机的文件发不过去，而这里不提供填链接。
-    const addable = isOpenRouter() ? allowed.filter((kind) => kind === 'image') : allowed;
+    const addable = specDriven() ? allowed.filter((kind) => kind === 'image') : allowed;
     const addRef = () =>
       openAssetPicker({
         limits: Object.fromEntries(addable.map((kind) => [kind, KINDS[kind].max - form.refs[kind].length])),
         usedIds: usedAssetIds(),
-        local: isOpenRouter(),
+        local: specDriven(),
         onPick: (ref) => setList(ref.kind, [...composer.form.refs[ref.kind], ref].slice(0, KINDS[ref.kind].max)),
       });
     const full = addable.every((kind) => form.refs[kind].length >= KINDS[kind].max);
@@ -337,7 +337,7 @@ function FramePanel() {
   const { form } = composer;
   const { resolutions: allowed, ratios } = capabilities();
   // Flatkey 的模型固定列三档，不支持的那档变灰；OpenRouter 各模型的档位差别大（768p、2K、4K），直接列它支持的。
-  const resolutions = isOpenRouter() ? allowed : RESOLUTIONS;
+  const resolutions = specDriven() ? allowed : RESOLUTIONS;
   return (
     <>
       <div className="popover-title">画面比例</div>
@@ -353,8 +353,8 @@ function FramePanel() {
       </div>
       <div className="popover-title">分辨率</div>
       <Segmented options={resolutions.map((r) => ({ value: r, label: r, disabled: !allowed.includes(r) }))} value={form.resolution} onChange={(resolution) => update({ resolution })} />
-      {!isOpenRouter() && allowed.length < RESOLUTIONS.length && <div className="small muted">{form.model} 不支持 1080p</div>}
-      {(isGrok() || isOpenRouter()) && form.mode === 'frames' && <div className="small muted">有首帧时，画面比例跟着首帧走</div>}
+      {!specDriven() && allowed.length < RESOLUTIONS.length && <div className="small muted">{form.model} 不支持 1080p</div>}
+      {(isGrok() || specDriven()) && form.mode === 'frames' && <div className="small muted">有首帧时，画面比例跟着首帧走</div>}
     </>
   );
 }

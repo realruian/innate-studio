@@ -6,7 +6,7 @@ import { exclusive } from '../playback.ts';
 import { refFromAsset, refFromRecord, assetFromRecord, readVideo } from '../media.ts';
 import { toast } from '../ui/layers.tsx';
 import { buildRequest as buildVideoRequest, buildOpenRouterRequest, buildImageRequest, buildSpeechRequest, buildSfxRequest, buildMusicRequest, refsInUse, carryRefs, videoFamily, RES_RANK } from '../request.ts';
-import { ALL_RESOLUTIONS, VIDEO_TASKS, videoCapabilities, videoFamilyOf, type VideoCapabilities, type VideoSpec, type VideoTask } from '../../../shared/models.ts';
+import { ALL_RESOLUTIONS, PROVIDERS, VIDEO_TASKS, videoCapabilities, videoFamilyOf, type VideoCapabilities, type VideoSpec, type VideoTask } from '../../../shared/models.ts';
 import type { Asset, BuiltRequest, Character, CreateType, HistoryItem, Kind, Ref, RefStatus, SkillRef, Studio, VideoForm, Voice } from '../types.ts';
 
 // 视频的表单单独存一份（生成记录里存的也是它）；当前选的类型和其余几种的表单存在另一份里。
@@ -136,16 +136,19 @@ function persist() {
 // 当前平台上能做哪几种内容。视频两个平台都有，其余看平台。
 export const availableTypes = () => TYPES.filter((t) => t.value === 'video' || state.app.features[t.value]);
 
-export const isOpenRouter = () => state.app.provider === 'openrouter';
+// OpenRouter 和火山方舟在页面上是同一种做法：模型支持什么由本地服务给一份清单（videoSpecs），请求是同一种格式，
+// 图片直接用本机的文件，参考视频和音频只能用公网链接。Flatkey 是另一种：型号登记在 shared/models.ts，素材走它的素材库。
+export const specDriven = () => state.app.provider !== 'flatkey';
+export const platformLabel = () => PROVIDERS[state.app.provider].label;
 // Flatkey 上的 Grok 只有文生视频和图生视频，也没有 Seedance「更多」里的那些设置。
-export const isGrok = (model = composer.form.model) => !isOpenRouter() && videoFamily(model) === 'grok';
+export const isGrok = (model = composer.form.model) => !specDriven() && videoFamily(model) === 'grok';
 
 // OpenRouter 的模型支持什么，是从它的模型列表里读来的。列表还没读到时先按这一份保守的来。
 const FALLBACK_SPEC: VideoSpec = { resolutions: ['480p', '720p'], ratios: ['16:9', '4:3', '1:1', '3:4', '9:16'], durations: [4, 5, 6, 7, 8], autoDuration: false, frames: ['first_frame'], audio: false, seed: false };
 export const specOf = (model: string) => state.videoSpecs[model] || FALLBACK_SPEC;
 
 // 当前模型能选的分辨率、比例、时长。Flatkey 的模型登记在 shared/models.ts，OpenRouter 的来自它的模型列表。
-export const capabilities = (model = composer.form.model): VideoCapabilities => (isOpenRouter() ? specOf(model) : videoCapabilities(model));
+export const capabilities = (model = composer.form.model): VideoCapabilities => (specDriven() ? specOf(model) : videoCapabilities(model));
 
 // 当前平台和模型下，输入框该露出哪些东西。
 export interface Traits {
@@ -163,7 +166,7 @@ export interface Traits {
 }
 
 export function traits(model = composer.form.model): Traits {
-  if (isOpenRouter()) {
+  if (specDriven()) {
     const spec = specOf(model);
     // 参考图所有模型都收；参考视频和音频只有 Seedance 2 代以上认（OpenRouter 的接口文档里写的）。
     const refKinds: Kind[] = videoFamilyOf(model) === 'seedance' ? ['image', 'video', 'audio'] : ['image'];
@@ -190,7 +193,7 @@ export function currentRequest(prompt?: string): BuiltRequest {
   if (studio.type === 'sfx') return buildSfxRequest(studio.sfx);
   if (studio.type === 'music') return buildMusicRequest(studio.music);
   const form = prompt === undefined ? composer.form : { ...composer.form, prompt };
-  if (isOpenRouter()) return buildOpenRouterRequest(form, specOf(form.model));
+  if (specDriven()) return buildOpenRouterRequest(form, specOf(form.model), platformLabel());
   return buildVideoRequest(form, refStatus);
 }
 
@@ -292,7 +295,7 @@ export function imageRatios(model = composer.studio.image.model) {
   return accepted ? IMAGE_RATIOS.filter((r) => accepted.includes(r)) : IMAGE_RATIOS;
 }
 // 这个图片模型最多收几张参考图（图生图）。只有 OpenRouter 上有，数字来自它的模型列表；0 是不能带参考图。
-export const imageRefLimit = (model = composer.studio.image.model) => (isOpenRouter() ? state.catalog.imageRefs[model] || 0 : 0);
+export const imageRefLimit = (model = composer.studio.image.model) => (specDriven() ? state.catalog.imageRefs[model] || 0 : 0);
 // 换了图片模型后，选着的比例它不收就换成它收的第一个；参考图超出它收的张数，多的去掉。
 function fitImage() {
   const { image } = composer.studio;
@@ -341,7 +344,7 @@ export function setStudio(type: 'image' | 'speech' | 'sfx' | 'music', next: Reco
 // 想让视频严格从这张图开始，再手动改成首尾帧。Seedance 只认素材库，所以先把图传上去。
 // Grok：它只有「图生视频」一种用法，就是把图当首帧，直接用本机的文件。
 export async function useImageForVideo(item: HistoryItem) {
-  if (isOpenRouter()) {
+  if (specDriven()) {
     // OpenRouter 直接用本机的文件当参考图。
     Object.assign(composer.form, { mode: 'reference', refs: { image: [await refFromRecord(item)], video: [], audio: [] } });
   } else if (isGrok()) {
@@ -369,14 +372,14 @@ export function useCharacter(character: Character, type: 'image' | 'video') {
   const merged = (current: Ref[]) => [...current, ...refs.filter((ref) => !current.some((r) => r.url === ref.url))];
   if (type === 'image') {
     const model = [studio.image.model, ...state.catalog.image].find((id) => imageRefLimit(id) > 0);
-    if (!model) throw new Error(isOpenRouter() ? '账号里没有能带参考图的图片模型' : '带参考图生成图片只在 OpenRouter 上可用');
+    if (!model) throw new Error(specDriven() ? '账号里没有能带参考图的图片模型' : '带参考图生成图片在 Flatkey 上用不了，换到 OpenRouter 或火山方舟');
     Object.assign(studio.image, { model, refs: merged(studio.image.refs || []).slice(0, imageRefLimit(model)) });
     if (!studio.image.prompt.trim()) studio.image.prompt = character.description;
     fitImage();
   } else {
-    if (isOpenRouter()) Object.assign(form, { mode: 'reference', refs: { ...form.refs, image: merged(form.refs.image).slice(0, KINDS.image.max) } });
+    if (specDriven()) Object.assign(form, { mode: 'reference', refs: { ...form.refs, image: merged(form.refs.image).slice(0, KINDS.image.max) } });
     else if (isGrok()) Object.assign(form, { mode: 'frames', frames: { first: refs[0], last: null } });
-    else throw new Error('Flatkey 上的 Seedance 只认素材库里的素材，角色的图用不了。换到 OpenRouter，或者换成 Grok 的视频模型');
+    else throw new Error('Flatkey 上的 Seedance 只认素材库里的素材，角色的图用不了。换到 OpenRouter 或火山方舟，或者换成 Grok 的视频模型');
     if (!form.prompt.trim()) form.prompt = character.description;
     fitModel();
   }
@@ -389,7 +392,7 @@ export function useCharacter(character: Character, type: 'image' | 'video') {
 const sourceAssets = new Map<string, Asset>();
 export async function useVideoAsSource(item: HistoryItem, task: VideoTask) {
   // OpenRouter 的参考视频只收公网链接，本机的视频发不过去（2026-10-09 实测），所以这两件事只在 Flatkey 上做。
-  if (isOpenRouter()) throw new Error('延长和编辑只在 Flatkey 上可用');
+  if (specDriven()) throw new Error('延长和编辑只在 Flatkey 上可用');
   // 只有 Seedance 能做。当前选的不是，就换成账号里的第一个 Seedance 型号。
   const model = [composer.form.model, item.model, ...state.models].find((id) => videoFamilyOf(id) === 'seedance' && state.models.includes(id));
   if (!model) throw new Error('账号里没有 Seedance 模型，延长和编辑用不了');
@@ -614,7 +617,7 @@ export function initComposer() {
     const info = state.modelsInfo;
     // 选着的型号不在列表里就换成第一个。列表没读到时一般先留着不动，但留着的是另一个平台的型号（带不带厂商前缀对不上）时也要换。
     const model = composer.form.model;
-    if (!state.models.includes(model) && state.models.length && (info.source === 'remote' || model.includes('/') !== isOpenRouter())) composer.form.model = state.models[0];
+    if (!state.models.includes(model) && state.models.length && (info.source === 'remote' || model.includes('/') !== specDriven())) composer.form.model = state.models[0];
     // 同一个型号在两个平台上支持的东西也不一样，所以每次都重新对一遍。
     fitModel();
     persist();
