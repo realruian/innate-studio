@@ -625,10 +625,42 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 @media (hover: hover) { .project-media:hover .project-more { opacity: 1; } }
 @media (hover: none) { .project-more { opacity: 1; } }
 
-/* 角色库和模板的列表沿用项目卡片。角色的封面是人像，用竖的画框，卡片也窄一些 */
+/* 角色库的列表沿用项目卡片。角色的封面是人像，用竖的画框，卡片也窄一些 */
 .character-grid { grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); }
 .character-grid .project-cover { aspect-ratio: 3 / 4; }
 .character-images { flex-wrap: wrap; }
+
+/* ---------- 技能 ---------- */
+/* 输入框里选着的技能：提示词上面的一个小标签 */
+.skill-chip-row { display: flex; padding: var(--sp-16) var(--sp-20) 0; }
+.skill-chip { display: inline-flex; align-items: center; gap: var(--sp-4); max-width: 100%; height: var(--h-sm); padding: 0 var(--sp-4) 0 var(--sp-8); border-radius: var(--r-xs); background: var(--hover); color: var(--text-2); font-size: var(--text-ui); }
+.skill-chip > button { display: grid; place-items: center; flex: none; width: var(--sp-20); height: var(--sp-20); padding: 0; border: 0; border-radius: var(--r-xs); background: none; color: var(--text-3); cursor: pointer; }
+@media (hover: hover) { .skill-chip > button:hover { color: var(--text); } }
+.media-block:not([hidden]) + .skill-chip-row { padding-top: var(--sp-8); }
+.entry-action-btn.active { color: var(--text); }
+/* 技能面板：上面搜索，中间是技能，下面两个入口。一行技能是图标、名字加标记、一行说明，选中的那行右边打勾 */
+.skill-popover { width: 440px; padding: var(--sp-8); }
+.skill-search { display: flex; align-items: center; gap: var(--sp-8); height: var(--h-md); padding: 0 var(--sp-12); border-bottom: 1px solid var(--border); color: var(--text-3); }
+.skill-search > input { flex: 1; min-width: 0; border: 0; outline: 0; background: none; color: var(--text); font-size: var(--text-ui); }
+.skill-search > input::placeholder { color: var(--text-3); }
+.skill-list { display: flex; flex-direction: column; gap: var(--sp-2); max-height: 320px; padding: var(--sp-8) 0; overflow-y: auto; overscroll-behavior: contain; }
+.skill-item { display: flex; align-items: flex-start; gap: var(--sp-12); flex: none; width: 100%; min-width: 0; padding: var(--sp-8) var(--sp-12); border: 0; border-radius: var(--r-sm); background: none; color: var(--text); text-align: left; cursor: pointer; transition: background-color 120ms var(--ease); }
+.skill-item > .icon { flex: none; margin-top: var(--sp-2); color: var(--text-2); }
+.skill-item.selected, .skill-item:focus-visible { background: var(--hover); outline: 0; }
+@media (hover: hover) { .skill-item:hover { background: var(--hover); } }
+.skill-text { display: flex; flex-direction: column; gap: var(--sp-2); flex: 1; min-width: 0; }
+.skill-name { display: flex; align-items: center; gap: var(--sp-8); min-width: 0; font-size: var(--text-body); font-weight: var(--fw-medium); }
+.skill-desc { color: var(--text-3); font-size: var(--text-ui); }
+.skill-check { display: grid; place-items: center; flex: none; width: var(--sp-20); height: var(--sp-20); }
+.skill-foot { display: flex; flex-direction: column; gap: var(--sp-2); padding-top: var(--sp-8); border-top: 1px solid var(--border); }
+.skill-action { display: flex; align-items: center; gap: var(--sp-12); height: var(--h-md); padding: 0 var(--sp-12); border: 0; border-radius: var(--r-sm); background: none; color: var(--text); font-size: var(--text-ui); text-align: left; cursor: pointer; transition: background-color 120ms var(--ease); }
+.skill-action:focus-visible { background: var(--hover); outline: 0; }
+@media (hover: hover) { .skill-action:hover { background: var(--hover); } }
+/* 「技能」页：一个技能一行，和面板里是同一种写法，外面多一圈边 */
+.skill-page-list { display: flex; flex-direction: column; gap: var(--sp-8); }
+.skill-card { display: flex; align-items: center; gap: var(--sp-4); padding: var(--sp-4); border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-1); }
+.skill-card > .skill-item { flex: 1; }
+.skill-rules { resize: vertical; line-height: var(--lh-body); }
 
 /* 进了一张画布：侧栏收起，整个窗口都是画布。画布自己管平移和缩放，这一页不滚动，也不用给滚动条留位置 */
 #app:has(> .sidebar[hidden]) { grid-template-columns: minmax(0, 1fr); }
@@ -657,20 +689,29 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 /* 小地图点开才显示，叠在左下角那一条的上面 */
 .canvas .react-flow__minimap { overflow: hidden; margin-bottom: var(--sp-64); border: 1px solid var(--border-float); border-radius: var(--r-sm); }
 .canvas .react-flow__attribution a { color: var(--text-4); }
-/* 连接点：节点左右两侧各一个带加号的小圆，鼠标移到节点上、选中节点或者正在拉线时才出现 */
-/* 加号在屏幕上大小不变、离框边的距离不变、正对框的中线。React Flow 自带的定位是用 transform 往回挪半个身位，那段偏移会被 scale 一起放大缩小，位置就跟着缩放漂；这里把它关掉，直接算出左上角。框的中线在整个节点的中线下面 12（上面那行名字占 24）。 */
-.canvas .react-flow__handle.cnode-port { display: grid; place-items: center; width: 22px; height: 22px; top: calc(50% + 1px); transform: none; scale: var(--inv, 1); border: 1px solid var(--text-off); background: var(--bg); color: var(--text-3); opacity: 0; transition: opacity 120ms var(--ease), border-color 120ms var(--ease), color 120ms var(--ease), background-color 120ms var(--ease); }
-/* 加号在屏幕上大小不变，离框的距离也按屏幕上的 22 像素算 */
-.canvas .react-flow__handle-left.cnode-port { left: calc(-22px * var(--inv, 1) - 11px); }
-.canvas .react-flow__handle-right.cnode-port { right: calc(-22px * var(--inv, 1) - 11px); }
-.cnode-port > .icon { pointer-events: none; }
-.cnode.selected .cnode-port, .canvas:has(.react-flow__connectionline) .cnode-port { opacity: 1; }
-@media (hover: hover) { .react-flow__node:hover .cnode-port { opacity: 1; } .canvas .cnode-port:hover { border-color: var(--text); color: var(--text); } }
-@media (hover: none) { .canvas .cnode-port { opacity: 1; } }
-.canvas .react-flow__handle.cnode-port.connectingto, .canvas .react-flow__handle.cnode-port.valid { border-color: var(--text); background: var(--text); color: var(--bg); opacity: 1; }
+/* 连接点：框的左右两边各一块看不见的感应区（屏幕上 52 见方，贴着框边，正对框的中线），里面一个 14 像素的小加号。
+   感应区一直在，在里面任何地方按下都能拉线；加号平时藏着，鼠标移到节点上、选中节点或者进了感应区才出现。
+   鼠标进了感应区，加号吸到鼠标的位置并放大一点（位置由脚本写在加号上）。正在拉线的时候所有加号都藏起来。
+   感应区和加号在屏幕上大小不变：以贴着框的那条边为准把画布的缩放抵消掉。框的中线在整个节点的中线下面 12（上面那行名字占 24）。 */
+.canvas .react-flow__handle.cnode-port { top: calc(50% - 14px); width: 52px; height: 52px; min-width: 0; min-height: 0; border: 0; border-radius: 0; background: none; transform: none; scale: var(--inv, 1); cursor: crosshair; }
+.canvas .react-flow__handle-left.cnode-port { left: -52px; transform-origin: right center; }
+.canvas .react-flow__handle-right.cnode-port { right: -52px; transform-origin: left center; }
+.cnode-plus { position: absolute; top: 26px; display: grid; place-items: center; width: 14px; height: 14px; border: 1px solid var(--text-3); border-radius: 50%; background: var(--bg); color: var(--text-2); translate: -50% -50%; opacity: 0; pointer-events: none; transition: opacity 120ms var(--ease), scale 160ms var(--ease-out), left 90ms var(--ease-out), top 90ms var(--ease-out), border-color 120ms var(--ease), color 120ms var(--ease); }
+.react-flow__handle-left > .cnode-plus { left: 42px; }
+.react-flow__handle-right > .cnode-plus { left: 10px; }
+.cnode.selected .cnode-plus { opacity: 1; }
+@media (hover: hover) {
+  .react-flow__node:hover .cnode-plus { opacity: 1; }
+  .cnode-port:hover > .cnode-plus { scale: 1.15; border-color: var(--text); color: var(--text); }
+}
+@media (hover: none) { .cnode-plus { opacity: 1; } }
+.canvas:has(.react-flow__connectionline) .cnode-plus { opacity: 0; }
 
 /* 左上角：返回项目列表，后面是项目的名字，直接点上去改 */
-.canvas-title { display: flex; align-items: center; gap: var(--sp-2); }
+/* 浮在画布上的几块离窗口边都是 16。左边这三块（项目名、工具栏、底栏）的第一个图标在同一条竖线上：都是 1 像素的边、4 的内边距、36 宽的按钮 */
+.canvas .react-flow__panel { margin: var(--sp-16); }
+.canvas-title { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-4); border: 1px solid transparent; }
+.canvas-title > .icon-btn:first-child { width: 36px; height: 36px; }
 .canvas-name { width: auto; min-width: 72px; max-width: 280px; field-sizing: content; height: var(--h-md); padding: 0 var(--sp-8); border: 1px solid transparent; border-radius: var(--r-sm); background: none; color: var(--text); font-size: var(--text-body); font-weight: var(--fw-medium); outline: 0; text-overflow: ellipsis; transition: border-color 120ms var(--ease), background-color 120ms var(--ease); }
 @media (hover: hover) { .canvas-name:hover { background: var(--hover); } }
 .canvas-name:focus { border-color: var(--border-hover); background: var(--surface-1); }
@@ -695,7 +736,7 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 .canvas-tools-split { width: var(--sp-16); height: 1px; margin: var(--sp-4) 0; background: var(--border-strong); }
 /* 左下角：撤销、重做、小地图、缩放比例 */
 .canvas-foot .icon-btn, .canvas-zoom { height: var(--h-sm); border-radius: var(--r-xs); }
-.canvas-foot .icon-btn { width: var(--h-sm); }
+.canvas-foot .icon-btn { width: 36px; }
 .icon-btn.active { background: var(--hover); color: var(--text); }
 .icon-btn:disabled { opacity: 0.4; cursor: default; background: none; color: var(--text-2); }
 .canvas-zoom { min-width: 52px; padding: 0 var(--sp-8); border: 0; background: none; color: var(--text-2); font-size: var(--text-caption); font-variant-numeric: tabular-nums; cursor: pointer; transition: background-color 120ms var(--ease), color 120ms var(--ease); }
@@ -801,7 +842,7 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 .cnode { position: relative; display: flex; flex-direction: column; gap: var(--sp-8); }
 /* 名字那一行在屏幕上大小不变：以左下角为准把画布的缩放抵消掉。它占的位置固定是 16 高加 8 的空隙（TITLE_ROOM），实际离框 12 像素（屏幕上）。
    宽度先乘上缩放，抵消之后正好和框一样宽，右端的操作才对得齐框的右边。 */
-.cnode-title { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-8); width: calc(100% * var(--zoom, 1)); height: var(--sp-16); padding: 0 var(--sp-2); color: var(--text-3); font-size: var(--text-ui); line-height: var(--lh-snug); white-space: nowrap; cursor: grab; transform-origin: left bottom; scale: var(--inv, 1); translate: 0 calc(var(--sp-8) - var(--sp-12) * var(--inv, 1)); }
+.cnode-title { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-8); width: calc(100% * var(--zoom, 1)); height: var(--sp-16); padding: 0; color: var(--text-3); font-size: var(--text-ui); line-height: var(--lh-snug); white-space: nowrap; cursor: grab; transform-origin: left bottom; scale: var(--inv, 1); translate: 0 calc(var(--sp-8) - var(--sp-12) * var(--inv, 1)); }
 .cnode-name { display: flex; align-items: center; gap: var(--sp-4); min-width: 0; }
 .cnode-acts { display: flex; align-items: center; gap: var(--sp-2); flex: none; cursor: default; animation: fade 160ms var(--ease-out); }
 .cnode-box { display: grid; height: 240px; overflow: hidden; background: var(--surface-1); border-radius: var(--r-lg); box-shadow: 0 0 0 1px var(--border); outline: var(--ring, 1.5px) solid transparent; outline-offset: var(--ring-gap, 3px); }
@@ -873,9 +914,9 @@ button.cnode-ref[aria-expanded='true'] { border-color: var(--text-3); }
 .clink-beam-head { stop-color: var(--accent); }
 @media (prefers-reduced-motion: reduce) { .clink-beam { display: none; } }
 .canvas .react-flow__edge.selected .react-flow__edge-path.clink { stroke: var(--text); }
-/* 正在拉的那条线是流动的虚线 */
-.canvas .react-flow__connection-path { stroke-dasharray: 5 5; animation: clink-flow 480ms linear infinite; }
-@keyframes clink-flow { to { stroke-dashoffset: -10; } }
+/* 正在拉的那条线：一条细实线，带一层淡淡的光晕。松在空白处之后它留在原地（变回普通的灰线），等菜单选完或者关掉才收 */
+.canvas .react-flow__connection-path { stroke: var(--accent); stroke-width: 1.5; filter: drop-shadow(0 0 4px color-mix(in srgb, var(--accent) 70%, transparent)); }
+.canvas-loose { fill: none; stroke: var(--text-off); stroke-width: 1; vector-effect: non-scaling-stroke; }
 
 /* ---------- 画布上的动效 ---------- */
 /* 节点出现：从略小、略透明长出来。输入面板从下面浮上来，操作条从上面落下来 */
@@ -886,9 +927,7 @@ button.cnode-ref[aria-expanded='true'] { border-color: var(--text-3); }
 /* 拖着节点走的时候它浮起来一点 */
 .cnode-box { position: relative; transition: outline-color 120ms var(--ease), translate 200ms var(--ease-out), box-shadow 200ms var(--ease-out), opacity 160ms var(--ease); }
 .react-flow__node.dragging .cnode-box { box-shadow: var(--shadow-lift); }
-/* 拉线的时候：接不住这条线的节点暗下去；线拖到接得住的节点上，那个节点浮起来、边线变亮，松手就连上 */
-.cnode.is-dimmed .cnode-box, .cnode.is-dimmed .cnode-title { opacity: 0.4; }
-.cnode-title { transition: opacity 160ms var(--ease); }
+/* 拉线的时候：线拖到接得住的节点上，那个节点浮起来、套上选中时的那圈线，松手就连上 */
 /* 落点盖住整个框，看不见，只在拉线时才有 */
 .canvas .react-flow__handle.cnode-drop { top: auto; bottom: 0; left: 0; right: auto; width: 100%; height: 240px; min-width: 0; min-height: 0; border: 0; border-radius: var(--r-lg); background: none; transform: none; opacity: 0; }
 .cnode:has(.cnode-drop.valid) .cnode-box { translate: 0 -6px; outline-color: var(--text-2); box-shadow: var(--shadow-lift); }
@@ -898,9 +937,6 @@ button.cnode-ref[aria-expanded='true'] { border-color: var(--text-3); }
 /* 正在生成：框上扫过一道淡淡的光 */
 .cnode-box:has(.spinner)::after { content: ""; position: absolute; inset: 0; background: linear-gradient(100deg, transparent 30%, color-mix(in srgb, var(--text) 7%, transparent) 50%, transparent 70%); background-size: 220% 100%; animation: cnode-sheen 1.6s linear infinite; pointer-events: none; }
 @keyframes cnode-sheen { from { background-position: 120% 0; } to { background-position: -100% 0; } }
-/* 加号：指上去放大一点 */
-.canvas .react-flow__handle.cnode-port { transition: opacity 120ms var(--ease), scale 160ms var(--ease-out), border-color 120ms var(--ease), color 120ms var(--ease), background-color 120ms var(--ease); }
-@media (hover: hover) { .canvas .cnode-port:hover { scale: calc(var(--inv, 1) * 1.18); } }
 
 /* ---------- 窄屏 ---------- */
 

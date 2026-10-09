@@ -3,7 +3,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { Icon } from './Icon.tsx';
+import { Icon, type IconName } from './Icon.tsx';
 import { enter, leave } from './motion.ts';
 
 // 一个能被订阅的列表：打开、关闭就是往里加、往外拿。
@@ -330,6 +330,8 @@ function PopoverHost() {
 export interface MenuItem {
   value: string;
   label: string;
+  // 文字前面的图标。
+  icon?: IconName;
   note?: string;
   disabled?: boolean;
   selected?: boolean;
@@ -339,6 +341,8 @@ export interface MenuItem {
 
 interface MenuOptions {
   label: string;
+  // 一组动作的菜单默认不显示标题；给了这个就在最上面显示一行。
+  heading?: string;
   items: MenuItem[];
   onSelect: (value: string) => void;
   onClose?: () => void;
@@ -347,12 +351,12 @@ interface MenuOptions {
 
 // 下拉菜单。两种用法：选一个值（每项带 selected，当前项打勾，顶部显示标题），
 // 或者一组动作（各项都不带 selected，不显示标题和打勾的位置）。
-export function openMenu(anchor: HTMLElement, { label, items, onSelect, onClose, align }: MenuOptions): LayerHandle | null {
+export function openMenu(anchor: HTMLElement, { label, heading, items, onSelect, onClose, align }: MenuOptions): LayerHandle | null {
   const picking = items.some((item) => 'selected' in item);
   const layer = openPopover(
     anchor,
     <>
-      {picking && label && <div className="menu-title">{label}</div>}
+      {(heading || (picking && label)) && <div className="menu-title">{heading || label}</div>}
       <div className="menu-list" role={picking ? 'listbox' : 'menu'} aria-label={label}>
         {items.map((item) => (
           <button
@@ -368,6 +372,7 @@ export function openMenu(anchor: HTMLElement, { label, items, onSelect, onClose,
               if (!item.selected) onSelect(item.value);
             }}
           >
+            {item.icon && <Icon name={item.icon} size={16} />}
             <span className="menu-item-label">{item.label}</span>
             {item.note && <span className="menu-item-note">{item.note}</span>}
             {picking && <span className="menu-item-check">{item.selected && <Icon name="check" size={14} />}</span>}

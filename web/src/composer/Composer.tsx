@@ -2,7 +2,7 @@
 // 状态和动作在 state.ts。
 
 import { useEffect, useLayoutEffect, useRef, type ReactNode } from 'react';
-import { state, useStore, KINDS, polishModel, goTo, loadCharacters, loadTemplates } from '../store.ts';
+import { state, useStore, KINDS, polishModel, goTo, loadCharacters } from '../store.ts';
 import { RES_RANK } from '../request.ts';
 import { modelNote, referenceModeLabel } from '../../../shared/models.ts';
 import { Icon, type IconName } from '../ui/Icon.tsx';
@@ -11,13 +11,13 @@ import { openPopover, openMenu, toast } from '../ui/layers.tsx';
 import { enter, enterEach, reducedMotion, useOnChange, EASE_OUT } from '../ui/motion.ts';
 import { Thumb, openAssetPicker } from '../assets.tsx';
 import { openSettings } from '../settings.tsx';
-import { applyTemplate, saveCurrent } from '../templates.tsx';
+import { SkillPanel } from '../skills.tsx';
 import type { Kind, Ref, VideoForm } from '../types.ts';
 import {
   composer, RESOLUTIONS, RATIOS, SR_RESOLUTIONS,
   typeOf, draftPrompt, isGrok, specDriven, traits, availableTypes, capabilities, imageRatios, imageRefLimit, usedAssetIds, refStatus, currentRequest,
   update, setMode, swapFrames, updateSr, updateStudio, setType, typePrompt, polish, undoPolish, submit, registerPrompt,
-  voiceName, voiceNote, togglePreview, setVoiceFilter, pickVoice, stopPreview, useCharacter,
+  voiceName, voiceNote, togglePreview, setVoiceFilter, pickVoice, stopPreview, useCharacter, activeSkill, setSkill,
 } from './state.ts';
 
 const SR_SCENES = [
@@ -520,9 +520,8 @@ function VoicePanel({ close }: { close: () => void }) {
 }
 
 // 右下角：润色（有提示词的类型才有）和发送键。发送键不能提交时变淡，鼠标停上去或点一下都会说明原因。
-// 输入框右下角的「角色」和「模板」：点开是一张清单，选中就带进输入框。清单每次点开时现读，在别的页面刚存的也在里面。
+// 输入框右下角的「角色」：点开是一张清单，选中就把这个角色的参考图带进输入框。清单每次点开时现读，在别的页面刚存的也在里面。
 const MANAGE = '__manage';
-const SAVE = '__save';
 
 async function pickCharacter(button: HTMLElement, type: 'image' | 'video') {
   const list = await loadCharacters().catch(() => []);
@@ -544,25 +543,6 @@ async function pickCharacter(button: HTMLElement, type: 'image' | 'video') {
   });
 }
 
-async function pickTemplate(button: HTMLElement) {
-  const list = await loadTemplates().catch(() => []);
-  openMenu(button, {
-    label: '模板',
-    align: 'end',
-    items: [
-      ...list.map((t) => ({ value: t.id, label: t.name, note: typeOf(t.type).label })),
-      ...(composer.studio.type === 'music' ? [] : [{ value: SAVE, label: '把当前内容存为模板' }]),
-      ...(list.length ? [{ value: MANAGE, label: '管理模板' }] : []),
-    ],
-    onSelect: (value) => {
-      const template = list.find((t) => t.id === value);
-      if (template) applyTemplate(template);
-      else if (value === SAVE) saveCurrent();
-      else goTo('templates');
-    },
-  });
-}
-
 function SendArea() {
   if (!state.app.hasKey) {
     return (
@@ -574,6 +554,8 @@ function SendArea() {
   const type = typeOf();
   const blocked = currentRequest().problems[0] || '';
   const { beforePolish, polishing, submitting, submitError } = composer;
+  const canSkill = type.value === 'image' || type.value === 'video';
+  const skill = activeSkill();
   return (
     <>
       {(type.value === 'image' || type.value === 'video') && (
@@ -581,12 +563,26 @@ function SendArea() {
           角色
         </button>
       )}
-      {type.value !== 'music' && (
-        <button key="template" className="entry-action-btn" type="button" data-control="template" aria-haspopup="menu" aria-expanded="false" {...tip('套用存好的提示词和参数')} onClick={(e) => pickTemplate(e.currentTarget)}>
-          模板
+      {canSkill && (
+        <button
+          key="skill"
+          className={`entry-action-btn ${skill ? 'active' : ''}`}
+          type="button"
+          data-control="skill"
+          aria-haspopup="dialog"
+          aria-expanded="false"
+          {...tip('选一套写提示词的规则，只写一句话，发送时帮你扩写')}
+          onClick={(e) => {
+            const layer = openPopover(e.currentTarget, <div className="popover-body">{<SkillPanel close={() => layer?.close()} />}</div>, { className: 'skill-popover', label: '技能', align: 'end' });
+          }}
+        >
+          <Icon name="wand" />
+          技能
         </button>
       )}
+      {/* 选了技能就不再润色：两件事都是让文本模型改写提示词。 */}
       {type.polish &&
+        !skill &&
         state.catalog.polish.length > 0 &&
         (beforePolish !== null ? (
           <button key="undo" className="entry-action-btn" type="button" data-control="polish" onClick={undoPolish}>
@@ -613,6 +609,7 @@ export function Composer() {
   const { studio } = composer;
   const type = typeOf();
   const text = draftPrompt();
+  const skill = activeSkill();
   const prompt = useRef<HTMLTextAreaElement>(null);
   const title = useRef<HTMLHeadingElement>(null);
   const types = useRef<HTMLDivElement>(null);
@@ -649,7 +646,7 @@ export function Composer() {
 
   // 类型、生成方式、模型家族变了，输入框里的东西就不一样高。高度滑过去，下面的记录跟着挪，不是跳一下。
   // 只管这几种变化：打字撑高文本框时不做动效。
-  const shape = `${studio.type}:${composer.form.mode}:${modesFor().length}:${traits().lastFrame}:${studio.type === 'image' && imageRefLimit() > 0}`;
+  const shape = `${studio.type}:${composer.form.mode}:${modesFor().length}:${traits().lastFrame}:${studio.type === 'image' && imageRefLimit() > 0}:${Boolean(skill)}`;
   useLayoutEffect(() => {
     const el = card.current!;
     // 上一次还没滑完就又变了，从现在停着的高度接着滑。
@@ -684,13 +681,25 @@ export function Composer() {
       </div>
       <div ref={card} className="composer-card">
         <MediaBlock />
+        {/* 选着的技能：一个小标签，在提示词上面。点叉取消。 */}
+        {skill && (
+          <div className="skill-chip-row">
+            <span className="skill-chip">
+              <Icon name="wand" />
+              <span className="ellipsis">{skill.name}</span>
+              <button type="button" aria-label={`取消技能「${skill.name}」`} onClick={() => setSkill(null)}>
+                <Icon name="x" size={12} stroke={2} />
+              </button>
+            </span>
+          </div>
+        )}
         <textarea
           ref={prompt}
           className="prompt"
           rows={3}
           defaultValue={text}
           hidden={!type.placeholder}
-          placeholder={type.placeholder || ''}
+          placeholder={skill ? '写一句简单的话就行，发送时会按技能的规则扩写成完整的提示词' : type.placeholder || ''}
           aria-label={type.value === 'speech' ? '要朗读的文字' : '提示词'}
           onInput={(e) => typePrompt(e.currentTarget.value)}
           onKeyDown={(e) => {

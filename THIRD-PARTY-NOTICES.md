@@ -36,3 +36,10 @@ SOFTWARE.
 ## React Flow
 
 画布页用的是 [React Flow](https://reactflow.dev)（`@xyflow/react`，MIT 许可，版权归 webkid GmbH），通过 npm 安装，没有改动它的源码。许可全文在 `node_modules/@xyflow/react/LICENSE`。画布右下角保留了它的署名。
+
+## 官方技能的规则
+
+`shared/skills.ts` 里三个官方技能的规则取自团队自己的两个项目，只去掉了原项目流程里才有意义的句子：
+
+- 「角色设定图」「分镜首帧」来自小云雀（XiaoYunQue）的提示词。小云雀按 MIT 许可发布，版权归 Video-Claw / FilmAgent（<https://github.com/HITsz-TMG/FilmAgent>）和 XiaoYunQue（Innate Labs）。
+- 「多镜头成片」来自 FRW 导演工作台里给 Seedance 2 写的提示词规则和范例。这个项目是团队内部的，仓库里没有许可证文件；把这个应用的源码公开之前，先确认这部分可以一起公开。
