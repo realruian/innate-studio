@@ -87,10 +87,12 @@ async function submitVideo(flow: Flow, node: Node, sources: { link: LinkData; no
   return (await api<HistoryItem>('POST', '/api/videos', { payload: request.payload, form })).id;
 }
 
-async function submitImage(node: Node, sources: { link: LinkData; node: Node }[], prompt: string) {
+async function submitImage(node: Node, sources: { link: LinkData; node: Node }[], prompt: string, given?: { url: string; name: string }[]) {
   const data = node.data as unknown as ImageData;
-  // 连进来的图片是参考图（图生图）。
-  const refs: Ref[] = sources
+  // 连进来的图片是参考图（图生图）。given 是这一次临时指定的参考图（扩图的底图），有它就不看连线。
+  const refs: Ref[] = given
+    ? given.map((item) => ({ uid: crypto.randomUUID(), kind: 'image' as const, source: 'local' as const, url: item.url, name: item.name, thumb: null }))
+    : sources
     .filter((s) => s.link.kind === 'image')
     .map((s) => {
       const output = outputOf(s.node);
@@ -157,7 +159,8 @@ export function deliver(flow: Flow, id: string, results: Record<string, unknown>
   }
 }
 
-export async function generate(flow: Flow, id: string, snap: () => void = () => {}) {
+// once：只管这一次的临时安排。prompt 是直接用这段提示词（斜杠预设、扩图），refs 是直接用这几张参考图。
+export async function generate(flow: Flow, id: string, snap: () => void = () => {}, once: { prompt?: string; refs?: { url: string; name: string }[] } = {}) {
   const node = flow.getNode(id);
   if (!node || (node.data as AnyData).busy) return;
   if (node.type === 'text') return write(flow, id, snap);
@@ -170,11 +173,11 @@ export async function generate(flow: Flow, id: string, snap: () => void = () => 
       .filter((edge) => edge.target === id)
       .map((edge) => ({ link: edge.data as unknown as LinkData, node: flow.getNode(edge.source)! }))
       .filter((s) => s.node);
-    const prompt = promptOf(sources, (node.data as AnyData).prompt || '');
+    const prompt = promptOf(sources, once.prompt ?? ((node.data as AnyData).prompt || ''));
     const kind = node.type as NodeKind;
     const count = Math.max(1, Number((node.data as AnyData).count) || 1);
     let ids: string[];
-    if (kind === 'image') ids = await submitImage(node, sources, prompt);
+    if (kind === 'image') ids = await submitImage(node, sources, prompt, once.refs);
     else if (kind === 'video') {
       // 视频接口一次只出一段，要几段就提交几次。中途有一次没提交上，已经提交的照样放上画布。
       ids = [];

@@ -589,27 +589,39 @@ test('角色：新建、从生成记录选的图会复制一份、改、删', as
   assert.equal((await call('DELETE', `/api/characters/${id}`)).status, 404);
 });
 
-test('模板：存下一份表单、改名、删；不认识的类型和过大的封面不收', async () => {
-  const cover = `data:image/jpeg;base64,${PNG.toString('base64')}`;
-  const form = { prompt: '雨夜街头，霓虹倒影', model: 'seedance-2.0', resolution: '720p', ratio: '16:9', duration: 5 };
-  const created = await call('POST', '/api/templates', { name: '', type: 'video', form, cover });
+test('技能：官方的只读，自己建的能改能删，扩写时把规则和这次的设置一起发给文本模型', async () => {
+  const listed = await call('GET', '/api/skills');
+  const official = listed.data.items.filter((s) => s.official);
+  assert.deepEqual(official.map((s) => s.name), ['多镜头成片', '角色设定图', '分镜首帧']);
+  assert.equal((await call('PUT', `/api/skills/${official[0].id}`, { name: 'x' })).status, 400);
+  assert.equal((await call('DELETE', `/api/skills/${official[0].id}`)).status, 400);
+
+  const rules = '把用户的一句话写成产品展示视频的提示词：干净的棚拍环境，缓慢环绕。';
+  assert.equal((await call('POST', '/api/skills', { name: '', type: 'video', rules })).status, 400);
+  assert.equal((await call('POST', '/api/skills', { name: '产品展示', type: 'speech', rules })).status, 400);
+  assert.equal((await call('POST', '/api/skills', { name: '产品展示', type: 'video', rules: '短' })).status, 400);
+  const created = await call('POST', '/api/skills', { name: ' 产品展示 ', description: '棚拍环绕', type: 'video', rules });
   assert.equal(created.status, 200);
-  assert.match(created.data.id, /^tp_/);
-  assert.equal(created.data.name, '未命名模板');
-  assert.deepEqual(created.data.form, form);
-  assert.equal(created.data.cover, cover);
-
-  assert.equal((await call('POST', '/api/templates', { name: 'x', type: 'music', form })).status, 400);
-  assert.equal((await call('POST', '/api/templates', { name: 'x', type: 'image', form: 'x' })).status, 400);
-  // 封面不是图片或者太大，就当没有封面。
-  const plain = await call('POST', '/api/templates', { name: '无封面', type: 'image', form: { prompt: '一只猫' }, cover: `data:image/jpeg;base64,${'A'.repeat(400 * 1024)}` });
-  assert.equal(plain.data.cover, null);
-
+  assert.match(created.data.id, /^sk_/);
+  assert.equal(created.data.name, '产品展示');
   const { id } = created.data;
-  assert.equal((await call('PUT', `/api/templates/${id}`, { name: ' 雨夜 ' })).data.name, '雨夜');
-  const list = await call('GET', '/api/templates');
-  assert.deepEqual(list.data.items.map((t) => t.name).sort(), ['无封面', '雨夜']);
-  assert.equal((await call('DELETE', `/api/templates/${id}`)).status, 204);
-  assert.equal((await call('GET', '/api/templates')).data.items.length, 1);
-  assert.equal((await call('PUT', `/api/templates/${id}`, { name: 'x' })).status, 404);
+  // 只改说明，别的不动。
+  const edited = await call('PUT', `/api/skills/${id}`, { description: '新的说明' });
+  assert.equal(edited.data.description, '新的说明');
+  assert.equal(edited.data.rules, rules);
+  assert.equal((await call('GET', '/api/skills')).data.items.length, official.length + 1);
+
+  const before = mock.log.length;
+  const expanded = await call('POST', '/api/skills/expand', { id, text: '一只白色的陶瓷杯', context: '时长：5 秒', model: 'claude-haiku-5-5' });
+  assert.equal(expanded.status, 200);
+  assert.ok(expanded.data.text.includes('一只白色的陶瓷杯'));
+  const sent = mock.log.slice(before).find((l) => l.path === '/v1/chat/completions');
+  assert.equal(sent.system, rules);
+  assert.ok(expanded.data.text.startsWith('时长：5 秒'), '这次的设置应当放在用户那句话前面');
+  assert.equal((await call('POST', '/api/skills/expand', { id, text: '', model: 'claude-haiku-5-5' })).status, 400);
+  assert.equal((await call('POST', '/api/skills/expand', { id: 'sk_none', text: 'x', model: 'claude-haiku-5-5' })).status, 404);
+  assert.equal((await call('POST', '/api/skills/expand', { id, text: 'x', model: 'not-a-model' })).status, 400);
+
+  assert.equal((await call('DELETE', `/api/skills/${id}`)).status, 204);
+  assert.equal((await call('GET', '/api/skills')).data.items.length, official.length);
 });

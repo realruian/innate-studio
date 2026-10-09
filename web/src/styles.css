@@ -500,6 +500,11 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 .modal-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: var(--sp-8); margin-top: var(--sp-8); }
 .confirm-text { word-break: break-word; }
 .tab-pane { display: flex; flex-direction: column; gap: var(--sp-8); min-height: 150px; }
+/* 选素材的弹窗：换来源时大小不变。这一块固定高，上传区撑满它，素材多了在里面滚 */
+.picker-pane { height: 400px; overflow-y: auto; overscroll-behavior: contain; }
+.picker-pane > .upload-pane { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.picker-pane .dropzone { flex: 1; justify-content: center; }
+.picker-pane .pick-grid { max-height: none; overflow: visible; }
 
 #toast-root { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 80; display: flex; flex-direction: column; align-items: center; gap: var(--sp-8); pointer-events: none; }
 .toast { max-width: min(560px, 90vw); padding: var(--sp-8) var(--sp-12); border: 1px solid var(--border-float); border-radius: var(--r-sm); background: var(--surface-float); box-shadow: var(--shadow-float); font-size: var(--text-ui); transition: opacity 200ms var(--ease); }
@@ -841,6 +846,7 @@ button.cnode-ref[aria-expanded='true'] { border-color: var(--text-3); }
 /* 引用连进来的节点：提示词右下角的一个 @ */
 .cnode-panel { position: relative; }
 .cnode-at { position: absolute; right: 60px; bottom: var(--sp-12); display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 0; border-radius: var(--r-sm); background: none; color: var(--text-3); font-size: var(--text-body); cursor: pointer; transition: background-color 120ms var(--ease), color 120ms var(--ease); }
+.cnode-at.is-slash { right: 96px; }
 @media (hover: hover) { .cnode-at:hover { background: var(--hover); color: var(--text); } }
 .cnode-prompt::placeholder { color: var(--text-3); }
 .cnode-error { padding: 0 var(--sp-20) var(--sp-4); color: var(--danger); font-size: var(--text-caption); overflow-wrap: anywhere; }

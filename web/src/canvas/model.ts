@@ -134,6 +134,32 @@ export function resolveMentions(prompt: string, inputs: Mentionable[]): { prompt
   return { prompt: resolved, inlined };
 }
 
+// ---------- 斜杠预设 ----------
+
+// 图片节点的提示词里打一个 /，列出这些现成的任务：选一个就用它的提示词直接生成，不用自己写。
+// needsRef：要有一张连进来的参考图才做得了（基于已有的画面去变）。
+export interface Preset {
+  id: string;
+  label: string;
+  note: string;
+  needsRef: boolean;
+  prompt: string;
+}
+const KEEP = '参考图里的主体、场景、道具、光线和画风都保持一致；有人物的话，长相、服装、发型不变，不要添加参考图里没有的人和物。';
+export const IMAGE_PRESETS: Preset[] = [
+  { id: 'grid9', label: '多机位九宫格', note: '同一场景的九个机位', needsRef: true, prompt: `根据参考图生成一张 3×3 的九宫格图。九格是同一个场景、同一时刻的九个不同机位和景别，例如远景、全景、中景、近景、特写、俯拍、仰拍、侧面。${KEEP}九格大小一致、排列整齐，格与格之间用细白线隔开，不要任何文字和编号。` },
+  { id: 'grid4', label: '剧情推演四宫格', note: '接下来的四个连续画面', needsRef: true, prompt: `根据参考图生成一张 2×2 的四宫格图，是从参考图这一刻往后发展的四个连续画面，按从左到右、从上到下的顺序推进剧情，每格换一个合适的景别。${KEEP}四格大小一致，格与格之间用细白线隔开，不要任何文字和编号。` },
+  { id: 'views3', label: '角色三视图', note: '正面、侧面、背面', needsRef: true, prompt: '根据参考图里的角色生成一张三视图：同一个角色的正面、侧面、背面全身站姿，从左到右并排，比例一致，站在同一条地平线上。角色的长相、发型、服装、配饰和参考图完全一致。纯白背景，均匀的平光，不要任何文字。' },
+  { id: 'sheet', label: '角色设定图', note: '全身立绘加表情和细节', needsRef: false, prompt: '生成一张角色设定图：左侧是角色的全身立绘，右侧是三个头部表情特写（平静、微笑、生气）和服装、配饰的细节特写。画风统一，纯白背景，排版整齐，不要任何文字。' },
+  { id: 'after3', label: '画面推演：3 秒后', note: '顺着当前画面往后', needsRef: true, prompt: `生成参考图这个画面 3 秒之后的样子：按画面里正在发生的动作自然地往后发展，机位和构图基本不变。${KEEP}` },
+  { id: 'before5', label: '画面推演：5 秒前', note: '倒回当前画面之前', needsRef: true, prompt: `生成参考图这个画面 5 秒之前的样子：按画面里正在发生的动作合理地倒推回去，机位和构图基本不变。${KEEP}` },
+  { id: 'relight', label: '电影级光影', note: '只改光，不改内容', needsRef: true, prompt: '保持参考图的构图、人物、场景和所有内容完全不变，只重新打光：电影感的主光和轮廓光，明暗层次分明，阴影柔和干净，色调统一有氛围。' },
+  { id: 'board', label: '故事板', note: '把一段剧情画成连续分镜', needsRef: false, prompt: '把下面这段剧情画成一张故事板：2×3 六格连续分镜，按从左到右、从上到下的顺序，每格一个镜头，景别和机位有变化，人物和场景前后一致。格与格之间用细白线隔开，不要任何文字。剧情：' },
+];
+
+// 扩图用的提示词。发给模型的参考图是已经放大了画布的一张：原图在中间，四周是灰色的空白。
+export const OUTPAINT_PROMPT = '参考图中间是一张原图，四周的纯灰色区域是空白。把灰色区域补全成原图画面向外的自然延伸：内容、透视、光线、色调和画风与原图连贯一致，看不出拼接的痕迹。原图部分的内容保持不变，最后的画面里不能留下任何灰色空白和边框。';
+
 export interface MediaInput {
   kind: Kind;
   role: FrameRole;

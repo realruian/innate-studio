@@ -7,7 +7,7 @@ import { refFromAsset, refFromRecord, assetFromRecord, readVideo } from '../medi
 import { toast } from '../ui/layers.tsx';
 import { buildRequest as buildVideoRequest, buildOpenRouterRequest, buildImageRequest, buildSpeechRequest, buildSfxRequest, buildMusicRequest, refsInUse, carryRefs, videoFamily, RES_RANK } from '../request.ts';
 import { ALL_RESOLUTIONS, VIDEO_TASKS, videoCapabilities, videoFamilyOf, type VideoCapabilities, type VideoSpec, type VideoTask } from '../../../shared/models.ts';
-import type { Asset, BuiltRequest, Character, CreateType, HistoryItem, Kind, Ref, RefStatus, Studio, VideoForm, Voice } from '../types.ts';
+import type { Asset, BuiltRequest, Character, CreateType, HistoryItem, Kind, Ref, RefStatus, SkillRef, Studio, VideoForm, Voice } from '../types.ts';
 
 // 视频的表单单独存一份（生成记录里存的也是它）；当前选的类型和其余几种的表单存在另一份里。
 const FORM_KEY = 'seedance-studio.form.v1';
@@ -50,11 +50,12 @@ export const defaults = (): VideoForm => ({
   sr: { enabled: false, by: 'resolution', resolution: '1080p', limit: 1440, scene: '', tool: 'standard', fps: '' },
   frames: { first: null, last: null },
   refs: { image: [], video: [], audio: [] },
+  skill: null,
 });
 
 const studioDefaults = (): Studio => ({
   type: 'video',
-  image: { prompt: '', model: 'grok-imagine-image-2.0', ratio: '16:9', count: 1, refs: [] },
+  image: { prompt: '', model: 'grok-imagine-image-2.0', ratio: '16:9', count: 1, refs: [], skill: null },
   speech: { prompt: '', voiceId: '', voiceName: '' },
   sfx: { prompt: '', duration: 'auto', influence: '0.3' },
   music: { video: null },
@@ -181,15 +182,37 @@ export function refStatus(ref: Ref): RefStatus & { label: string } {
   return assetReadiness(findAsset(ref.assetId), composer.form.model);
 }
 
-// 当前类型的请求和不能提交的原因。
-export function currentRequest(): BuiltRequest {
+// 当前类型的请求和不能提交的原因。prompt 是技能扩写出来的提示词：给了就用它代替输入框里的那句话。
+export function currentRequest(prompt?: string): BuiltRequest {
   const { studio } = composer;
-  if (studio.type === 'image') return buildImageRequest(studio.image, imageRefLimit());
+  if (studio.type === 'image') return buildImageRequest(prompt === undefined ? studio.image : { ...studio.image, prompt }, imageRefLimit());
   if (studio.type === 'speech') return buildSpeechRequest(studio.speech);
   if (studio.type === 'sfx') return buildSfxRequest(studio.sfx);
   if (studio.type === 'music') return buildMusicRequest(studio.music);
-  if (isOpenRouter()) return buildOpenRouterRequest(composer.form, specOf(composer.form.model));
-  return buildVideoRequest(composer.form, refStatus);
+  const form = prompt === undefined ? composer.form : { ...composer.form, prompt };
+  if (isOpenRouter()) return buildOpenRouterRequest(form, specOf(form.model));
+  return buildVideoRequest(form, refStatus);
+}
+
+// ---------- 技能 ----------
+// 技能只用在视频和图片上，两种各记各的。选了技能，输入框里写的就是一句简单的话，发送前按技能的规则扩写成提示词。
+
+export function activeSkill(): SkillRef | null {
+  const { type } = composer.studio;
+  return (type === 'video' ? composer.form.skill : type === 'image' ? composer.studio.image.skill : null) || null;
+}
+
+export function setSkill(skill: SkillRef | null) {
+  if (composer.studio.type === 'video') update({ skill });
+  else if (composer.studio.type === 'image') updateStudio('image', { skill });
+}
+
+// 这次生成的设置，扩写时放在用户那句话前面：规则里有些写法要看它们（时长、要不要写声音、有没有参考图）。
+function skillContext() {
+  const { form, studio } = composer;
+  if (studio.type === 'image') return `参考图：${studio.image.refs?.length || 0} 张\n画面比例：${studio.image.ratio}`;
+  const images = refsInUse(form).filter((ref) => ref.kind === 'image').length;
+  return [`时长：${form.durationAuto ? '由模型决定' : `${form.duration} 秒`}`, `生成声音：${traits().audio && form.generateAudio ? '是' : '否'}`, `参考图：${images} 张`].join('\n');
 }
 
 // 超分的目标必须高于原始分辨率；不满足时自动换到更高的最近一档，免得用户被一条看不见的校验卡住。
@@ -528,12 +551,20 @@ export function undoPolish() {
 export async function submit() {
   const { studio, form } = composer;
   const { type } = studio;
-  const request = currentRequest();
+  let request = currentRequest();
   if (request.problems.length) return toast(request.problems[0], 'info');
+  const skill = activeSkill();
+  if (skill && !polishModel()) return toast('账号里没有可用的文本模型，技能用不了。可以先取消技能再生成', 'info');
   composer.submitting = true;
   composer.submitError = '';
   emit('composer');
   try {
+    // 选了技能：先让文本模型按规则把这句话扩写成提示词，再拿扩写的结果去生成。输入框里留着的还是用户写的那句话。
+    if (skill) {
+      const { text } = await api('POST', '/api/skills/expand', { id: skill.id, text: draftPrompt(), context: skillContext(), model: polishModel() });
+      request = currentRequest(text);
+      if (request.problems.length) throw new Error(request.problems[0]);
+    }
     if (type === 'video') await api('POST', '/api/videos', { payload: request.payload, form });
     else if (type === 'image') await api('POST', '/api/images', { payload: request.payload, form: { type, ...studio.image } });
     else await api('POST', `/api/audio/${type}`, { ...request.body, form: { type, ...studio[type] } });

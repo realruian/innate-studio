@@ -12,6 +12,7 @@ import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
 import { videoFamilyOf, polishGuide, POLISH_KINDS, PROVIDERS, isProvider, videoSpecOf } from './shared/models.ts';
+import { OFFICIAL_SKILLS } from './shared/skills.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -73,7 +74,7 @@ const history = readJson('history.json', []);
 const assets = readJson('assets.json', {});
 const canvases = readJson('canvases.json', []);
 const characters = readJson('characters.json', []);
-const templates = readJson('templates.json', []);
+const skills = readJson('skills.json', []);
 const workflows = readJson('workflows.json', []);
 
 const saveConfig = () => writeJson('config.json', config, 0o600);
@@ -81,7 +82,7 @@ const saveHistory = () => writeJson('history.json', history);
 const saveAssets = () => writeJson('assets.json', assets);
 const saveCanvases = () => writeJson('canvases.json', canvases);
 const saveCharacters = () => writeJson('characters.json', characters);
-const saveTemplates = () => writeJson('templates.json', templates);
+const saveSkills = () => writeJson('skills.json', skills);
 const saveWorkflows = () => writeJson('workflows.json', workflows);
 
 // Key 要放进 HTTP 请求头，只能由可见的 ASCII 字符组成。
@@ -1104,52 +1105,69 @@ route('DELETE', /^\/api\/characters\/([\w-]+)$/, async ({ params }) => {
   return null;
 });
 
-// ---------- 模板 ----------
-// 一份模板是一次创作的提示词和参数（创作面板里的那份表单），存下来以后一键填回去。
-// 参考素材不跟着模板走，由页面在存之前去掉。封面是页面缩好的一张小图，直接存在模板里，不依赖别的文件。
+// ---------- 技能 ----------
+// 一个技能是一套写提示词的规则：用户只写一句简单的话，发送前让文本模型按规则扩写成完整的提示词。
+// 官方技能登记在 shared/skills.ts，不能改；用户自己建的存在 data/skills.json。
 
-const TEMPLATE_TYPES = ['video', 'image', 'speech', 'sfx'];
-const MAX_COVER_CHARS = 300 * 1024;
-const templateName = (name) => String(name || '').trim().slice(0, 60) || '未命名模板';
-function findTemplate(id) {
-  const template = templates.find((t) => t.id === id);
-  if (!template) throw new HttpError(404, 'not_found', '没有这份模板');
-  return template;
+const SKILL_TYPES = ['video', 'image'];
+const allSkills = () => [...OFFICIAL_SKILLS, ...[...skills].sort((a, b) => b.updatedAt - a.updatedAt)];
+function findSkill(id) {
+  const skill = allSkills().find((item) => item.id === id);
+  if (!skill) throw new HttpError(404, 'not_found', '没有这个技能');
+  return skill;
+}
+function ownSkill(id) {
+  const skill = findSkill(id);
+  if (skill.official) throw new HttpError(400, 'invalid_request', '官方技能不能修改');
+  return skill;
+}
+// 名称、说明、规则都要有；规则太短等于没有规则。
+function skillFields(body, current = {}) {
+  const next = {
+    name: body.name === undefined ? current.name : String(body.name || '').trim().slice(0, 30),
+    description: body.description === undefined ? current.description : String(body.description || '').trim().slice(0, 120),
+    type: body.type === undefined ? current.type : body.type,
+    rules: body.rules === undefined ? current.rules : String(body.rules || '').trim(),
+  };
+  if (!next.name) throw new HttpError(400, 'invalid_request', '请给技能起个名字');
+  if (!SKILL_TYPES.includes(next.type)) throw new HttpError(400, 'invalid_request', '技能只能用在视频或图片上');
+  if (next.rules.length < 10) throw new HttpError(400, 'invalid_request', '请写下这个技能的规则：希望模型怎样把一句话写成提示词');
+  if (next.rules.length > 8000) throw new HttpError(400, 'invalid_request', '规则太长，最多 8000 字');
+  return next;
 }
 
-route('GET', /^\/api\/templates$/, async () => ({ items: [...templates].sort((a, b) => b.updatedAt - a.updatedAt) }));
+route('GET', /^\/api\/skills$/, async () => ({ items: allSkills() }));
 
-route('POST', /^\/api\/templates$/, async ({ req }) => {
-  const { name, type, form, cover } = await readJsonBody(req);
-  if (!TEMPLATE_TYPES.includes(type)) throw new HttpError(400, 'invalid_request', '这种内容存不了模板');
-  if (!form || typeof form !== 'object' || Array.isArray(form)) throw new HttpError(400, 'invalid_request', '模板缺少参数');
+route('POST', /^\/api\/skills$/, async ({ req }) => {
   const now = Date.now();
-  const template = {
-    id: newId('tp'),
-    name: templateName(name),
-    type,
-    form,
-    cover: typeof cover === 'string' && cover.startsWith('data:image/') && cover.length <= MAX_COVER_CHARS ? cover : null,
-    createdAt: now,
-    updatedAt: now,
-  };
-  templates.push(template);
-  saveTemplates();
-  return template;
+  const skill = { id: newId('sk'), ...skillFields(await readJsonBody(req)), createdAt: now, updatedAt: now };
+  skills.push(skill);
+  saveSkills();
+  return skill;
 });
 
-route('PUT', /^\/api\/templates\/([\w-]+)$/, async ({ req, params }) => {
-  const template = findTemplate(params[0]);
-  const body = await readJsonBody(req);
-  if (body.name !== undefined) template.name = templateName(body.name);
-  template.updatedAt = Date.now();
-  saveTemplates();
-  return template;
+// 按技能的规则把用户写的话扩写成提示词。context 是这次生成的设置（时长、有没有声音、带了几张参考图），原样放在用户那句话前面。
+route('POST', /^\/api\/skills\/expand$/, async ({ req }) => {
+  const { id, text, context, model } = await readJsonBody(req);
+  const skill = findSkill(id);
+  const draft = String(text || '').trim();
+  if (!draft) throw new HttpError(400, 'invalid_request', '请先写下想生成什么');
+  if (draft.length > 4000) throw new HttpError(400, 'invalid_request', '内容太长，技能最多处理 4000 字');
+  if (!POLISH_MODELS[currentProvider()].includes(model)) throw new HttpError(400, 'invalid_request', '不支持用这个模型扩写');
+  const setup = String(context || '').trim().slice(0, 500);
+  return askTextModel(model, [{ role: 'system', content: skill.rules }, { role: 'user', content: setup ? `${setup}\n\n${draft}` : draft }], 2000);
 });
 
-route('DELETE', /^\/api\/templates\/([\w-]+)$/, async ({ params }) => {
-  templates.splice(templates.indexOf(findTemplate(params[0])), 1);
-  saveTemplates();
+route('PUT', /^\/api\/skills\/([\w-]+)$/, async ({ req, params }) => {
+  const skill = ownSkill(params[0]);
+  Object.assign(skill, skillFields(await readJsonBody(req), skill), { updatedAt: Date.now() });
+  saveSkills();
+  return skill;
+});
+
+route('DELETE', /^\/api\/skills\/([\w-]+)$/, async ({ params }) => {
+  skills.splice(skills.indexOf(ownSkill(params[0])), 1);
+  saveSkills();
   return null;
 });
 

@@ -1,10 +1,11 @@
 // 页面里来回传的几种数据的形状。接口返回的字段不全列，只写页面用到的。
 
 import type { Features, ProviderId } from '../../shared/models.ts';
+export type { Skill } from '../../shared/skills.ts';
 
 export type Kind = 'image' | 'video' | 'audio';
 export type CreateType = 'video' | 'image' | 'speech' | 'sfx' | 'music';
-export type ViewId = 'create' | 'canvas' | 'records' | 'characters' | 'templates' | 'library' | 'persons';
+export type ViewId = 'create' | 'canvas' | 'records' | 'characters' | 'skills' | 'library' | 'persons';
 export type Tone = 'ok' | 'pending' | 'error';
 
 // 一份参考素材：素材库里的、公网链接，或者只存在本机的文件。
@@ -46,6 +47,8 @@ export interface VideoForm {
   sr: SuperResolution;
   frames: { first: Ref | null; last: Ref | null };
   refs: Record<Kind, Ref[]>;
+  // 选了技能时，prompt 是用户写的那句话，发送前按技能的规则扩写。
+  skill?: SkillRef | null;
 }
 
 export interface ImageForm {
@@ -55,6 +58,7 @@ export interface ImageForm {
   count: number;
   // 参考图（图生图）。只有 OpenRouter 上收参考图的模型才用得上。
   refs?: Ref[];
+  skill?: SkillRef | null;
 }
 
 export interface SpeechForm {
@@ -151,14 +155,10 @@ export interface Character {
   updatedAt: number;
 }
 
-// 一份模板：一次创作的提示词和参数。form 是创作面板里那种内容的表单，不带参考素材；cover 是一张缩好的小图。
-export interface Template {
+// 输入框里选着的技能。只记是哪个、叫什么；规则在发送时由本地服务去取。
+export interface SkillRef {
   id: string;
   name: string;
-  type: Exclude<CreateType, 'music'>;
-  form: Record<string, any>;
-  cover: string | null;
-  updatedAt: number;
 }
 
 export interface Voice {

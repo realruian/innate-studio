@@ -147,23 +147,23 @@ function MediaBlock() {
     const kinds = (Object.keys(KINDS) as Kind[]).filter((kind) => allowed.includes(kind) || form.refs[kind].length > 0);
     const setList = (kind: Kind, next: Ref[]) => update({ refs: { ...composer.form.refs, [kind]: next } });
     // 三种素材共用一个「+」，不用先选类型：上传的、选中的是什么就放进哪一类。
-    const full = kinds.every((kind) => form.refs[kind].length >= KINDS[kind].max);
+    // OpenRouter 上只有图片能加：它的参考视频和音频只收公网链接，本机的文件发不过去，而这里不提供填链接。
+    const addable = isOpenRouter() ? allowed.filter((kind) => kind === 'image') : allowed;
     const addRef = () =>
       openAssetPicker({
-        limits: Object.fromEntries(allowed.map((kind) => [kind, KINDS[kind].max - form.refs[kind].length])),
-        subtitle: allowed.map((kind) => `${KINDS[kind].label} ${form.refs[kind].length} / ${KINDS[kind].max}`).join(' · '),
+        limits: Object.fromEntries(addable.map((kind) => [kind, KINDS[kind].max - form.refs[kind].length])),
         usedIds: usedAssetIds(),
-        // OpenRouter：图片用本机的文件；视频和音频它只收公网链接。
-        ...(isOpenRouter() ? { local: true, fileKinds: ['image' as const] } : {}),
+        local: isOpenRouter(),
         onPick: (ref) => setList(ref.kind, [...composer.form.refs[ref.kind], ref].slice(0, KINDS[ref.kind].max)),
       });
+    const full = addable.every((kind) => form.refs[kind].length >= KINDS[kind].max);
     content = (
       <div className="ref-row">
         {kinds.flatMap((kind) =>
           form.refs[kind].map((ref, i) => <RefTile key={ref.uid} item={ref} label={`${REF_PREFIX[kind]}${i + 1}`} onRemove={() => setList(kind, composer.form.refs[kind].filter((r) => r.uid !== ref.uid))} />),
         )}
         {!full && (
-          <button className="ref-tile ref-add" type="button" aria-label="添加参考素材" {...tip('添加参考素材：图片、视频、音频')} onClick={addRef}>
+          <button className="ref-tile ref-add" type="button" aria-label="添加参考素材" {...tip(`添加参考素材：${addable.map((kind) => KINDS[kind].label).join('、')}`)} onClick={addRef}>
             <Icon name="plus" size={18} />
           </button>
         )}

@@ -3,7 +3,7 @@
 
 import { useSyncExternalStore } from 'react';
 import { PROVIDERS, type VideoSpec } from '../../shared/models.ts';
-import type { AppInfo, Asset, Character, CreateType, HistoryItem, Kind, Person, RefStatus, Template, ViewId, Voice } from './types.ts';
+import type { AppInfo, Asset, Character, CreateType, HistoryItem, Kind, Person, RefStatus, Skill, ViewId, Voice } from './types.ts';
 
 export class ApiError extends Error {
   status: number;
@@ -76,9 +76,9 @@ export const state = {
   history: [] as HistoryItem[],
   historyLoaded: false,
   assets: [] as Asset[],
-  // 角色和模板存在本机，和平台无关。null 是还没读过。
+  // 角色和技能存在本机，和平台无关。null 是还没读过。
   characters: null as Character[] | null,
-  templates: null as Template[] | null,
+  skills: null as Skill[] | null,
   persons: null as Person[] | null,
   personsError: '',
   personAssets: {} as Record<string, Asset[]>,
@@ -86,7 +86,7 @@ export const state = {
   watchedPersonView: '',
 };
 
-export type StoreEvent = 'boot' | 'view' | 'app' | 'models' | 'history' | 'assets' | 'persons' | 'createType' | 'recordsType' | 'composer' | 'immersive' | 'characters' | 'templates';
+export type StoreEvent = 'boot' | 'view' | 'app' | 'models' | 'history' | 'assets' | 'persons' | 'createType' | 'recordsType' | 'composer' | 'immersive' | 'characters' | 'skills';
 
 const listeners: Partial<Record<StoreEvent, Set<() => void>>> = {};
 const versions: Partial<Record<StoreEvent, number>> = {};
@@ -224,10 +224,10 @@ export async function loadCharacters() {
   return state.characters;
 }
 
-export async function loadTemplates() {
-  state.templates = (await api<{ items: Template[] }>('GET', '/api/templates')).items;
-  emit('templates');
-  return state.templates;
+export async function loadSkills() {
+  state.skills = (await api<{ items: Skill[] }>('GET', '/api/skills')).items;
+  emit('skills');
+  return state.skills;
 }
 
 function putAsset(asset: Asset) {

@@ -446,29 +446,76 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
     [flow, setNodes, snap],
   );
 
-  // 把几张做好的图各变成一个图片节点，摆在来源节点的右边，columns 个一行；那里有节点就再往右让。
-  const addBeside = useCallback(
-    (sourceId: string, made: { url: string; name: string }[], columns = 1) => {
-      const source = flow.getNode(sourceId);
-      if (!source || !made.length) return;
+  // 来源节点右边的一块空位：columns × rows 个节点那么大，那里有节点就再往右让。
+  const spotBeside = useCallback(
+    (source: Node, columns = 1, rows = 1) => {
       const stepX = BOX_HEIGHT + 40;
       const stepY = TITLE_ROOM + BOX_HEIGHT + 40;
-      const rows = Math.ceil(made.length / columns);
       const taken = flow.getNodes().filter((node) => !isGroup(node) && !node.hidden);
       let x = source.position.x + boxOf(source).width + 80;
       const y = source.position.y;
       const blocked = () => taken.some((node) => node.position.x < x + columns * stepX && node.position.x + boxOf(node).width + 40 > x && node.position.y < y + rows * stepY && node.position.y + TITLE_ROOM + BOX_HEIGHT + 40 > y);
       while (blocked()) x += stepX;
+      return { x, y, stepX, stepY };
+    },
+    [flow],
+  );
+  const seed = () => ({ form: composer.form, image: composer.studio.image, speech: composer.studio.speech });
+
+  // 把几张做好的图各变成一个图片节点，摆在来源节点的右边，columns 个一行。
+  const addBeside = useCallback(
+    (sourceId: string, made: { url: string; name: string }[], columns = 1) => {
+      const source = flow.getNode(sourceId);
+      if (!source || !made.length) return;
+      const { x, y, stepX, stepY } = spotBeside(source, columns, Math.ceil(made.length / columns));
       snap();
-      const seed = { form: composer.form, image: composer.studio.image, speech: composer.studio.speech };
       const fresh = numbered(
-        made.map((item, index) => ({ id: crypto.randomUUID(), type: 'image', position: { x: x + (index % columns) * stepX, y: y + Math.floor(index / columns) * stepY }, data: { ...newNodeData('image', seed), upload: item }, selected: index === 0 }) as Node),
+        made.map((item, index) => ({ id: crypto.randomUUID(), type: 'image', position: { x: x + (index % columns) * stepX, y: y + Math.floor(index / columns) * stepY }, data: { ...newNodeData('image', seed()), upload: item }, selected: index === 0 }) as Node),
         flow.getNodes(),
       );
       setNodes((items) => [...items.map((node) => (node.selected ? { ...node, selected: false } : node)), ...fresh]);
       reveal(fresh[0].position, BOX_HEIGHT);
     },
-    [flow, reveal, setNodes, snap],
+    [flow, reveal, setNodes, snap, spotBeside],
+  );
+
+  // 在来源节点右边加一个同类的空节点（参数照抄来源节点，再盖上 data），选中它，返回它的 id。扩图用：结果放进这个新节点。
+  const addNodeBeside = useCallback(
+    (sourceId: string, data: Record<string, unknown>) => {
+      const source = flow.getNode(sourceId);
+      if (!source) return '';
+      const { x, y } = spotBeside(source);
+      snap();
+      const kind = source.type as NodeKind;
+      const base = { ...newNodeData(kind, seed()), ...Object.fromEntries(['model', 'ratio', 'resolution', 'duration'].filter((key) => source.data[key] !== undefined).map((key) => [key, source.data[key]])) };
+      const [made] = numbered([{ id: crypto.randomUUID(), type: kind, position: { x, y }, data: { ...base, ...data }, selected: true } as Node], flow.getNodes());
+      setNodes((items) => [...items.map((node) => (node.selected ? { ...node, selected: false } : node)), made]);
+      reveal(made.position, nodeWidth(kind, made.data));
+      return made.id;
+    },
+    [flow, reveal, setNodes, snap, spotBeside],
+  );
+
+  // 接着一段视频往后拍：它的最后一帧变成一个图片节点，再接一个视频节点，这张图当首帧。新视频节点的参数照抄原来的，选中它等着写接下来发生什么。
+  const continueVideo = useCallback(
+    (sourceId: string, frame: { url: string; name: string }) => {
+      const source = flow.getNode(sourceId);
+      if (!source) return;
+      const { x, y } = spotBeside(source, 3, 1);
+      snap();
+      const copied = Object.fromEntries(['model', 'ratio', 'resolution', 'duration'].map((key) => [key, source.data[key]]));
+      const [image, video] = numbered(
+        [
+          { id: crypto.randomUUID(), type: 'image', position: { x, y }, data: { ...newNodeData('image', seed()), upload: frame, aspect: source.data.aspect } } as Node,
+          { id: crypto.randomUUID(), type: 'video', position: { x: x + nodeWidth('image', { aspect: source.data.aspect as number | undefined }) + 120, y }, data: { ...newNodeData('video', seed()), ...copied, prompt: '' }, selected: true } as Node,
+        ],
+        flow.getNodes(),
+      );
+      setNodes((items) => [...items.map((node) => (node.selected ? { ...node, selected: false } : node)), image, video]);
+      setEdges((items) => [...items, { id: crypto.randomUUID(), source: image.id, target: video.id, type: 'link', data: { kind: 'image', role: 'first' } }]);
+      reveal(video.position, nodeWidth('video', video.data));
+    },
+    [flow, reveal, setEdges, setNodes, snap, spotBeside],
   );
 
   // ---------- 堆叠 ----------
@@ -884,7 +931,7 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
     });
   }
 
-  const actions = useMemo(() => ({ snap, addInput, ungroup, saveWorkflow, unstack, addBeside }), [snap, addInput, ungroup, saveWorkflow, unstack, addBeside]);
+  const actions = useMemo(() => ({ snap, addInput, ungroup, saveWorkflow, unstack, addBeside, addNodeBeside, continueVideo }), [snap, addInput, ungroup, saveWorkflow, unstack, addBeside, addNodeBeside, continueVideo]);
   const shown = useMemo(() => framed(nodes), [nodes]);
   // 每种颜色标了哪些节点。收在一叠里的不算。
   const pinned = useMemo(() => {

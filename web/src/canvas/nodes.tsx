@@ -16,9 +16,9 @@ import { openMenu, openModal, openPopover, toast } from '../ui/layers.tsx';
 import { VideoPlayer, AudioPlayer } from '../player.tsx';
 import { openDetail } from '../history.tsx';
 import type { Kind } from '../types.ts';
-import { BOX_HEIGHT, NODE_LABELS, ROLE_LABELS, canLink, nodeWidth, joinPrompt, linkLabel, PINS, PIN_LABELS, type AudioData, type FrameRole, type GroupData, type ImageData, type Pin, type StackData, type LinkData, type NodeKind, type TextData, type VideoData } from './model.ts';
+import { BOX_HEIGHT, IMAGE_PRESETS, NODE_LABELS, OUTPAINT_PROMPT, ROLE_LABELS, canLink, nodeWidth, joinPrompt, linkLabel, PINS, PIN_LABELS, type AudioData, type FrameRole, type GroupData, type ImageData, type Pin, type Preset, type StackData, type LinkData, type NodeKind, type TextData, type VideoData } from './model.ts';
 import { fitVideo, generate, nameOf, outputOf, recordOf, runAll } from './run.ts';
-import { Cropper, cropImage, grabFrame, splitGrid, type Made } from './edit.tsx';
+import { Cropper, cropImage, grabFrame, padImage, splitGrid, type Made } from './edit.tsx';
 
 // 画布页交给节点用的几件事。snap：会改动画布结构的操作，动手之前调一下，撤销时回到这一刻。
 // addInput：在某个节点左边加一个节点并连进它，extra 是新节点一出来就带着的内容（上传的文件、素材库里的素材）。
@@ -32,7 +32,10 @@ export const CanvasActions = createContext<{
   saveWorkflow: (groupId: string) => void;
   unstack: (stackId: string, memberId?: string) => void;
   addBeside: (sourceId: string, made: Made[], columns?: number) => void;
-}>({ snap() {}, addInput() {}, ungroup() {}, saveWorkflow() {}, unstack() {}, addBeside() {} });
+  // addNodeBeside：在某个节点右边加一个同类的空节点，返回它的 id（扩图的结果放进它）。continueVideo：接着一段视频往后拍，frame 是它的最后一帧。
+  addNodeBeside: (sourceId: string, data: Record<string, unknown>) => string;
+  continueVideo: (sourceId: string, frame: Made) => void;
+}>({ snap() {}, addInput() {}, ungroup() {}, saveWorkflow() {}, unstack() {}, addBeside() {}, addNodeBeside: () => '', continueVideo() {} });
 
 export const NODE_ICONS: Record<NodeKind, IconName> = { text: 'type', image: 'image', video: 'video', audio: 'music' };
 
@@ -163,7 +166,9 @@ function useDraft(value: string, commit: (next: string) => void) {
 
 // 提示词输入框。打一个 @，会列出连进这个节点的节点，选一个就插进一段「@图片 1」；生成时它会被换成模型看得懂的说法。
 // 面板右下角的 @ 按钮是同一件事，插在光标的位置。
-function Prompt({ id, value, placeholder }: { id: string; value: string; placeholder: string }) {
+// presets：这个节点有斜杠预设（图片节点）。提示词还空着的时候打一个 /，或点右下角的 /，列出这些预设。
+// 选了之后提示词换成预设的那一段；节点已经连了东西就直接开始生成，否则先停下等着补内容。
+function Prompt({ id, value, placeholder, presets }: { id: string; value: string; placeholder: string; presets?: { refs: number; limit: number; run: (prompt: string) => void } }) {
   const flow = useReactFlow();
   const inputs = useInputs(id);
   const area = useRef<HTMLTextAreaElement>(null);
@@ -190,6 +195,27 @@ function Prompt({ id, value, placeholder }: { id: string; value: string; placeho
     });
   }
 
+  function preset(typed: boolean) {
+    const el = area.current!;
+    const why = (item: Preset) => (!item.needsRef ? null : !presets!.limit ? '这个模型不收参考图，换一个模型再用' : !presets!.refs ? '先连一张参考图进来' : null);
+    openMenu(el, {
+      label: '预设',
+      items: IMAGE_PRESETS.map((item) => ({ value: item.id, label: item.label, note: item.note, disabled: Boolean(why(item)), title: why(item) })),
+      onSelect: (pick) => {
+        const item = IMAGE_PRESETS.find((p) => p.id === pick)!;
+        // 是打 / 打出来的，把那个 / 换掉；点按钮来的，接在已经写的后面（已经写的当作补充说明）。
+        const own = typed ? '' : el.value.trim();
+        set(own ? `${item.prompt}\n${own}` : item.prompt);
+        // 有输入可用就直接开始；没有（比如故事板还没写剧情）就把光标放到最后，等着补。
+        if (inputs.length || own) return presets!.run(own ? `${item.prompt}\n${own}` : item.prompt);
+        requestAnimationFrame(() => {
+          el.focus();
+          el.setSelectionRange(el.value.length, el.value.length);
+        });
+      },
+    });
+  }
+
   return (
     <>
       <textarea
@@ -202,8 +228,15 @@ function Prompt({ id, value, placeholder }: { id: string; value: string; placeho
           // 刚打出来的是 @（输入法拼字的时候不算）。
           const typed = (e.nativeEvent as InputEvent).data === '@' && !(e.nativeEvent as InputEvent).isComposing;
           if (typed) requestAnimationFrame(() => mention(true));
+          // 提示词还空着时打的 /：出预设。写到一半的 / 只是个斜杠。
+          if (presets && e.target.value === '/' && !(e.nativeEvent as InputEvent).isComposing) requestAnimationFrame(() => preset(true));
         }}
       />
+      {presets && (
+        <button className="cnode-at is-slash" type="button" {...tip('预设：九宫格、三视图、画面推演…')} aria-label="预设" aria-haspopup="menu" onClick={() => preset(false)}>
+          /
+        </button>
+      )}
       <button className="cnode-at" type="button" data-mention {...tip('引用连进来的节点')} aria-label="引用连进来的节点" aria-haspopup="menu" onClick={() => mention(false)}>
         @
       </button>
@@ -356,7 +389,7 @@ function Clip({ src, label, onShape }: { src: string; label: string; onShape?: (
 // onUpload：图片节点可以上传一张图放进来；节点还空着的时候只有这一个按钮。
 function NodeTools({ id, kind, data, onUpload }: { id: string; kind: Kind; data: MediaData; onUpload?: () => void }) {
   const flow = useReactFlow();
-  const { addBeside } = useContext(CanvasActions);
+  const { addBeside, addNodeBeside, continueVideo, snap } = useContext(CanvasActions);
   useStore('history', 'app');
   const record = recordOf(data);
   // 这个节点里现在放着的东西：生成的结果、上传的文件，或者素材库里的素材。
@@ -426,18 +459,48 @@ function NodeTools({ id, kind, data, onUpload }: { id: string; kind: Kind; data:
   }
   const playhead = () => document.querySelector<HTMLVideoElement>(`.react-flow__node[data-id="${id}"] video`)?.currentTime || 0;
   const local = Boolean(file?.local);
+  // 扩图：把画面往外补成另一个比例。先在本地做一张放大了画布的底图，再让这个节点的模型去补；结果放进右边一个新的图片节点。
+  async function outpaint(ratio: string) {
+    const model = (data as ImageData).model;
+    if (!imageRefLimit(model)) return toast(`${model} 不收参考图，做不了扩图。先在下面的面板里换一个收参考图的模型`, 'info');
+    toast('正在准备扩图…', 'info', 1800);
+    try {
+      const [w, h] = ratio.split(':').map(Number);
+      const padded = await padImage(file!.url, w / h, `${file!.name}-扩图底图`);
+      if (!padded) return toast(`这张图已经是 ${ratio} 了`, 'info');
+      const made = addNodeBeside(id, { prompt: `扩图成 ${ratio}`, ratio, count: 1 });
+      // 等新节点真的上了画布再让它生成。
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      generate(flow, made, snap, { prompt: OUTPAINT_PROMPT, refs: [padded] });
+    } catch (err) {
+      toast((err as Error).message, 'error', 6000);
+    }
+  }
+  async function extend() {
+    if (!traits((data as VideoData).model).frames) return toast(`${(data as VideoData).model} 不支持首帧，接不了。先在下面的面板里换一个模型`, 'info');
+    toast('正在截取最后一帧…', 'info', 1800);
+    try {
+      continueVideo(id, await grabFrame(file!.url, 'last', `${file!.name}-尾帧`));
+    } catch (err) {
+      toast((err as Error).message, 'error', 6000);
+    }
+  }
+  // 切宫格、扩图各有几个选项，点了再出第二层菜单。
+  const ratios = imageRatios((data as ImageData).model).filter((r) => ['1:1', '16:9', '9:16', '4:3', '3:4', '21:9'].includes(r));
+  const submenu = (button: HTMLElement | null, label: string, options: { value: string; label: string }[], run: (value: string) => void) => button && setTimeout(() => openMenu(button, { label, items: options, onSelect: run }), 0);
+  const moreButton = useRef<HTMLButtonElement>(null);
   const items = [
-    ...(local && kind === 'image' ? [{ value: 'crop', label: '裁剪' }, { value: 'grid2', label: '切成 2×2' }, { value: 'grid3', label: '切成 3×3' }, { value: 'grid4', label: '切成 4×4' }] : []),
-    ...(local && kind === 'video' ? [{ value: 'frame', label: '截取当前帧' }, { value: 'first', label: '截取首帧' }, { value: 'last', label: '截取尾帧' }] : []),
+    ...(local && kind === 'image' ? [{ value: 'crop', label: '裁剪' }, { value: 'grid', label: '切成宫格…' }, ...(ratios.length ? [{ value: 'outpaint', label: '扩图…' }] : [])] : []),
+    ...(local && kind === 'video' ? [{ value: 'extend', label: '延长：接着往后拍' }, { value: 'frame', label: '截取当前帧' }, { value: 'first', label: '截取首帧' }, { value: 'last', label: '截取尾帧' }] : []),
     ...(file ? [{ value: 'download', label: '下载' }] : []),
     ...(canSave ? [{ value: 'save', label: '存到素材库' }] : []),
     ...(onUpload ? [{ value: 'upload', label: file || data.asset ? '换一张图' : '上传图片' }] : []),
   ];
   const acts: Record<string, () => void> = {
     crop,
-    grid2: () => make('切分', () => splitGrid(file!.url, 2, file!.name), 2),
-    grid3: () => make('切分', () => splitGrid(file!.url, 3, file!.name), 3),
-    grid4: () => make('切分', () => splitGrid(file!.url, 4, file!.name), 4),
+    grid: () => submenu(moreButton.current, '切成宫格', [2, 3, 4].map((n) => ({ value: String(n), label: `${n}×${n}` })), (n) => make('切分', () => splitGrid(file!.url, Number(n), file!.name), Number(n))),
+    outpaint: () => submenu(moreButton.current, '扩图成', ratios.map((r) => ({ value: r, label: r })), outpaint),
+    extend,
     frame: () => make('截帧', async () => [await grabFrame(file!.url, playhead(), `${file!.name}-截帧`)]),
     first: () => make('截帧', async () => [await grabFrame(file!.url, 0, `${file!.name}-首帧`)]),
     last: () => make('截帧', async () => [await grabFrame(file!.url, 'last', `${file!.name}-尾帧`)]),
@@ -462,7 +525,7 @@ function NodeTools({ id, kind, data, onUpload }: { id: string; kind: Kind; data:
         </button>
       ) : (
         items.length > 0 && (
-          <button className="cnode-btn" type="button" {...tip('更多')} aria-label="更多操作" aria-haspopup="menu" aria-expanded="false" onClick={(e) => openMenu(e.currentTarget, { label: '更多操作', items, onSelect: act })}>
+          <button ref={moreButton} className="cnode-btn" type="button" {...tip('更多')} aria-label="更多操作" aria-haspopup="menu" aria-expanded="false" onClick={(e) => openMenu(e.currentTarget, { label: '更多操作', items, onSelect: act })}>
             <Icon name="more" size={16} />
           </button>
         )
@@ -593,7 +656,7 @@ export function ImageNode({ id, data: raw, selected }: NodeProps) {
       panel={
         <>
           <Refs id={id} kind="image" model={data.model} limit={refLimit} />
-          <Prompt id={id} value={data.prompt} placeholder={promptHint(linked, hasRefs ? '想怎么改这张图？例如：把背景改成雪夜' : '描述想生成的图片：主体、环境、构图、光线和风格')} />
+          <Prompt id={id} value={data.prompt} placeholder={promptHint(linked, hasRefs ? '想怎么改这张图？例如：把背景改成雪夜' : '描述想生成的图片：主体、环境、构图、光线和风格')} presets={{ refs: inputs.filter((i) => i.link.kind === 'image').length, limit: refLimit, run: (prompt) => generate(flow, id, snap, { prompt }) }} />
           {data.error && !data.busy && <p className="cnode-error">{data.error}</p>}
           <Bar working={working} ready={Boolean(data.prompt.trim()) || linked} action="生成图片" onSend={() => generate(flow, id, snap)}>
             <Dropdown variant="tool" chevron label="模型" value={data.model} options={models.map((m) => ({ value: m, label: m }))} onChange={(model) => flow.updateNodeData(id, { model, ratio: imageRatios(model).includes(data.ratio) ? data.ratio : imageRatios(model)[0] || data.ratio })} />

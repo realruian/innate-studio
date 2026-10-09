@@ -65,6 +65,28 @@ export async function grabFrame(url: string, at: number | 'last', name: string) 
   return save(video, 0, 0, video.videoWidth, video.videoHeight, name);
 }
 
+// 扩图的底图：把画布放大到 ratio 这个宽高比，原图原大放在正中间，多出来的地方填成灰色，交给模型去补。
+// 已经是这个比例（差不到 2%）就不用扩，返回 null。
+export async function padImage(url: string, ratio: number, name: string): Promise<Made | null> {
+  const img = await loadImage(url);
+  const w = img.naturalWidth;
+  const h = img.naturalHeight;
+  if (Math.abs(w / h / ratio - 1) < 0.02) return null;
+  const width = w / h < ratio ? Math.round(h * ratio) : w;
+  const height = w / h < ratio ? h : Math.round(w / ratio);
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d')!;
+  ctx.fillStyle = '#808080';
+  ctx.fillRect(0, 0, width, height);
+  ctx.drawImage(img, Math.round((width - w) / 2), Math.round((height - h) / 2));
+  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
+  if (!blob) throw new Error('底图做不出来');
+  const ref = await uploadLocalFile(new File([blob], `${name}.png`, { type: 'image/png' }), 'image');
+  return { url: ref.url, name };
+}
+
 // ---------- 裁剪 ----------
 
 const RATIOS = [
