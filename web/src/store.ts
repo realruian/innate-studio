@@ -2,6 +2,7 @@
 // 状态是一个普通对象，改完后用 emit() 说一声是哪一块变了；组件用 useStore() 订阅自己关心的那几块。
 
 import { useSyncExternalStore } from 'react';
+import { PROVIDERS, type VideoSpec } from '../../shared/models.ts';
 import type { AppInfo, Asset, CreateType, HistoryItem, Kind, Person, RefStatus, ViewId, Voice } from './types.ts';
 
 export class ApiError extends Error {
@@ -55,11 +56,14 @@ export const state = {
   createType: 'video' as CreateType,
   // 记录页的类型筛选。放在这里是因为创作页的「查看全部」要带着类型过去。
   recordsType: 'all' as CreateType | 'all',
-  app: { hasKey: false, keyHint: '', keySource: '', baseUrl: '' } as AppInfo,
+  app: { hasKey: false, keyHint: '', keySource: '', baseUrl: '', provider: 'flatkey', features: PROVIDERS.flatkey.features, providers: [] } as AppInfo,
   models: ['seedance-2.0', 'seedance-2.0-fast'] as string[],
+  // OpenRouter 的模型各自支持什么（分辨率、比例、时长、首尾帧）。Flatkey 的模型登记在 shared/models.ts，这里是空的。
+  videoSpecs: {} as Record<string, VideoSpec>,
   modelsInfo: { source: 'default', error: '', note: '' },
   // 视频之外账号还能用什么。known 为 false 表示还没读到模型列表，这时不拦任何一种创作。
-  catalog: { known: false, image: [] as string[], polish: [] as string[], audio: { speech: false, sfx: false, music: false } },
+  // imageRatios 是 OpenRouter 每个图片模型收哪些画面比例；Flatkey 上没有这一项，比例不受限。
+  catalog: { known: false, image: [] as string[], imageRatios: {} as Record<string, string[]>, polish: [] as string[], audio: { speech: false, sfx: false, music: false } },
   voices: null as Voice[] | null,
   history: [] as HistoryItem[],
   historyLoaded: false,
@@ -106,16 +110,28 @@ export function goTo(view: ViewId) {
 }
 
 export async function loadApp() {
-  state.app = await api('GET', '/api/state');
+  // 本地服务还是改之前的版本时，返回里没有平台那几项，这时保留默认的（Flatkey）。
+  state.app = { ...state.app, ...(await api('GET', '/api/state')) };
   emit('app');
 }
 
 export async function loadModels() {
   const data = await api('GET', '/api/models');
   state.models = data.models;
+  state.videoSpecs = data.videoSpecs || {};
   state.modelsInfo = { source: data.source, error: data.error || '', note: data.note || '' };
-  state.catalog = { known: !data.error, image: data.imageModels || [], polish: data.polishModels || [], audio: data.audio || {} };
+  state.catalog = { known: !data.error, image: data.imageModels || [], imageRatios: data.imageRatios || {}, polish: data.polishModels || [], audio: data.audio || {} };
   emit('models');
+}
+
+// 换平台。模型、音色都是跟着平台走的，换完重新读。
+export async function switchProvider(provider: AppInfo['provider']) {
+  state.app = await api('PUT', '/api/provider', { provider });
+  state.voices = null;
+  // 新平台的模型列表读到之前，先不按旧平台的列表拦着。
+  state.catalog = { ...state.catalog, known: false, polish: [], imageRatios: {} };
+  emit('app');
+  if (state.app.hasKey) await loadModels();
 }
 
 export async function loadVoices() {
@@ -158,7 +174,7 @@ export async function loadHistory() {
 }
 
 export const isPendingTask = (item: HistoryItem) => item.status === 'queued' || item.status === 'in_progress';
-// 等太久、本地服务已停止自动查询的任务。它在 Flatkey 那边不一定失败了，可以手动再查一次。
+// 等太久、本地服务已停止自动查询的任务。它在平台那边不一定失败了，可以手动再查一次。
 export const isTimedOutTask = (item: HistoryItem) => item.status === 'failed' && item.error?.code === 'poll_timeout';
 
 let historyTimer: ReturnType<typeof setTimeout> | undefined;

@@ -1,7 +1,8 @@
-// 设置弹窗：外观、润色用的模型、API Key 和余额。
+// 设置弹窗：外观、润色用的模型、用哪个平台、API Key 和余额。
 
 import { useEffect, useRef, useState } from 'react';
-import { api, state, useStore, loadApp, loadModels, polishModel, setPolishModel } from './store.ts';
+import { api, state, useStore, loadApp, loadModels, switchProvider, polishModel, setPolishModel } from './store.ts';
+import { PROVIDERS, type ProviderId } from '../../shared/models.ts';
 import { currentTheme, setTheme } from './theme.ts';
 import { Segmented, FormRow, Dropdown } from './ui/controls.tsx';
 import { toast, openModal, confirmDialog } from './ui/layers.tsx';
@@ -18,8 +19,10 @@ function Settings() {
   const [saving, setSaving] = useState(false);
   const [credits, setCredits] = useState('—');
   const [test, setTest] = useState({ tone: '', text: '' });
+  const [switching, setSwitching] = useState(false);
   const input = useRef<HTMLInputElement>(null);
-  const { hasKey, keyHint, keySource, baseUrl } = state.app;
+  const { hasKey, keyHint, keySource, baseUrl, provider } = state.app;
+  const { label: platform, keyPrefix, keysUrl } = PROVIDERS[provider];
   const fromEnv = keySource === 'env';
   const models = state.catalog.polish;
 
@@ -27,8 +30,9 @@ function Settings() {
     if (!state.app.hasKey) return setCredits('—');
     setCredits('读取中…');
     try {
-      const { remaining, used } = await api('GET', '/api/credits');
-      setCredits(`剩余 ${amount(remaining)} · 已用 ${amount(used)}`);
+      const { remaining, used, unit } = await api('GET', '/api/credits');
+      const sign = unit === 'usd' ? '$' : '';
+      setCredits(`剩余 ${sign}${amount(remaining)} · 已用 ${sign}${amount(used)}`);
     } catch {
       setCredits('没有读到');
     }
@@ -37,8 +41,26 @@ function Settings() {
     readCredits();
   }, []);
 
+  // 换平台：之后新提交的生成都走新平台，两个平台的 Key 各存各的。
+  async function changeProvider(next: ProviderId) {
+    if (next === provider || switching) return;
+    setSwitching(true);
+    setTest({ tone: '', text: '' });
+    input.current!.value = '';
+    try {
+      await switchProvider(next);
+      setPolish(polishModel());
+      toast(`已切换到 ${PROVIDERS[next].label}`, 'success');
+    } catch (err) {
+      toast(message(err), 'error', 6000);
+    } finally {
+      setSwitching(false);
+      readCredits();
+    }
+  }
+
   async function testConnection() {
-    setTest({ tone: 'muted', text: '正在连接 Flatkey…' });
+    setTest({ tone: 'muted', text: `正在连接 ${platform}…` });
     await loadModels();
     const info = state.modelsInfo;
     if (info.source === 'remote') {
@@ -57,15 +79,15 @@ function Settings() {
     if (!value) return toast('请粘贴你的 API Key', 'error');
     if (/[^\x21-\x7e]/.test(value)) {
       setMasked(false);
-      return toast('这不像是 API Key：里面有中文或空格，可能是剪贴板里的其他内容。请复制 Flatkey 控制台里以 sk-fk- 开头的那一串。', 'error', 8000);
+      return toast(`这不像是 API Key：里面有中文或空格，可能是剪贴板里的其他内容。请复制 ${platform} 控制台里以 ${keyPrefix} 开头的那一串。`, 'error', 8000);
     }
-    if (!value.startsWith('sk-fk-')) {
-      const ok = await confirmDialog({ title: '这看起来不像 Flatkey 的 Key', message: 'Flatkey 的 Key 通常以 sk-fk- 开头，你粘贴的内容不是。仍然保存吗？', okText: '仍然保存' });
+    if (!value.startsWith(keyPrefix)) {
+      const ok = await confirmDialog({ title: `这看起来不像 ${platform} 的 Key`, message: `${platform} 的 Key 通常以 ${keyPrefix} 开头，你粘贴的内容不是。仍然保存吗？`, okText: '仍然保存' });
       if (!ok) return;
     }
     setSaving(true);
     try {
-      state.app = await api('PUT', '/api/key', { apiKey: value });
+      state.app = await api('PUT', '/api/key', { apiKey: value, provider });
       input.current!.value = '';
       setMasked(true);
       await loadApp();
@@ -80,10 +102,10 @@ function Settings() {
   }
 
   async function remove() {
-    const ok = await confirmDialog({ title: '清除已保存的 API Key？', message: '清除后需要重新填写才能生成。进行中的任务也会暂停查询。', okText: '清除', danger: true });
+    const ok = await confirmDialog({ title: `清除已保存的 ${platform} API Key？`, message: '清除后需要重新填写才能生成。进行中的任务也会暂停查询。', okText: '清除', danger: true });
     if (!ok) return;
     try {
-      await api('DELETE', '/api/key');
+      await api('DELETE', `/api/key?provider=${provider}`);
       await loadApp();
       readCredits();
       setTest({ tone: '', text: '' });
@@ -132,7 +154,16 @@ function Settings() {
           )}
         </FormRow>
       </div>
-      <div className="section-title">Flatkey API Key</div>
+      <div className="section-title">模型平台</div>
+      <div className="form-section">
+        <FormRow label="用哪个平台生成" desc="两个平台的 Key 各存各的，随时可以换回来">
+          <div>
+            <Segmented options={(Object.keys(PROVIDERS) as ProviderId[]).map((id) => ({ value: id, label: PROVIDERS[id].label, disabled: switching }))} value={provider} onChange={changeProvider} />
+          </div>
+        </FormRow>
+      </div>
+      {provider === 'openrouter' && <p className="small muted">OpenRouter 上能生成视频、图片和语音，也能润色提示词。音效、配乐、素材库、真人档案只有 Flatkey 有，切换回去就能用；延长和修改视频也只在 Flatkey 上。</p>}
+      <div className="section-title">{platform} API Key</div>
       <div className="form-section">
         <FormRow label="当前 Key">
           <span className={hasKey ? 'mono' : 'warn-text'}>{hasKey ? `${keyHint}${fromEnv ? '（来自环境变量）' : ''}` : '还没有设置'}</span>
@@ -149,11 +180,11 @@ function Settings() {
           ref={input}
           className={`input mono${masked ? ' masked' : ''}`}
           type="text"
-          placeholder="sk-fk-…"
+          placeholder={`${keyPrefix}…`}
           autoComplete="off"
           data-1p-ignore=""
           data-lpignore="true"
-          aria-label="Flatkey API Key"
+          aria-label={`${platform} API Key`}
           disabled={fromEnv}
           onKeyDown={(e) => e.key === 'Enter' && save()}
         />
@@ -165,9 +196,9 @@ function Settings() {
         </button>
       </div>
       <p className="small muted">
-        Key 只保存在这台电脑上（data/config.json），由本地服务在请求 Flatkey 时带上，不会写进网页代码。在{' '}
-        <a href="https://console.flatkey.ai/keys?lng=zh" target="_blank" rel="noopener">
-          Flatkey 控制台
+        Key 只保存在这台电脑上（data/config.json），由本地服务在请求 {platform} 时带上，不会写进网页代码。在{' '}
+        <a href={keysUrl} target="_blank" rel="noopener">
+          {platform} 控制台
         </a>{' '}
         里可以创建 Key。
       </p>

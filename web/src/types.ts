@@ -1,5 +1,7 @@
 // 页面里来回传的几种数据的形状。接口返回的字段不全列，只写页面用到的。
 
+import type { Features, ProviderId } from '../../shared/models.ts';
+
 export type Kind = 'image' | 'video' | 'audio';
 export type CreateType = 'video' | 'image' | 'speech' | 'sfx' | 'music';
 export type ViewId = 'create' | 'records' | 'library' | 'persons';
@@ -91,6 +93,8 @@ export interface BuiltRequest {
 
 export interface HistoryItem {
   id: string;
+  // 在哪个平台提交的。老记录没有这一项，都是 Flatkey 的。
+  provider?: ProviderId;
   kind: Kind;
   tool?: 'speech' | 'sfx' | 'music';
   status: 'queued' | 'in_progress' | 'completed' | 'failed';
@@ -144,9 +148,17 @@ export interface Voice {
   previewUrl?: string;
 }
 
-export interface AppInfo {
+// 一个平台的 Key 状态。
+export interface KeyInfo {
   hasKey: boolean;
   keyHint: string;
   keySource: string;
   baseUrl: string;
+}
+
+// 最外面的几项说的是当前平台；providers 是两个平台各自的状态。
+export interface AppInfo extends KeyInfo {
+  provider: ProviderId;
+  features: Features;
+  providers: (KeyInfo & { id: ProviderId; label: string })[];
 }

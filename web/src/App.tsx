@@ -14,19 +14,22 @@ import { openSettings } from './settings.tsx';
 import type { ViewId } from './types.ts';
 
 // 四项是同一层的页签。「创作」是首页，在首页再点一次会回到顶部并把光标放回输入框。
+// 素材库和真人档案是 Flatkey 才有的，feature 写着它们各自要平台支持哪一项，平台不支持就不显示。
 // Sparkle 在库里画得比别的图标小一圈（只占画布中间六成），所以放大到 22 显示，线条相应调细，看上去和其他几项一样大、一样粗。
-const VIEWS: { id: ViewId; label: string; icon: IconName; size?: number; stroke?: number }[] = [
+const VIEWS: { id: ViewId; label: string; icon: IconName; size?: number; stroke?: number; feature?: 'library' | 'persons' }[] = [
   { id: 'create', label: '创作', icon: 'sparkle', size: 22, stroke: 1.1 },
   { id: 'records', label: '创作记录', icon: 'history' },
-  { id: 'library', label: '素材库', icon: 'folder' },
-  { id: 'persons', label: '真人档案', icon: 'user' },
+  { id: 'library', label: '素材库', icon: 'folder', feature: 'library' },
+  { id: 'persons', label: '真人档案', icon: 'user', feature: 'persons' },
 ];
 const NO_KEY = '还没有设置 API Key';
 
 export function App() {
   const visit = useStore('view');
   useStore('boot', 'app');
-  const { view } = state;
+  const views = VIEWS.filter((v) => !v.feature || state.app.features[v.feature]);
+  // 正开着的页面在换平台之后没有了，就回到创作页。
+  const view = views.some((v) => v.id === state.view) ? state.view : 'create';
   const main = useRef<HTMLElement>(null);
   const opened = useRef(new Set<ViewId>(['create'])).current;
   opened.add(view);
@@ -50,7 +53,7 @@ export function App() {
           <span className="brand-word" role="img" aria-label="INNATE" />
         </div>
         <nav className="nav">
-          {VIEWS.map((v) => {
+          {views.map((v) => {
             const current = view === v.id;
             return (
               <button key={v.id} className={`nav-item ${current ? 'active' : ''}`} type="button" aria-current={current ? 'page' : undefined} onClick={() => goTo(v.id)}>

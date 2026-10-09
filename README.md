@@ -1,6 +1,6 @@
 # Seedance Studio
 
-通过 Flatkey 生成视频、图片和音频的本地网页应用。视频用 Seedance 和 Grok，图片用 Grok，语音和音效用 ElevenLabs，还能给视频配乐、让模型帮忙润色提示词。
+通过 Flatkey 或 OpenRouter 生成视频、图片和音频的本地网页应用。视频用 Seedance 和 Grok，图片用 Grok，语音和音效用 ElevenLabs，还能给视频配乐、让模型帮忙润色提示词。两个平台在「设置」里切换，见下面的[两个平台](#两个平台)。
 
 ## 第一次使用
 
@@ -65,7 +65,27 @@ npm start
 | `data/audio/` | 生成的语音、音效、配乐 |
 | `data/uploads/` | 从电脑里选来当输入的文件（Grok 的首帧、要配乐的视频）。删除记录不会删掉它们，用不着了可以手动清理 |
 
-也可以不把 Key 存进文件，改用环境变量：`FLATKEY_API_KEY=sk-fk-... npm start`。
+也可以不把 Key 存进文件，改用环境变量：`FLATKEY_API_KEY=sk-fk-... npm start`（OpenRouter 的是 `OPENROUTER_API_KEY`）。
+
+## 两个平台
+
+在「设置」的「模型平台」里选用哪个平台生成。两个平台的 Key 各存各的，换过去再换回来不用重填。换平台只影响之后新提交的生成；已经提交的任务仍然回它原来的平台查询。
+
+| | Flatkey | OpenRouter |
+| --- | --- | --- |
+| 视频模型 | Seedance、Grok | Seedance、Grok，还有 Veo、Kling、Wan、海螺、Runway 等 |
+| 文生视频、首尾帧、参考图 | 有 | 有 |
+| 参考视频、参考音频 | 有，从素材库选 | 只收公网的 https 链接，本机的文件发不过去 |
+| 延长和修改视频 | 有 | 没有 |
+| Seedance 的水印开关、联网搜索、超分、时长自动、比例自适应 | 有 | 没有 |
+| 提示词润色 | 有 | 有 |
+| 图片 | Grok | Grok，还有 Seedream、GPT Image、Gemini 等 |
+| 语音 | ElevenLabs，音色能试听、能按语言筛 | ElevenLabs，音色只有名字，不能试听 |
+| 音效、配乐、素材库、真人档案 | 有 | 平台上没有 |
+
+选了 OpenRouter 之后，它没有的那些创作类型和页面不显示。它上面每个视频模型支持的分辨率、比例、时长，每个图片模型收的画面比例，都是从它的模型列表里读来的，出了新模型不用改代码。
+
+OpenRouter 这一列在 2026-10-09 用 Seedance 2.5 实测过：文生视频、首帧、首尾帧、参考图能用；把本机的视频内嵌进请求会被拒绝，Seedance 2.5 也不支持接着上一个任务继续生成，所以延长和修改做不了。参考视频和参考音频用公网链接这条路是按它的接口文档做的，没有实测。图片（Grok）和语音（ElevenLabs）同一天实测过能用。
 
 ### 连接 Flatkey 时断时续
 
@@ -83,7 +103,7 @@ NODE_USE_ENV_PROXY=1 npm start
 npm test
 ```
 
-先做类型检查，再用模拟的 Flatkey 接口跑一遍主要流程（视频、图片、语音、音效、配乐、润色、素材、真人档案），不花钱，也不会用到真实的 Key 和 `data/`。
+先做类型检查，再用模拟的 Flatkey 和 OpenRouter 接口跑一遍主要流程（视频、图片、语音、音效、配乐、润色、素材、真人档案、切换平台），不花钱，也不会用到真实的 Key 和 `data/`。
 
 调界面时可以用 `npm run dev:mock` 另起一份接模拟接口的应用（<http://127.0.0.1:5179>）。
 
@@ -93,8 +113,8 @@ npm test
 
 ## 结构
 
-- `server.js`：本地服务。托管页面、保管 Key、转发 Flatkey 请求、轮询任务、保存生成结果。只监听 `127.0.0.1`，并拒绝其他网站发来的跨站请求。
-- `shared/models.ts`：模型登记表。每个模型属于哪一族、型号后面的附注、能选的分辨率和时长、润色时用的提示词规则都在这里，页面和服务都读它。加新模型先改这个文件。
+- `server.js`：本地服务。托管页面、保管 Key、把请求转发给当前选的平台、轮询任务、保存生成结果。只监听 `127.0.0.1`，并拒绝其他网站发来的跨站请求。
+- `shared/models.ts`：模型登记表。两个平台各自能用什么、每个模型属于哪一族、型号后面的附注、能选的分辨率和时长、润色时用的提示词规则都在这里，页面和服务都读它。加新模型先改这个文件。
 - `web/`：页面。React 加 TypeScript，用 Vite 构建到 `web/dist/`，由 `server.js` 托管。
   - `web/src/ui/`：基础控件、浮层和弹窗、图标。
   - `web/src/composer/`：创作输入框。`state.ts` 是状态和动作，`Composer.tsx` 是界面。
@@ -103,7 +123,7 @@ npm test
 - `test/`：模拟接口和自动化测试。
 - `DESIGN.md`：界面的视觉规范（对标 Antigravity 与 Codex 的深色工作台），改界面前先看它。
 
-接口文档：<https://docs.flatkey.ai/zh/guides/seedance>。语音、音效、配乐这几个接口 Flatkey 的文档里没有写，这里用的格式是对着真实接口试出来的，写在 `server.js` 对应的路由里。
+接口文档：Flatkey 的在 <https://docs.flatkey.ai/zh/guides/seedance>，OpenRouter 的视频接口在 <https://openrouter.ai/docs/guides/overview/multimodal/video-generation>。语音、音效、配乐这几个接口 Flatkey 的文档里没有写，这里用的格式是对着真实接口试出来的，写在 `server.js` 对应的路由里。
 
 ## 许可
 

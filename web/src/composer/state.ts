@@ -5,9 +5,9 @@ import { api, state, on, emit, KINDS, findAsset, assetReadiness, refreshAsset, s
 import { exclusive } from '../playback.ts';
 import { refFromAsset, refFromRecord, assetFromRecord, readVideo } from '../media.ts';
 import { toast } from '../ui/layers.tsx';
-import { buildRequest as buildVideoRequest, buildImageRequest, buildSpeechRequest, buildSfxRequest, buildMusicRequest, refsInUse, carryRefs, videoFamily, RES_RANK } from '../request.ts';
-import { ALL_RESOLUTIONS, VIDEO_TASKS, videoCapabilities, videoFamilyOf, type VideoTask } from '../../../shared/models.ts';
-import type { Asset, BuiltRequest, CreateType, HistoryItem, Ref, RefStatus, Studio, VideoForm, Voice } from '../types.ts';
+import { buildRequest as buildVideoRequest, buildOpenRouterRequest, buildImageRequest, buildSpeechRequest, buildSfxRequest, buildMusicRequest, refsInUse, carryRefs, videoFamily, RES_RANK } from '../request.ts';
+import { ALL_RESOLUTIONS, VIDEO_TASKS, videoCapabilities, videoFamilyOf, type VideoCapabilities, type VideoSpec, type VideoTask } from '../../../shared/models.ts';
+import type { Asset, BuiltRequest, CreateType, HistoryItem, Kind, Ref, RefStatus, Studio, VideoForm, Voice } from '../types.ts';
 
 // 视频的表单单独存一份（生成记录里存的也是它）；当前选的类型和其余几种的表单存在另一份里。
 const FORM_KEY = 'seedance-studio.form.v1';
@@ -132,10 +132,45 @@ function persist() {
   }, 300);
 }
 
-// Grok 只有文生视频和图生视频，也没有 Seedance「更多」里的那些设置。
-export const isGrok = (model = composer.form.model) => videoFamily(model) === 'grok';
-// 当前模型能选的分辨率、比例、时长。各模型的范围登记在 shared/models.ts。
-export const capabilities = (model = composer.form.model) => videoCapabilities(model);
+// 当前平台上能做哪几种内容。视频两个平台都有，其余看平台。
+export const availableTypes = () => TYPES.filter((t) => t.value === 'video' || state.app.features[t.value]);
+
+export const isOpenRouter = () => state.app.provider === 'openrouter';
+// Flatkey 上的 Grok 只有文生视频和图生视频，也没有 Seedance「更多」里的那些设置。
+export const isGrok = (model = composer.form.model) => !isOpenRouter() && videoFamily(model) === 'grok';
+
+// OpenRouter 的模型支持什么，是从它的模型列表里读来的。列表还没读到时先按这一份保守的来。
+const FALLBACK_SPEC: VideoSpec = { resolutions: ['480p', '720p'], ratios: ['16:9', '4:3', '1:1', '3:4', '9:16'], durations: [4, 5, 6, 7, 8], autoDuration: false, frames: ['first_frame'], audio: false, seed: false };
+const specOf = (model: string) => state.videoSpecs[model] || FALLBACK_SPEC;
+
+// 当前模型能选的分辨率、比例、时长。Flatkey 的模型登记在 shared/models.ts，OpenRouter 的来自它的模型列表。
+export const capabilities = (model = composer.form.model): VideoCapabilities => (isOpenRouter() ? specOf(model) : videoCapabilities(model));
+
+// 当前平台和模型下，输入框该露出哪些东西。
+export interface Traits {
+  // 能不能给首帧、尾帧，能不能用参考素材，参考素材能用哪几类。
+  frames: boolean;
+  lastFrame: boolean;
+  reference: boolean;
+  refKinds: Kind[];
+  // 素材直接用本机的文件，不经过 Flatkey 的素材库。
+  localFiles: boolean;
+  // 「更多」里的几项：要不要声音、随机种子，以及只有 Flatkey 上的 Seedance 才有的那些（水印、联网搜索、输入模式、超分）。
+  audio: boolean;
+  seed: boolean;
+  seedanceExtras: boolean;
+}
+
+export function traits(model = composer.form.model): Traits {
+  if (isOpenRouter()) {
+    const spec = specOf(model);
+    // 参考图所有模型都收；参考视频和音频只有 Seedance 2 代以上认（OpenRouter 的接口文档里写的）。
+    const refKinds: Kind[] = videoFamilyOf(model) === 'seedance' ? ['image', 'video', 'audio'] : ['image'];
+    return { frames: spec.frames.includes('first_frame'), lastFrame: spec.frames.includes('last_frame'), reference: true, refKinds, localFiles: true, audio: spec.audio, seed: spec.seed, seedanceExtras: false };
+  }
+  const grok = isGrok(model);
+  return { frames: true, lastFrame: !grok, reference: !grok, refKinds: ['image', 'video', 'audio'], localFiles: grok, audio: !grok, seed: !grok, seedanceExtras: !grok };
+}
 
 const allRefs = () => refsInUse(composer.form);
 export const usedAssetIds = () => allRefs().map((r) => r.assetId).filter((id): id is string => Boolean(id));
@@ -153,6 +188,7 @@ export function currentRequest(): BuiltRequest {
   if (studio.type === 'speech') return buildSpeechRequest(studio.speech);
   if (studio.type === 'sfx') return buildSfxRequest(studio.sfx);
   if (studio.type === 'music') return buildMusicRequest(studio.music);
+  if (isOpenRouter()) return buildOpenRouterRequest(composer.form, specOf(composer.form.model));
   return buildVideoRequest(composer.form, refStatus);
 }
 
@@ -169,11 +205,14 @@ function fitSrTarget() {
 function fitModel() {
   const { form } = composer;
   const able = capabilities();
-  if (!able.resolutions.includes(form.resolution)) form.resolution = '720p';
-  if (!able.ratios.includes(form.ratio)) form.ratio = '16:9';
+  // 常用的那一档这个模型有就用它，没有就用它支持的第一档。
+  const pick = <T,>(list: T[], usual: T) => (list.includes(usual) ? usual : (list[0] ?? usual));
+  if (!able.resolutions.includes(form.resolution)) form.resolution = pick(able.resolutions, '720p');
+  if (!able.ratios.includes(form.ratio)) form.ratio = pick(able.ratios, '16:9');
   if (!able.autoDuration) form.durationAuto = false;
-  if (!able.durations.includes(Number(form.duration))) form.duration = 5;
-  if (isGrok() && form.mode === 'reference') form.mode = 'text';
+  if (!able.durations.includes(Number(form.duration))) form.duration = pick(able.durations, 5);
+  const can = traits();
+  if ((form.mode === 'reference' && !can.reference) || (form.mode === 'frames' && !can.frames)) form.mode = 'text';
 }
 
 // 用到的素材里有真人素材就盯着那份档案，素材库里查不到的就去问一次。
@@ -203,7 +242,7 @@ export function update(patch: Partial<VideoForm>) {
   changed();
 }
 
-// 换生成方式。Grok 的首帧只能用本机的文件，素材库里的参考图带不过去。
+// 换生成方式。Flatkey 上 Grok 的首帧只能用本机的文件，素材库里的参考图带不过去。
 export function setMode(mode: VideoForm['mode']) {
   update({ mode, ...(isGrok() ? {} : carryRefs(composer.form, mode, KINDS.image.max)) });
 }
@@ -222,8 +261,23 @@ export function updateSr(patch: Partial<VideoForm['sr']>) {
   changed();
 }
 
+// 图片能选的画面比例。OpenRouter 上各模型收的比例不一样，只留这个模型收的；Flatkey 上不受限。
+// 模型一个比例都不收时返回空的，这时不显示比例的入口。
+export const IMAGE_RATIOS = ['16:9', '3:2', '4:3', '1:1', '3:4', '2:3', '9:16'];
+export function imageRatios(model = composer.studio.image.model) {
+  const accepted = state.catalog.imageRatios[model];
+  return accepted ? IMAGE_RATIOS.filter((r) => accepted.includes(r)) : IMAGE_RATIOS;
+}
+// 换了图片模型后，选着的比例它不收就换成它收的第一个。
+function fitImage() {
+  const { image } = composer.studio;
+  const ratios = imageRatios();
+  if (ratios.length && !ratios.includes(image.ratio)) image.ratio = ratios[0];
+}
+
 export function updateStudio<T extends 'image' | 'speech' | 'sfx' | 'music'>(type: T, patch: Partial<Studio[T]>) {
   Object.assign(composer.studio[type], patch);
+  if (type === 'image') fitImage();
   composer.submitError = '';
   persist();
   changed();
@@ -261,7 +315,10 @@ export function setStudio(type: 'image' | 'speech' | 'sfx' | 'music', next: Reco
 // 想让视频严格从这张图开始，再手动改成首尾帧。Seedance 只认素材库，所以先把图传上去。
 // Grok：它只有「图生视频」一种用法，就是把图当首帧，直接用本机的文件。
 export async function useImageForVideo(item: HistoryItem) {
-  if (isGrok()) {
+  if (isOpenRouter()) {
+    // OpenRouter 直接用本机的文件当参考图。
+    Object.assign(composer.form, { mode: 'reference', refs: { image: [await refFromRecord(item)], video: [], audio: [] } });
+  } else if (isGrok()) {
     Object.assign(composer.form, { mode: 'frames', frames: { first: await refFromRecord(item), last: null } });
   } else {
     toast('正在把图片传到素材库…', 'info');
@@ -276,6 +333,8 @@ export async function useImageForVideo(item: HistoryItem) {
 // 这里把视频传进素材库、切到参考生成、填好开头和结尾的约束，用户只要在中间写上内容。
 const sourceAssets = new Map<string, Asset>();
 export async function useVideoAsSource(item: HistoryItem, task: VideoTask) {
+  // OpenRouter 的参考视频只收公网链接，本机的视频发不过去（2026-10-09 实测），所以这两件事只在 Flatkey 上做。
+  if (isOpenRouter()) throw new Error('延长和修改只在 Flatkey 上可用');
   // 只有 Seedance 能做。当前选的不是，就换成账号里的第一个 Seedance 型号。
   const model = [composer.form.model, item.model, ...state.models].find((id) => videoFamilyOf(id) === 'seedance' && state.models.includes(id));
   if (!model) throw new Error('账号里没有 Seedance 模型，延长和修改用不了');
@@ -475,24 +534,30 @@ export function focusComposer() {
 export function initComposer() {
   const { form, studio } = composer;
   if (!state.models.includes(form.model) && state.modelsInfo.source === 'remote') form.model = state.models[0];
+  if (!availableTypes().some((t) => t.value === studio.type)) {
+    studio.type = 'video';
+    state.createType = 'video';
+  }
   fitModel();
   syncWatches();
   if (studio.type === 'speech') ensureVoices();
 
   on('app', () => {
+    // 换了平台之后，正在编辑的那种内容新平台上可能没有，退回视频。
+    if (!availableTypes().some((t) => t.value === composer.studio.type)) setType('video');
     if (composer.studio.type === 'speech') ensureVoices();
   });
   on('models', () => {
     const info = state.modelsInfo;
-    if (info.source === 'remote' && !state.models.includes(composer.form.model)) {
-      composer.form.model = state.models[0];
-      fitModel();
-      persist();
-    }
-    if (state.catalog.image.length && !state.catalog.image.includes(composer.studio.image.model)) {
-      composer.studio.image.model = state.catalog.image[0];
-      persist();
-    }
+    // 选着的型号不在列表里就换成第一个。列表没读到时一般先留着不动，但留着的是另一个平台的型号（带不带厂商前缀对不上）时也要换。
+    const model = composer.form.model;
+    if (!state.models.includes(model) && state.models.length && (info.source === 'remote' || model.includes('/') !== isOpenRouter())) composer.form.model = state.models[0];
+    // 同一个型号在两个平台上支持的东西也不一样，所以每次都重新对一遍。
+    fitModel();
+    persist();
+    if (state.catalog.image.length && !state.catalog.image.includes(composer.studio.image.model)) composer.studio.image.model = state.catalog.image[0];
+    fitImage();
+    persist();
     if (state.app.hasKey && info.source === 'default' && info.error) toast(`没能读到账号的模型列表，暂时显示默认型号。${info.error}`, 'error', 6000);
     changed();
   });

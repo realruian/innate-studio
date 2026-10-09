@@ -2,7 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildRequest, refsInUse, carryRefs, buildImageRequest, buildSpeechRequest, buildSfxRequest, buildMusicRequest } from '../web/src/request.ts';
+import { buildRequest, buildOpenRouterRequest, refsInUse, carryRefs, buildImageRequest, buildSpeechRequest, buildSfxRequest, buildMusicRequest } from '../web/src/request.ts';
 
 const baseForm = (patch = {}) => ({
   mode: 'text',
@@ -214,4 +214,51 @@ test('配乐：要有视频，并且读到了时长', () => {
   assert.deepEqual(buildMusicRequest({ video: { url: '/media/videos/a.mp4', duration: 5.04 } }), { body: { video: '/media/videos/a.mp4', duration: 5.04 }, problems: [] });
   assert.deepEqual(buildMusicRequest({ video: null }).problems, ['请选择要配乐的视频']);
   assert.deepEqual(buildMusicRequest({ video: { url: '/media/videos/a.mp4', duration: 0 } }).problems, ['没有读到这段视频的时长，请重新选择']);
+});
+
+// ---------- OpenRouter ----------
+
+const spec = (patch = {}) => ({ resolutions: ['480p', '720p'], ratios: ['16:9', '9:16'], durations: [4, 5], autoDuration: false, frames: ['first_frame', 'last_frame'], audio: true, seed: true, ...patch });
+const orForm = (patch = {}) => baseForm({ model: 'bytedance/seedance-2.5', ...patch });
+
+test('OpenRouter 文生视频：提示词是 prompt 字符串，不带 Seedance 在 Flatkey 上的那些参数', () => {
+  const { payload, problems } = buildOpenRouterRequest(orForm({ seed: '42', webSearch: true, watermark: true, durationAuto: true }), spec());
+  assert.deepEqual(problems, []);
+  assert.deepEqual(payload, { model: 'bytedance/seedance-2.5', duration: 5, resolution: '720p', prompt: '清晨的厨房', aspect_ratio: '16:9', generate_audio: true, seed: 42 });
+  assert.deepEqual(buildOpenRouterRequest(orForm({ prompt: ' ' }), spec()).problems, ['请填写提示词']);
+});
+
+test('OpenRouter 模型不支持的选项不发：声音开关、随机种子', () => {
+  const { payload } = buildOpenRouterRequest(orForm({ seed: '42' }), spec({ audio: false, seed: false }));
+  assert.equal('generate_audio' in payload, false);
+  assert.equal('seed' in payload, false);
+});
+
+test('OpenRouter 首尾帧：放在 frame_images 里，比例跟着图片走；模型只收首帧时不发尾帧', () => {
+  const frames = { first: local('/media/images/a.jpg'), last: local('/media/images/b.jpg') };
+  const both = buildOpenRouterRequest(orForm({ mode: 'frames', frames }), spec());
+  assert.deepEqual(both.problems, []);
+  assert.deepEqual(both.payload.frame_images, [
+    { type: 'image_url', image_url: { url: '/media/images/a.jpg' }, frame_type: 'first_frame' },
+    { type: 'image_url', image_url: { url: '/media/images/b.jpg' }, frame_type: 'last_frame' },
+  ]);
+  assert.equal('aspect_ratio' in both.payload, false);
+  assert.equal(buildOpenRouterRequest(orForm({ mode: 'frames', frames }), spec({ frames: ['first_frame'] })).payload.frame_images.length, 1);
+  assert.deepEqual(buildOpenRouterRequest(orForm({ mode: 'frames' }), spec()).problems, ['请添加首帧图片']);
+});
+
+test('OpenRouter 参考生成：素材放在 input_references 里；本机的视频和 Flatkey 素材库里的素材用不了', () => {
+  const refs = { image: [local('/media/images/a.jpg')], video: [ref('video', 'https://example.com/a.mp4')], audio: [] };
+  const { payload, problems } = buildOpenRouterRequest(orForm({ mode: 'reference', refs }), spec());
+  assert.deepEqual(problems, []);
+  assert.deepEqual(payload.input_references, [
+    { type: 'image_url', image_url: { url: '/media/images/a.jpg' } },
+    { type: 'video_url', video_url: { url: 'https://example.com/a.mp4' } },
+  ]);
+  assert.equal(payload.aspect_ratio, '16:9');
+
+  const localVideo = { image: [], video: [{ uid: 'v', kind: 'video', source: 'local', url: '/media/videos/a.mp4' }], audio: [] };
+  assert.match(buildOpenRouterRequest(orForm({ mode: 'reference', refs: localVideo }), spec()).problems[0], /公网链接/);
+  const fromLibrary = { image: [{ uid: 'a', kind: 'image', source: 'asset', assetId: 'ast_1', url: 'asset://ast_1' }], video: [], audio: [] };
+  assert.match(buildOpenRouterRequest(orForm({ mode: 'reference', refs: fromLibrary }), spec()).problems[0], /素材库/);
 });

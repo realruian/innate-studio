@@ -13,8 +13,8 @@ import { Thumb, openAssetPicker } from '../assets.tsx';
 import { openSettings } from '../settings.tsx';
 import type { Kind, Ref, VideoForm } from '../types.ts';
 import {
-  composer, TYPES, RESOLUTIONS, RATIOS, SR_RESOLUTIONS,
-  typeOf, draftPrompt, isGrok, capabilities, usedAssetIds, refStatus, currentRequest,
+  composer, RESOLUTIONS, RATIOS, SR_RESOLUTIONS,
+  typeOf, draftPrompt, isGrok, isOpenRouter, traits, availableTypes, capabilities, imageRatios, usedAssetIds, refStatus, currentRequest,
   update, setMode, swapFrames, updateSr, updateStudio, setType, typePrompt, polish, undoPolish, submit, registerPrompt,
   voiceName, voiceNote, togglePreview, setVoiceFilter, pickVoice, stopPreview,
 } from './state.ts';
@@ -31,8 +31,13 @@ const MODES: { value: VideoForm['mode']; label: string; icon: IconName; note: st
   { value: 'frames', label: '首尾帧', icon: 'frames', note: '指定首帧，尾帧可选' },
   { value: 'reference', label: '参考生成', icon: 'layers', note: '图片、视频、音频作参考' },
 ];
-// Grok 只有文生视频和图生视频。
-const GROK_MODES: typeof MODES = [MODES[0], { value: 'frames', label: '图生视频', icon: 'frames', note: '给一张首帧' }];
+// 只能给首帧、不能给尾帧的模型，第二种方式叫「图生视频」。
+const FIRST_FRAME_MODE: (typeof MODES)[number] = { value: 'frames', label: '图生视频', icon: 'frames', note: '给一张首帧' };
+// 当前模型能用的生成方式。
+function modesFor() {
+  const can = traits();
+  return [MODES[0], ...(can.frames ? [can.lastFrame ? MODES[1] : FIRST_FRAME_MODE] : []), ...(can.reference ? [MODES[2]] : [])];
+}
 const INPUT_TYPES = [
   { value: 'auto', label: '自动判断', note: '推荐' },
   { value: 'reference', label: 'reference', note: '参考' },
@@ -40,7 +45,6 @@ const INPUT_TYPES = [
 ];
 const REF_PREFIX: Record<Kind, string> = { image: '图', video: '视频', audio: '音频' };
 
-const IMAGE_RATIOS = ['16:9', '3:2', '4:3', '1:1', '3:4', '2:3', '9:16'].map((value) => ({ value, label: value }));
 const IMAGE_COUNTS = [1, 2, 3, 4];
 const SFX_DURATIONS = [1, 2, 3, 5, 8, 10, 15, 20];
 const SFX_INFLUENCES = [
@@ -102,13 +106,13 @@ function MediaBlock() {
   } else if (form.mode === 'frames') {
     const frame = (key: 'first' | 'last', label: string) => {
       const setRef = (value: Ref | null) => update({ frames: { ...form.frames, [key]: value } });
-      return <Slot item={form.frames[key]} label={label} onAdd={() => openAssetPicker({ kind: 'image', remaining: 1, usedIds: usedAssetIds(), local: isGrok(), onPick: setRef })} onRemove={() => setRef(null)} />;
+      return <Slot item={form.frames[key]} label={label} onAdd={() => openAssetPicker({ kind: 'image', remaining: 1, usedIds: usedAssetIds(), local: traits().localFiles, onPick: setRef })} onRemove={() => setRef(null)} />;
     };
-    // Grok 只有首帧。
+    // 有的模型只有首帧。
     content = (
       <div className="frames-row">
         {frame('first', '首帧')}
-        {!isGrok() && (
+        {traits().lastFrame && (
           <>
             <button className="frames-swap" type="button" aria-label="互换首帧和尾帧" disabled={!form.frames.first && !form.frames.last} onClick={swapFrames} {...tip('互换首帧和尾帧')}>
               <Icon name="swap" />
@@ -119,20 +123,24 @@ function MediaBlock() {
       </div>
     );
   } else {
-    const kinds = Object.keys(KINDS) as Kind[];
+    // 这个模型不收的素材类型不让添加；已经加进来的仍然显示，方便移除。
+    const allowed = traits().refKinds;
+    const kinds = (Object.keys(KINDS) as Kind[]).filter((kind) => allowed.includes(kind) || form.refs[kind].length > 0);
     const setList = (kind: Kind, next: Ref[]) => update({ refs: { ...composer.form.refs, [kind]: next } });
     // 三种素材共用一个「+」：先选类型，再选来源。
     const full = kinds.every((kind) => form.refs[kind].length >= KINDS[kind].max);
     const addRef = (anchor: HTMLElement) =>
       openMenu(anchor, {
         label: '添加参考素材',
-        items: kinds.map((kind) => ({ value: kind, label: KINDS[kind].label, note: `${form.refs[kind].length} / ${KINDS[kind].max}`, disabled: form.refs[kind].length >= KINDS[kind].max })),
+        items: kinds.map((kind) => ({ value: kind, label: KINDS[kind].label, note: `${form.refs[kind].length} / ${KINDS[kind].max}`, disabled: form.refs[kind].length >= KINDS[kind].max || !allowed.includes(kind) })),
         onSelect: (value) => {
           const kind = value as Kind;
           openAssetPicker({
             kind,
             remaining: KINDS[kind].max - composer.form.refs[kind].length,
             usedIds: usedAssetIds(),
+            // OpenRouter：图片用本机的文件；视频和音频它只收公网链接，所以只留「粘贴链接」。
+            ...(isOpenRouter() ? { local: true, ...(kind === 'image' ? {} : { sources: ['url' as const] }) } : {}),
             onPick: (ref) => setList(kind, [...composer.form.refs[kind], ref].slice(0, KINDS[kind].max)),
           });
         },
@@ -191,7 +199,8 @@ function PanelButton({ name, label, ariaLabel, className, panel, onClose, childr
 
 function VideoToolbar() {
   const { form } = composer;
-  const modes = isGrok() ? GROK_MODES : MODES;
+  const modes = modesFor();
+  const can = traits();
   const mode = modes.find((m) => m.value === form.mode) || modes[0];
   const ratio = RATIOS.find((r) => r.value === form.ratio) || RATIOS[0];
   const models = state.models.includes(form.model) ? state.models : [form.model, ...state.models];
@@ -225,8 +234,8 @@ function VideoToolbar() {
         options={[...durations.map((d) => ({ value: String(d), label: `${d} 秒` })), ...(autoDuration ? [{ value: 'auto', label: '由模型决定', display: '时长自动' }] : [])]}
         onChange={(value) => update(value === 'auto' ? { durationAuto: true } : { durationAuto: false, duration: Number(value) })}
       />
-      {/* 「更多」里全是 Seedance 的设置，Grok 一项也用不上。 */}
-      {!isGrok() && (
+      {/* 「更多」里的设置这个模型一项也用不上时，不显示入口。 */}
+      {(can.audio || can.seed || can.seedanceExtras) && (
         <PanelButton key="more" name="more" label="更多设置" className="more-popover" panel={() => <MorePanel />}>
           <Icon name="sliders" />
           <span>更多</span>
@@ -238,7 +247,10 @@ function VideoToolbar() {
 
 function ImageRatioButton() {
   const ref = useRef<HTMLButtonElement>(null);
-  const ratio = IMAGE_RATIOS.find((r) => r.value === composer.studio.image.ratio) || IMAGE_RATIOS[0];
+  // 只列当前模型收的比例；它一个都不收就不显示这个入口。
+  const ratios = imageRatios().map((value) => ({ value, label: value }));
+  const ratio = ratios.find((r) => r.value === composer.studio.image.ratio) || ratios[0];
+  if (!ratio) return null;
   return (
     <button
       ref={ref}
@@ -248,7 +260,7 @@ function ImageRatioButton() {
       aria-haspopup="listbox"
       aria-expanded="false"
       aria-label={`画面比例：${ratio.label}`}
-      onClick={() => openMenu(ref.current!, { label: '画面比例', items: IMAGE_RATIOS.map((r) => ({ ...r, selected: r === ratio })), onSelect: (value) => updateStudio('image', { ratio: value }) })}
+      onClick={() => openMenu(ref.current!, { label: '画面比例', items: ratios.map((r) => ({ ...r, selected: r === ratio })), onSelect: (value) => updateStudio('image', { ratio: value }) })}
     >
       <span className="ratio-box">
         <RatioShape value={ratio.value} />
@@ -312,6 +324,8 @@ function FramePanel() {
   useStore('composer');
   const { form } = composer;
   const { resolutions: allowed, ratios } = capabilities();
+  // Flatkey 的模型固定列三档，不支持的那档变灰；OpenRouter 各模型的档位差别大（768p、2K、4K），直接列它支持的。
+  const resolutions = isOpenRouter() ? allowed : RESOLUTIONS;
   return (
     <>
       <div className="popover-title">画面比例</div>
@@ -326,9 +340,9 @@ function FramePanel() {
         ))}
       </div>
       <div className="popover-title">分辨率</div>
-      <Segmented options={RESOLUTIONS.map((r) => ({ value: r, label: r, disabled: !allowed.includes(r) }))} value={form.resolution} onChange={(resolution) => update({ resolution })} />
-      {allowed.length < RESOLUTIONS.length && <div className="small muted">{form.model} 不支持 1080p</div>}
-      {isGrok() && form.mode === 'frames' && <div className="small muted">图生视频时，画面比例跟着首帧走</div>}
+      <Segmented options={resolutions.map((r) => ({ value: r, label: r, disabled: !allowed.includes(r) }))} value={form.resolution} onChange={(resolution) => update({ resolution })} />
+      {!isOpenRouter() && allowed.length < RESOLUTIONS.length && <div className="small muted">{form.model} 不支持 1080p</div>}
+      {(isGrok() || isOpenRouter()) && form.mode === 'frames' && <div className="small muted">有首帧时，画面比例跟着首帧走</div>}
     </>
   );
 }
@@ -342,7 +356,7 @@ function NumberInput({ value, onInput, inputRef, ...attrs }: { value: string | n
 function MorePanel() {
   useStore('composer');
   const { form } = composer;
-  const sr = form.sr;
+  const can = traits();
   const seedInput = useRef<HTMLInputElement>(null);
   const randomSeed = () => {
     const seed = String(Math.floor(Math.random() * 2147483647));
@@ -351,22 +365,39 @@ function MorePanel() {
   };
   return (
     <>
-      <div className="popover-title">输出</div>
-      <FormRow label="同步音频" desc="同时生成与画面同步的声音">
-        <Toggle checked={form.generateAudio} onChange={(generateAudio) => update({ generateAudio })} label="同步音频" />
-      </FormRow>
-      <FormRow label="水印">
-        <Toggle checked={form.watermark} onChange={(watermark) => update({ watermark })} label="水印" />
-      </FormRow>
-      <div className="popover-title">高级</div>
-      <FormRow label="随机种子">
-        <div className="row">
-          <NumberInput inputRef={seedInput} value={form.seed} onInput={(seed) => update({ seed })} placeholder="留空则每次随机" step="1" aria-label="随机种子" />
-          <button className="btn" type="button" onClick={randomSeed}>
-            随机
-          </button>
-        </div>
-      </FormRow>
+      {(can.audio || can.seedanceExtras) && <div className="popover-title">输出</div>}
+      {can.audio && (
+        <FormRow label="同步音频" desc="同时生成与画面同步的声音">
+          <Toggle checked={form.generateAudio} onChange={(generateAudio) => update({ generateAudio })} label="同步音频" />
+        </FormRow>
+      )}
+      {can.seedanceExtras && (
+        <FormRow label="水印">
+          <Toggle checked={form.watermark} onChange={(watermark) => update({ watermark })} label="水印" />
+        </FormRow>
+      )}
+      {(can.seed || can.seedanceExtras) && <div className="popover-title">高级</div>}
+      {can.seed && (
+        <FormRow label="随机种子">
+          <div className="row">
+            <NumberInput inputRef={seedInput} value={form.seed} onInput={(seed) => update({ seed })} placeholder="留空则每次随机" step="1" aria-label="随机种子" />
+            <button className="btn" type="button" onClick={randomSeed}>
+              随机
+            </button>
+          </div>
+        </FormRow>
+      )}
+      {can.seedanceExtras && <SeedanceExtras />}
+    </>
+  );
+}
+
+// 只有 Flatkey 上的 Seedance 才有的几项：联网搜索、输入模式、超分。
+function SeedanceExtras() {
+  const { form } = composer;
+  const sr = form.sr;
+  return (
+    <>
       <FormRow label="联网搜索增强" desc="让任务先联网检索相关信息">
         <Toggle checked={form.webSearch} onChange={(webSearch) => update({ webSearch })} label="联网搜索增强" />
       </FormRow>
@@ -424,9 +455,11 @@ function VoicePanel({ close }: { close: () => void }) {
   useStore('composer');
   if (!state.voices) return <div className="empty small-empty">{composer.voicesError ? `读取音色失败：${composer.voicesError}` : '正在读取音色…'}</div>;
   const match = { all: () => true, zh: (language: string) => language === 'zh', en: (language: string) => language === 'en', other: (language: string) => language !== 'zh' && language !== 'en' };
+  // 有的平台只给音色的名字，不知道是什么语言，这时不显示按语言筛选的那一排。
+  const languages = state.voices.some((voice) => voice.language);
   return (
     <>
-      <Segmented
+      {languages && <Segmented
         options={[
           { value: 'all', label: '全部' },
           { value: 'zh', label: '中文' },
@@ -435,10 +468,10 @@ function VoicePanel({ close }: { close: () => void }) {
         ]}
         value={composer.voiceFilter}
         onChange={setVoiceFilter}
-      />
+      />}
       <div className="voice-list" role="listbox" aria-label="音色">
         {state.voices
-          .filter((voice) => match[composer.voiceFilter](voice.language))
+          .filter((voice) => !languages || match[composer.voiceFilter](voice.language))
           .map((voice) => {
             const selected = voice.id === composer.studio.speech.voiceId;
             return (
@@ -549,7 +582,7 @@ export function Composer() {
 
   // 类型、生成方式、模型家族变了，输入框里的东西就不一样高。高度滑过去，下面的记录跟着挪，不是跳一下。
   // 只管这几种变化：打字撑高文本框时不做动效。
-  const shape = `${studio.type}:${composer.form.mode}:${isGrok()}`;
+  const shape = `${studio.type}:${composer.form.mode}:${modesFor().length}:${traits().lastFrame}`;
   useLayoutEffect(() => {
     const el = card.current!;
     // 上一次还没滑完就又变了，从现在停着的高度接着滑。
@@ -573,9 +606,10 @@ export function Composer() {
       <h1 ref={title} className="composer-title">
         {type.title}
       </h1>
-      <div ref={types} className="composer-types">
+      {/* 平台上只有视频一种时，不用选类型。 */}
+      <div ref={types} className="composer-types" hidden={availableTypes().length < 2}>
         <Segmented
-          options={TYPES.map((t) => ({ value: t.value, label: t.label, disabled: missing[t.value] && t.value !== studio.type, title: missing[t.value] ? '这个账号没有对应的模型' : null }))}
+          options={availableTypes().map((t) => ({ value: t.value, label: t.label, disabled: missing[t.value] && t.value !== studio.type, title: missing[t.value] ? '这个账号没有对应的模型' : null }))}
           value={studio.type}
           onChange={setType}
           className="type-switch"

@@ -1,7 +1,7 @@
 // 把创作表单转成发给本地服务的请求。纯函数，不碰页面和网络，可以单独测试。
-// 视频有两种请求格式：Seedance 用 content 数组，Grok 用 prompt 字符串。图片、语音、音效、配乐各有一个小函数。
+// Flatkey 上视频有两种请求格式：Seedance 用 content 数组，Grok 用 prompt 字符串。OpenRouter 上所有模型是同一种格式。图片、语音、音效、配乐各有一个小函数。
 
-import { videoFamilyOf } from '../../shared/models.ts';
+import { videoFamilyOf, type VideoSpec } from '../../shared/models.ts';
 import type { VideoForm, ImageForm, SpeechForm, SfxForm, MusicForm, Ref, RefStatus, BuiltRequest } from './types.ts';
 
 export const RES_RANK: Record<string, number> = { '480p': 0, '720p': 1, '1080p': 2, '2k': 3, '4k': 4 };
@@ -114,6 +114,47 @@ export function buildRequest(form: VideoForm, refStatus: (ref: Ref) => RefStatus
     payload.super_resolution_config = sr;
   }
 
+  return { payload, problems };
+}
+
+// OpenRouter 的视频：提示词是 prompt 字符串，首尾帧在 frame_images，参考素材在 input_references。spec 是这个模型支持什么。
+// 图片可以用本机的文件（本地服务会把它内嵌进请求）；参考视频和音频只能用公网链接；Flatkey 素材库里的素材这边读不到。
+// 这些都在 2026-10-09 用 Seedance 2.5 实测过：文生视频、首帧、首尾帧、参考图能用，内嵌的视频会被拒绝。
+export function buildOpenRouterRequest(form: VideoForm, spec: VideoSpec): BuiltRequest {
+  const problems: string[] = [];
+  const text = form.prompt.trim();
+  const payload: Record<string, unknown> = { model: form.model, duration: Number(form.duration), resolution: form.resolution };
+  if (text) payload.prompt = text;
+  const media = (ref: Ref) => ({ type: MEDIA_FIELD[ref.kind], [MEDIA_FIELD[ref.kind]]: { url: ref.url } });
+
+  if (form.mode === 'text') {
+    if (!text) problems.push('请填写提示词');
+  } else if (form.mode === 'frames') {
+    const frames: Record<string, unknown>[] = [];
+    if (form.frames.first) frames.push({ ...media(form.frames.first), frame_type: 'first_frame' });
+    else problems.push('请添加首帧图片');
+    if (form.frames.last && spec.frames.includes('last_frame')) frames.push({ ...media(form.frames.last), frame_type: 'last_frame' });
+    payload.frame_images = frames;
+  } else {
+    const refs = [...form.refs.image, ...form.refs.video, ...form.refs.audio];
+    payload.input_references = refs.map(media);
+    if (!text && !form.refs.image.length && !form.refs.video.length) {
+      problems.push(form.refs.audio.length ? '只有音频不够，还需要提示词、图片或视频' : '请填写提示词，或添加参考图片、视频');
+    }
+  }
+  // 有首帧时画面比例跟着图片走，其余情况才需要指定。
+  if (form.mode !== 'frames') payload.aspect_ratio = form.ratio;
+
+  const used = refsInUse(form);
+  if (used.some((r) => r.source === 'asset')) problems.push('有素材来自 Flatkey 的素材库，OpenRouter 读不到，请移除后重新添加');
+  else if (used.some((r) => r.kind !== 'image' && r.source === 'local')) problems.push('参考视频和音频需要用公网链接，本机的文件发不过去');
+
+  if (spec.audio) payload.generate_audio = Boolean(form.generateAudio);
+  const seed = String(form.seed).trim();
+  if (spec.seed && seed !== '') {
+    if (/^-?\d+$/.test(seed)) payload.seed = Number(seed);
+    else problems.push('随机种子需要是整数');
+  }
   return { payload, problems };
 }
 

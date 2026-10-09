@@ -5,10 +5,41 @@
 export type VideoFamily = 'seedance' | 'grok';
 export type VideoMode = 'text' | 'frames' | 'reference';
 
-// ---------- 视频模型属于哪一族 ----------
-// 两族的请求格式不一样：Seedance 用 content 数组，Grok 用 prompt 字符串。
+// ---------- 平台 ----------
+// 应用可以接两个平台，在设置里切换。Flatkey 是原来的那套；OpenRouter 的视频模型更多，但没有音效、配乐、素材库和真人档案。
+// features 是这个平台上能用的东西，页面按它决定显示哪些创作类型和页面。
 
-export const videoFamilyOf = (id?: string): VideoFamily | null => (/^grok-imagine-video/i.test(id || '') ? 'grok' : /seedance/i.test(id || '') ? 'seedance' : null);
+export type ProviderId = 'flatkey' | 'openrouter';
+export interface Features {
+  image: boolean;
+  speech: boolean;
+  sfx: boolean;
+  music: boolean;
+  library: boolean;
+  persons: boolean;
+}
+
+export const PROVIDERS: Record<ProviderId, { label: string; keyPrefix: string; keysUrl: string; features: Features }> = {
+  flatkey: {
+    label: 'Flatkey',
+    keyPrefix: 'sk-fk-',
+    keysUrl: 'https://console.flatkey.ai/keys?lng=zh',
+    features: { image: true, speech: true, sfx: true, music: true, library: true, persons: true },
+  },
+  openrouter: {
+    label: 'OpenRouter',
+    keyPrefix: 'sk-or-',
+    keysUrl: 'https://openrouter.ai/settings/keys',
+    features: { image: true, speech: true, sfx: false, music: false, library: false, persons: false },
+  },
+};
+export const isProvider = (id: unknown): id is ProviderId => id === 'flatkey' || id === 'openrouter';
+
+// ---------- 视频模型属于哪一族 ----------
+// Flatkey 上两族的请求格式不一样：Seedance 用 content 数组，Grok 用 prompt 字符串。
+// OpenRouter 的型号前面带厂商（bytedance/seedance-2.5、x-ai/grok-imagine-video），也认得出来；它上面别的模型（Veo、Kling、Wan 等）不属于这两族。
+
+export const videoFamilyOf = (id?: string): VideoFamily | null => (/(^|\/)grok-imagine-video/i.test(id || '') ? 'grok' : /seedance/i.test(id || '') ? 'seedance' : null);
 
 // ---------- 型号后面的附注 ----------
 // 只说它是同一代里的哪一档，依据是型号名里的后缀，所以同一档的型号附注一定相同，新出的型号也不用再登记。
@@ -31,6 +62,34 @@ export interface VideoCapabilities {
   durations: number[];
   // 时长可以交给模型决定。
   autoDuration: boolean;
+}
+
+// OpenRouter 的模型列表接口会给出每个模型支持什么，本地服务把它整理成这个样子交给页面，不用在这里逐个登记。
+export interface VideoSpec extends VideoCapabilities {
+  // 能指定哪几种帧：first_frame、last_frame。一种都没有就只能文生视频。
+  frames: string[];
+  // 能不能选择要不要声音、能不能指定随机种子。
+  audio: boolean;
+  seed: boolean;
+}
+
+// 把 OpenRouter 模型列表里的一项整理成 VideoSpec。没有列出分辨率或时长的（视频编辑、放大、数字人这类工具）不是这里能用的生成模型，返回 null。
+export function videoSpecOf(model: Record<string, any>): VideoSpec | null {
+  const list = (value: unknown) => (Array.isArray(value) ? value : []);
+  const resolutions = list(model?.supported_resolutions).map(String);
+  const durations = list(model?.supported_durations).map(Number).filter((n) => n > 0).sort((a, b) => a - b);
+  if (!resolutions.length || !durations.length) return null;
+  // 480p、720p 按数字排，2K、4K 排在它们后面。
+  const rank = (r: string) => (parseFloat(r) || 0) * (/k$/i.test(r) ? 1000 : 1);
+  return {
+    resolutions: resolutions.sort((a, b) => rank(a) - rank(b)),
+    ratios: list(model.supported_aspect_ratios).map(String),
+    durations,
+    autoDuration: false,
+    frames: list(model.supported_frame_images).map(String),
+    audio: Boolean(model.generate_audio),
+    seed: Boolean(model.seed),
+  };
 }
 
 const range = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, i) => from + i);
@@ -117,6 +176,14 @@ const GROK_IMAGE = `你在帮用户改写一条 Grok Imagine 图片模型的提�
 - 光线要说出是哪一种（黄金时刻的逆光、阴天的漫射光、左侧打来的硬轮廓光）。氛围用具体的参照来说，比单个形容词管用。
 - 用草稿所用的语言写，控制在 6 到 10 个短语。`;
 
+// OpenRouter 上不属于 Seedance 和 Grok 的视频模型（Veo、Kling、Wan 等）没有登记各自的官方写法，用这一份通用的。
+const GENERIC_VIDEO = `你在帮用户改写一条 AI 视频生成模型的提示词。${RULES}
+补上草稿没写清楚、但生成视频需要的信息：主体的外观、具体的动作、场景环境、光线、镜头的景别和运动、整体风格。动作写具体，一个镜头里只用一种运镜。写成连贯的一段话，不用列表，不超过 200 字。用草稿所用的语言写。`;
+
+const GENERIC_FRAMES = `
+
+这次画面已经由首帧图片定了。提示词只写接下来发生什么：谁做什么动作、镜头怎么动，不要重新描述图片里已经有的东西。不超过 100 字。`;
+
 // 没有登记过官方写法的图片模型用这一份通用的。
 const GENERIC_IMAGE = `你在帮用户改写一条 AI 图片生成模型的提示词。${RULES}
 补上草稿没写清楚、但生成图片需要的信息：主体的外观和姿态、所处的环境、构图和视角、光线、材质、整体风格。写成连贯的一段话，不用列表，不超过 150 字。用草稿所用的语言写。`;
@@ -147,7 +214,9 @@ export type VideoTask = keyof typeof VIDEO_TASKS;
 // 选出这次润色要用的系统提示词。
 export function polishGuide({ kind, model, mode, refs }: PolishTarget): string {
   if (kind === 'sfx') return ELEVEN_SFX;
-  if (kind === 'image') return /^grok-imagine-image/i.test(model || '') ? GROK_IMAGE : GENERIC_IMAGE;
+  if (kind === 'image') return /(^|\/)grok-imagine-image/i.test(model || '') ? GROK_IMAGE : GENERIC_IMAGE;
   if (videoFamilyOf(model) === 'grok') return GROK_VIDEO + (mode === 'frames' ? GROK_FRAMES : '');
+  // 带厂商前缀的是 OpenRouter 的型号；其中不是 Seedance 的用通用写法。不带前缀又认不出来的仍按 Seedance 处理。
+  if (!videoFamilyOf(model) && (model || '').includes('/')) return GENERIC_VIDEO + (mode === 'frames' ? GENERIC_FRAMES : '');
   return SEEDANCE_VIDEO + (mode === 'frames' ? SEEDANCE_FRAMES : mode === 'reference' ? seedanceReference(refs || {}) : '');
 }

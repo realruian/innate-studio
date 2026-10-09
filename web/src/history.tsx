@@ -36,7 +36,7 @@ const done = (item: HistoryItem) => item.status === 'completed' && Boolean(item.
 const RECENT_COUNT = 6;
 
 function modeOf(item: HistoryItem) {
-  if (videoFamily(item.model) === 'grok') return item.payload?.image ? '图生视频' : '文生视频';
+  if (videoFamily(item.model) === 'grok') return item.payload?.image || item.payload?.frame_images?.length ? '图生视频' : '文生视频';
   return MODE_LABELS[seedanceModeOf(item)];
 }
 
@@ -61,7 +61,7 @@ function refsOf(item: HistoryItem): Ref[] {
 async function removeItem(item: HistoryItem) {
   const ok = await confirmDialog({
     title: '删除这条记录？',
-    message: '只删除本机上的记录和已保存的文件，不影响 Flatkey 上的任务和计费。删除后无法恢复。',
+    message: '只删除本机上的记录和已保存的文件，不影响平台上的任务和计费。删除后无法恢复。',
     okText: '删除',
     danger: true,
   });
@@ -97,7 +97,7 @@ async function refresh(item: HistoryItem) {
   }
 }
 
-// 查询超时的任务：再向 Flatkey 查一次，并说明这次查到了什么。
+// 查询超时的任务：再向平台查一次，并说明这次查到了什么。
 async function recheck(item: HistoryItem) {
   try {
     const next = await api<HistoryItem>('POST', `/api/history/${encodeURIComponent(item.id)}/refresh`);
@@ -119,8 +119,8 @@ async function animate(item: HistoryItem) {
   }
 }
 
-// 延长或修改一条视频。只有 Seedance 能做，账号里没有 Seedance 型号时不出现这两个入口。
-const canRework = (item: HistoryItem) => done(item) && item.kind === 'video' && state.models.some((id) => videoFamilyOf(id) === 'seedance');
+// 延长或修改一条视频。只有 Flatkey 上的 Seedance 能做（要把视频传进素材库当参考），用的是 OpenRouter 或者账号里没有 Seedance 型号时不出现这两个入口。
+const canRework = (item: HistoryItem) => done(item) && item.kind === 'video' && state.app.provider === 'flatkey' && state.models.some((id) => videoFamilyOf(id) === 'seedance');
 async function rework(item: HistoryItem, task: VideoTask) {
   if (!item.savedLocally) return toast('这条视频还没保存到本机，稍后再试', 'info');
   try {

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
-// Seedance Studio 本地服务：托管页面、保管 API Key、转发 Flatkey 请求、轮询任务并保存历史。
-// 能生成的有四类：视频（Seedance、Grok）、图片、音频（语音、音效、配乐），外加提示词润色。
+// Seedance Studio 本地服务：托管页面、保管 API Key、转发请求给模型平台、轮询任务并保存历史。
+// 平台有两个，在设置里切换：Flatkey 能生成视频（Seedance、Grok）、图片、音频（语音、音效、配乐）；OpenRouter 能生成视频、图片和语音。两边都能润色提示词。
 // 服务本身不依赖第三方包。页面是 web/ 里的 React 源码，用 npm run build 构建到 web/dist 之后由这里托管。
 
 import http from 'node:http';
@@ -11,13 +11,18 @@ import crypto from 'node:crypto';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
-import { videoFamilyOf, polishGuide, POLISH_KINDS } from './shared/models.ts';
+import { videoFamilyOf, polishGuide, POLISH_KINDS, PROVIDERS, isProvider, videoSpecOf } from './shared/models.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const PORT = Number(process.env.PORT) || 5178;
 const HOST = '127.0.0.1';
-const BASE_URL = (process.env.FLATKEY_BASE_URL || 'https://router.flatkey.ai').replace(/\/+$/, '');
+const trimSlash = (url) => url.replace(/\/+$/, '');
+// 两个平台各自的接口地址、Key 的环境变量名、Key 存在 config.json 里的哪个字段。平台的名字和各自能用的功能登记在 shared/models.ts。
+const UPSTREAMS = {
+  flatkey: { baseUrl: trimSlash(process.env.FLATKEY_BASE_URL || 'https://router.flatkey.ai'), envKey: 'FLATKEY_API_KEY', configKey: 'apiKey' },
+  openrouter: { baseUrl: trimSlash(process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api'), envKey: 'OPENROUTER_API_KEY', configKey: 'openrouterKey' },
+};
 const DATA_DIR = path.resolve(process.env.SEEDANCE_DATA_DIR || path.join(__dirname, 'data'));
 // 生成结果按类型分目录存；uploads 放的是从本机选来当输入的文件（Grok 的首帧、要配乐的视频）。
 const MEDIA_DIRS = { video: 'videos', image: 'images', audio: 'audio' };
@@ -32,12 +37,16 @@ const POLL_INTERVAL_MS = 6000;
 const MAX_PENDING_MS = Number(process.env.SEEDANCE_PENDING_LIMIT_MS) || 6 * 60 * 60 * 1000;
 const DOWNLOAD_RETRY_MS = 30000;
 const MAX_DOWNLOAD_ATTEMPTS = 6;
-const DEFAULT_MODELS = ['seedance-2.0', 'seedance-2.0-fast'];
-const SPEECH_MODEL = 'eleven_multilingual_v2';
+const DEFAULT_MODELS = { flatkey: ['seedance-2.0', 'seedance-2.0-fast'], openrouter: ['bytedance/seedance-2.5', 'bytedance/seedance-2.0'] };
+// 语音两边用的是同一个 ElevenLabs 模型，只是型号的写法不同。
+const SPEECH_MODEL = { flatkey: 'eleven_multilingual_v2', openrouter: 'elevenlabs/eleven-multilingual-v2' };
 const SFX_MODEL = 'eleven_sound_v1';
 const MUSIC_MODEL = 'sonilo-video-to-music';
 // 润色提示词只需要少数几个文本模型：按这个顺序，取账号里有的。
-const POLISH_MODELS = ['claude-haiku-5-5', 'claude-sonnet-5-5', 'claude-opus-5-5', 'glm-5.3', 'grok-4.7'];
+const POLISH_MODELS = {
+  flatkey: ['claude-haiku-5-5', 'claude-sonnet-5-5', 'claude-opus-5-5', 'glm-5.3', 'grok-4.7'],
+  openrouter: ['anthropic/claude-haiku-5.5', 'anthropic/claude-sonnet-5.5', 'anthropic/claude-opus-5.5', 'z-ai/glm-5.3', 'x-ai/grok-4.7'],
+};
 const MAX_IMAGES = 4;
 
 for (const name of [...Object.values(MEDIA_DIRS), 'uploads']) fs.mkdirSync(mediaDir(name), { recursive: true });
@@ -69,29 +78,48 @@ const saveAssets = () => writeJson('assets.json', assets);
 
 // Key 要放进 HTTP 请求头，只能由可见的 ASCII 字符组成。
 const isUsableKey = (value) => /^[\x21-\x7e]+$/.test(value);
-const BAD_KEY_MESSAGE = '这不像是 API Key：里面有中文、空格或其他不能用的字符。请到 Flatkey 控制台复制以 sk-fk- 开头的那一串，再粘贴进来。';
+const badKeyMessage = (provider) => `这不像是 API Key：里面有中文、空格或其他不能用的字符。请到 ${labelOf(provider)} 的控制台复制以 ${PROVIDERS[provider].keyPrefix} 开头的那一串，再粘贴进来。`;
 
-if (config.apiKey && !isUsableKey(config.apiKey)) {
-  delete config.apiKey;
+// 当前用哪个平台。没选过就是 Flatkey。
+const currentProvider = () => (isProvider(config.provider) ? config.provider : 'flatkey');
+// 一条记录是在哪个平台提交的。加这个字段之前的记录都是 Flatkey 的。
+const providerOf = (item) => (isProvider(item.provider) ? item.provider : 'flatkey');
+const labelOf = (provider) => PROVIDERS[provider].label;
+
+for (const [provider, { configKey }] of Object.entries(UPSTREAMS)) {
+  if (!config[configKey] || isUsableKey(config[configKey])) continue;
+  delete config[configKey];
   saveConfig();
-  console.log('之前保存的 API Key 含有非法字符，已清除，请在「设置」里重新填写。');
+  console.log(`之前保存的 ${labelOf(provider)} API Key 含有非法字符，已清除，请在「设置」里重新填写。`);
 }
 
-function apiKey() {
-  return process.env.FLATKEY_API_KEY || config.apiKey || '';
+function apiKey(provider = currentProvider()) {
+  const { envKey, configKey } = UPSTREAMS[provider];
+  return process.env[envKey] || config[configKey] || '';
 }
 
-function keyState() {
-  const key = apiKey();
+function providerState(provider) {
+  const key = apiKey(provider);
   return {
     hasKey: Boolean(key),
     keyHint: key ? `${key.slice(0, 6)}…${key.slice(-4)}` : '',
-    keySource: process.env.FLATKEY_API_KEY ? 'env' : key ? 'file' : '',
-    baseUrl: BASE_URL,
+    keySource: process.env[UPSTREAMS[provider].envKey] ? 'env' : key ? 'file' : '',
+    baseUrl: UPSTREAMS[provider].baseUrl,
   };
 }
 
-// ---------- 调用 Flatkey ----------
+// 最外面几项说的是当前平台；providers 里是两个平台各自的 Key 状态，设置页用。
+function keyState() {
+  const provider = currentProvider();
+  return {
+    ...providerState(provider),
+    provider,
+    features: PROVIDERS[provider].features,
+    providers: Object.keys(UPSTREAMS).map((id) => ({ id, label: labelOf(id), ...providerState(id) })),
+  };
+}
+
+// ---------- 调用模型平台 ----------
 
 class HttpError extends Error {
   constructor(status, code, message, upstream) {
@@ -106,7 +134,7 @@ const ERROR_HINTS = {
   invalid_api_key: 'API Key 无效或已被撤销',
   insufficient_balance: '账号余额不足，任务没有创建',
   model_not_allowed: '这个 Key 没有使用该模型的权限',
-  model_not_found: 'Flatkey 不认识这个模型 ID',
+  model_not_found: '平台不认识这个模型 ID',
   rate_limit_exceeded: '请求太频繁，请稍后再试',
   upstream_unavailable: '模型服务暂时不可用，请稍后重试',
 };
@@ -116,11 +144,13 @@ const CONNECT_ERRORS = new Set(['UND_ERR_CONNECT_TIMEOUT', 'ECONNREFUSED', 'ENOT
 const MAX_CONNECT_ATTEMPTS = 3;
 
 // binary 为 true 时，成功的响应按文件内容返回（语音、音效直接返回 MP3），不当成 JSON 解析。
-async function callUpstream(method, pathname, { json, body, headers = {}, timeoutMs = 60000, binary = false } = {}) {
-  const key = apiKey();
-  if (!key) throw new HttpError(401, 'no_api_key', '还没有设置 API Key，请先在「设置」里填写。');
+// provider 不传就是当前平台；查询已有的任务时要传那条任务自己的平台。
+async function callUpstream(method, pathname, { json, body, headers = {}, timeoutMs = 60000, binary = false, provider = currentProvider() } = {}) {
+  const name = labelOf(provider);
+  const key = apiKey(provider);
+  if (!key) throw new HttpError(401, 'no_api_key', `还没有设置 ${name} 的 API Key，请先在「设置」里填写。`);
 
-  if (!isUsableKey(key)) throw new HttpError(400, 'invalid_key', BAD_KEY_MESSAGE);
+  if (!isUsableKey(key)) throw new HttpError(400, 'invalid_key', badKeyMessage(provider));
 
   const requestHeaders = { Authorization: `Bearer ${key}`, ...headers };
   let payload = body;
@@ -132,7 +162,7 @@ async function callUpstream(method, pathname, { json, body, headers = {}, timeou
   let res;
   for (let attempt = 1; ; attempt += 1) {
     try {
-      res = await fetch(BASE_URL + pathname, {
+      res = await fetch(UPSTREAMS[provider].baseUrl + pathname, {
         method,
         headers: requestHeaders,
         body: payload,
@@ -142,14 +172,14 @@ async function callUpstream(method, pathname, { json, body, headers = {}, timeou
     } catch (err) {
       if (CONNECT_ERRORS.has(err.cause?.code) && attempt < MAX_CONNECT_ATTEMPTS) continue;
       const reason = err.name === 'TimeoutError' ? '请求超时' : err.cause?.code || err.message;
-      throw new HttpError(502, 'upstream_unreachable', `连接 Flatkey 失败：${reason}`);
+      throw new HttpError(502, 'upstream_unreachable', `连接 ${name} 失败：${reason}`);
     }
   }
 
   if (binary && res.ok) {
     const type = res.headers.get('content-type') || '';
     const data = Buffer.from(await res.arrayBuffer());
-    if (/^(application\/json|text\/)/i.test(type) || !data.length) throw new HttpError(502, 'bad_upstream_response', 'Flatkey 没有返回文件内容');
+    if (/^(application\/json|text\/)/i.test(type) || !data.length) throw new HttpError(502, 'bad_upstream_response', `${name} 没有返回文件内容`);
     return { status: res.status, data, type };
   }
 
@@ -165,10 +195,10 @@ async function callUpstream(method, pathname, { json, body, headers = {}, timeou
 
   if (!res.ok) {
     const e = data?.error;
-    const message = (typeof e === 'string' ? e : e?.message) || data?.message || `Flatkey 返回 ${res.status}`;
+    const message = (typeof e === 'string' ? e : e?.message) || data?.message || `${name} 返回 ${res.status}`;
     const code = String((typeof e === 'object' && e?.code) || data?.code || `http_${res.status}`);
     const hint = ERROR_HINTS[code] ? `${ERROR_HINTS[code]}。` : '';
-    throw new HttpError(res.status, code, `${hint}Flatkey 返回（${res.status}）：${message}`, data);
+    throw new HttpError(res.status, code, `${hint}${name} 返回（${res.status}）：${message}`, data);
   }
   return { status: res.status, data };
 }
@@ -199,10 +229,11 @@ function applyTaskState(item, data) {
   const status = STATUS_ALIASES[String(data.status || '').toLowerCase()];
   if (status) item.status = status;
   if (typeof data.progress === 'number') item.progress = data.progress;
-  if (data.usage) item.usage = data.usage;
+  // OpenRouter 的用量只有一个以美元计的 cost。
+  if (data.usage) item.usage = typeof data.usage.cost === 'number' ? { cost_usd: data.usage.cost } : data.usage;
   if (data.completed_at) item.completedAt = data.completed_at * 1000;
-  // 视频的下载地址在 metadata.url，配乐的在 audio[0].url。
-  const resultUrl = data.metadata?.url || data.audio?.[0]?.url;
+  // 视频的下载地址在 metadata.url，配乐的在 audio[0].url；OpenRouter 的在 unsigned_urls[0]。
+  const resultUrl = data.metadata?.url || data.audio?.[0]?.url || data.unsigned_urls?.[0];
   if (resultUrl) item.remoteUrl = resultUrl;
   if (item.status === 'completed') {
     item.progress = 100;
@@ -224,14 +255,15 @@ const downloading = new Set();
 async function pollTask(item) {
   if (polling.has(item.id)) return;
   polling.add(item.id);
+  const provider = providerOf(item);
   try {
-    const { data } = await callUpstream('GET', `${isMusic(item) ? '/v1/video-to-music' : '/v1/videos'}/${encodeURIComponent(item.id)}`, { timeoutMs: 20000 });
+    const { data } = await callUpstream('GET', `${isMusic(item) ? '/v1/video-to-music' : '/v1/videos'}/${encodeURIComponent(item.id)}`, { timeoutMs: 20000, provider });
     applyTaskState(item, data);
     item.pollError = null;
   } catch (err) {
     if (err.status === 404 || err.code === 'task_not_exist') {
       item.status = 'failed';
-      item.error = { message: 'Flatkey 查不到这个任务', code: 'task_not_found' };
+      item.error = { message: `${labelOf(provider)} 查不到这个任务`, code: 'task_not_found' };
     } else {
       item.pollError = err.message;
     }
@@ -240,7 +272,7 @@ async function pollTask(item) {
     // 先查再判断：服务停了很久再启动时，任务可能早就完成了。查过这一次仍没有结果才算超时。
     if (isPending(item) && Date.now() - item.createdAt > MAX_PENDING_MS) {
       item.status = 'failed';
-      item.error = { message: '等了很久还没有结果，已停止自动查询。任务可能还在 Flatkey 那边进行，可以再查一次。', code: 'poll_timeout' };
+      item.error = { message: `等了很久还没有结果，已停止自动查询。任务可能还在 ${labelOf(provider)} 那边进行，可以再查一次。`, code: 'poll_timeout' };
     }
     polling.delete(item.id);
     saveHistory();
@@ -261,10 +293,12 @@ async function downloadResult(item) {
   const dir = resultDir(item);
   const tmp = path.join(dir, `${file}.part`);
   try {
-    const url = new URL(item.remoteUrl);
+    const provider = providerOf(item);
+    const { baseUrl } = UPSTREAMS[provider];
+    const url = new URL(item.remoteUrl, baseUrl);
     const headers = {};
-    // 只在同一个 Flatkey 域名下才带上 Key，避免把 Key 发给别的主机。
-    if (url.origin === new URL(BASE_URL).origin && apiKey()) headers.Authorization = `Bearer ${apiKey()}`;
+    // 只在提交这条任务的平台自己的域名下才带上 Key，避免把 Key 发给别的主机。OpenRouter 的结果地址必须带 Key 才能下载。
+    if (url.origin === new URL(baseUrl).origin && apiKey(provider)) headers.Authorization = `Bearer ${apiKey(provider)}`;
     const res = await fetch(url, { headers, signal: AbortSignal.timeout(10 * 60 * 1000) });
     if (!res.ok || !res.body) throw new Error(`下载返回 ${res.status}`);
     const type = res.headers.get('content-type') || '';
@@ -286,11 +320,12 @@ async function downloadResult(item) {
 }
 
 function tick() {
-  if (!apiKey()) return;
   const now = Date.now();
   for (const item of history) {
     // direct 的记录没有上游任务可查，结果由发起它的那次请求自己写回来。
     if (item.direct) continue;
+    // 每条任务回它自己的平台去查。那个平台的 Key 被清掉了就先不查。
+    if (!apiKey(providerOf(item))) continue;
     if (isPending(item)) {
       if (now - (item.lastPolledAt || 0) >= POLL_INTERVAL_MS) pollTask(item);
     } else if (item.status === 'completed' && !item.localFile && item.remoteUrl) {
@@ -372,13 +407,31 @@ function localMediaFile(url) {
   return file;
 }
 
-// Grok 的图生视频要把首帧直接放进请求。页面传来的是本机地址，发给上游前换成 data URL；记录里存的仍是原来的短地址。
-function withLocalImage(payload) {
-  const url = payload.image?.url;
-  if (typeof url !== 'string' || !url.startsWith('/media/')) return payload;
-  const file = localMediaFile(url);
-  const type = MIME[path.extname(file).toLowerCase()] || 'image/jpeg';
-  return { ...payload, image: { ...payload.image, url: `data:${type};base64,${fs.readFileSync(file).toString('base64')}` } };
+// 只存在本机的图片要直接放进请求：Flatkey 上 Grok 的首帧（image），OpenRouter 的首尾帧（frame_images）和参考图（input_references）。
+// 页面传来的是本机地址，发给上游前换成 data URL；记录里存的仍是原来的短地址。
+function withLocalImages(payload) {
+  const inline = (holder) => {
+    const url = holder?.url;
+    if (typeof url !== 'string' || !url.startsWith('/media/')) return holder;
+    const file = localMediaFile(url);
+    const type = MIME[path.extname(file).toLowerCase()] || 'image/jpeg';
+    return { ...holder, url: `data:${type};base64,${fs.readFileSync(file).toString('base64')}` };
+  };
+  const next = { ...payload };
+  if (payload.image) next.image = inline(payload.image);
+  for (const field of ['frame_images', 'input_references']) {
+    if (!Array.isArray(payload[field])) continue;
+    next[field] = payload[field].map((entry) => {
+      // OpenRouter 的参考视频和音频只收公网的 https 链接（2026-10-09 实测：内嵌数据会被拒绝）。
+      if (entry?.video_url || entry?.audio_url) {
+        const url = (entry.video_url || entry.audio_url).url;
+        if (!/^https:\/\//i.test(url || '')) throw new HttpError(400, 'invalid_request', '参考视频和音频需要是公网能直接访问的 https 链接');
+        return entry;
+      }
+      return entry?.image_url ? { ...entry, image_url: inline(entry.image_url) } : entry;
+    });
+  }
+  return next;
 }
 
 // ---------- 素材 ----------
@@ -390,7 +443,7 @@ function assetIdOf(data) {
 
 function upsertAsset(data, extra = {}) {
   const id = assetIdOf(data);
-  if (!id) throw new HttpError(502, 'bad_upstream_response', 'Flatkey 没有返回素材 ID', data);
+  if (!id) throw new HttpError(502, 'bad_upstream_response', '平台没有返回素材 ID', data);
   const prev = assets[id] || { id, addedAt: Date.now() };
   const next = { ...prev };
   for (const [key, value] of Object.entries(extra)) {
@@ -557,27 +610,90 @@ const route = (method, pattern, handler) => routes.push({ method, pattern, handl
 
 route('GET', /^\/api\/state$/, async () => keyState());
 
+// 换了 Key 或者换了平台，之前读到的音色和可用的润色模型都不作数了。
+function forgetAccount() {
+  voices = null;
+  polishAvailable = null;
+  polishFailedAt.clear();
+}
+
+// 请求里指定了平台就用指定的，没指定就是当前平台。
+function providerIn(value) {
+  if (value == null || value === '') return currentProvider();
+  if (!isProvider(value)) throw new HttpError(400, 'invalid_request', '没有这个平台');
+  return value;
+}
+
 route('PUT', /^\/api\/key$/, async ({ req }) => {
-  const { apiKey: key } = await readJsonBody(req);
+  const { apiKey: key, provider: wanted } = await readJsonBody(req);
+  const provider = providerIn(wanted);
   const value = String(key || '').trim();
   if (!value) throw new HttpError(400, 'invalid_key', 'API Key 不能为空');
-  if (!isUsableKey(value)) throw new HttpError(400, 'invalid_key', BAD_KEY_MESSAGE);
-  config.apiKey = value;
+  if (!isUsableKey(value)) throw new HttpError(400, 'invalid_key', badKeyMessage(provider));
+  config[UPSTREAMS[provider].configKey] = value;
   saveConfig();
-  voices = null;
+  forgetAccount();
   return keyState();
 });
 
-route('DELETE', /^\/api\/key$/, async () => {
-  delete config.apiKey;
+route('DELETE', /^\/api\/key$/, async ({ query }) => {
+  delete config[UPSTREAMS[providerIn(query.get('provider'))].configKey];
   saveConfig();
-  voices = null;
+  forgetAccount();
   return keyState();
 });
+
+// 切换平台。之后新提交的生成都走这个平台；已经提交的任务仍然回它原来的平台查询。
+route('PUT', /^\/api\/provider$/, async ({ req }) => {
+  const { provider } = await readJsonBody(req);
+  if (!isProvider(provider)) throw new HttpError(400, 'invalid_request', '没有这个平台');
+  config.provider = provider;
+  saveConfig();
+  forgetAccount();
+  return keyState();
+});
+
+// OpenRouter 每个图片模型收哪些画面比例。提交生图时，模型不收的比例不发。读到模型列表之后才有。
+let openrouterImageRatios = {};
+
+// OpenRouter 的视频、图片模型各有专门的列表接口，里面写着每个模型支持什么：视频的整理成 videoSpecs，图片的比例整理成 imageRatios，一起交给页面。
+// 视频里 Seedance 排在前面，新的型号在前；图片里 Grok 排在前面（和 Flatkey 上默认用的是同一个）；其余按名字排。
+async function openrouterModels() {
+  const none = { imageModels: [], audio: { speech: false, sfx: false, music: false } };
+  try {
+    const get = (pathname) => callUpstream('GET', pathname, { timeoutMs: 20000 });
+    const [videos, texts, images, speech] = await Promise.all([get('/v1/videos/models'), get('/v1/models'), get('/v1/images/models'), get('/v1/models?output_modalities=speech')]);
+    const imageRatios = {};
+    for (const model of listOf(images.data)) {
+      if (model?.id) imageRatios[model.id] = (model.supported_parameters?.aspect_ratio?.values || []).map(String);
+    }
+    openrouterImageRatios = imageRatios;
+    const isGrokImage = (id) => /\/grok-imagine-image/i.test(id);
+    const rest = {
+      imageModels: Object.keys(imageRatios).sort((a, b) => isGrokImage(b) - isGrokImage(a) || a.localeCompare(b)),
+      imageRatios,
+      audio: { speech: listOf(speech.data).some((m) => m?.id === SPEECH_MODEL.openrouter), sfx: false, music: false },
+    };
+    const videoSpecs = {};
+    for (const model of listOf(videos.data)) {
+      const spec = model?.id && videoSpecOf(model);
+      if (spec) videoSpecs[model.id] = spec;
+    }
+    const ids = new Set(listOf(texts.data).map((m) => m?.id));
+    polishAvailable = POLISH_MODELS.openrouter.filter((id) => ids.has(id));
+    const isSeedance = (id) => videoFamilyOf(id) === 'seedance';
+    const models = Object.keys(videoSpecs).sort((a, b) => isSeedance(b) - isSeedance(a) || (isSeedance(a) ? b.localeCompare(a) : a.localeCompare(b)));
+    if (models.length) return { models, videoSpecs, polishModels: polishAvailable, ...rest, source: 'remote' };
+    return { models: DEFAULT_MODELS.openrouter, polishModels: polishAvailable, ...rest, source: 'default', note: 'OpenRouter 的模型列表里没有可用的视频模型，下面显示的是默认型号。' };
+  } catch (err) {
+    return { models: DEFAULT_MODELS.openrouter, polishModels: [], ...none, source: 'default', error: err.message, errorCode: err.code };
+  }
+}
 
 // 两类视频模型的请求格式不同：Seedance 用 content 数组，Grok 用 prompt 字符串。其他视频模型还没有接。
 // 账号能用的模型，按用途分好。models 是视频模型（Seedance 排在前面），其余是图片、润色用的文本模型和三种音频能力。
 route('GET', /^\/api\/models$/, async () => {
+  if (currentProvider() === 'openrouter') return openrouterModels();
   const none = { imageModels: [], polishModels: [], audio: { speech: false, sfx: false, music: false } };
   try {
     const { data } = await callUpstream('GET', '/v1/models', { timeoutMs: 20000 });
@@ -592,39 +708,48 @@ route('GET', /^\/api\/models$/, async () => {
     const rest = {
       // 列表里有些图片模型其实没有可用的通道，只有标了 image-generation 的才能走生图接口。
       imageModels: list.filter((m) => m.type === 'image' && (m.supported_endpoint_types || []).includes('image-generation')).map((m) => m.id).sort(),
-      polishModels: (polishAvailable = POLISH_MODELS.filter((id) => ids.has(id))),
-      audio: { speech: ids.has(SPEECH_MODEL), sfx: ids.has(SFX_MODEL), music: ids.has(MUSIC_MODEL) },
+      polishModels: (polishAvailable = POLISH_MODELS.flatkey.filter((id) => ids.has(id))),
+      audio: { speech: ids.has(SPEECH_MODEL.flatkey), sfx: ids.has(SFX_MODEL), music: ids.has(MUSIC_MODEL) },
     };
     if (video.length) return { models: video, ...rest, source: 'remote' };
-    return { models: DEFAULT_MODELS, ...rest, source: 'default', note: '账号的模型列表里没有 Seedance 模型，下面显示的是文档里的默认型号。' };
+    return { models: DEFAULT_MODELS.flatkey, ...rest, source: 'default', note: '账号的模型列表里没有 Seedance 模型，下面显示的是文档里的默认型号。' };
   } catch (err) {
-    return { models: DEFAULT_MODELS, ...none, source: 'default', error: err.message, errorCode: err.code };
+    return { models: DEFAULT_MODELS.flatkey, ...none, source: 'default', error: err.message, errorCode: err.code };
   }
 });
 
 route('GET', /^\/api\/credits$/, async () => {
   const { data } = await callUpstream('GET', '/v1/credits', { timeoutMs: 20000 });
+  // OpenRouter 给的是充值总额和已用金额，单位是美元。
+  if (currentProvider() === 'openrouter') {
+    const used = Number(data?.data?.total_usage) || 0;
+    return { remaining: (Number(data?.data?.total_credits) || 0) - used, used, unit: 'usd' };
+  }
   return { remaining: Number(data?.remaining) || 0, used: Number(data?.used) || 0 };
 });
 
 route('POST', /^\/api\/videos$/, async ({ req }) => {
   const { payload, form } = await readJsonBody(req);
-  // Seedance 的提示词和素材在 content 数组里，Grok 的提示词是 prompt 字符串。
+  // Flatkey 上 Seedance 的提示词和素材在 content 数组里，Grok 的提示词是 prompt 字符串。
+  // OpenRouter 上所有模型都是 prompt 字符串，素材在 frame_images 和 input_references 里，可以只给素材不写提示词。
   const hasContent = Array.isArray(payload?.content) && payload.content.length > 0;
   const hasPrompt = typeof payload?.prompt === 'string' && payload.prompt.trim() !== '';
-  if (!payload || typeof payload !== 'object' || !payload.model || (!hasContent && !hasPrompt)) {
+  const hasMedia = ['frame_images', 'input_references'].some((field) => Array.isArray(payload?.[field]) && payload[field].length > 0);
+  if (!payload || typeof payload !== 'object' || !payload.model || (!hasContent && !hasPrompt && !hasMedia)) {
     throw new HttpError(400, 'invalid_request', '请求缺少 model 或 content');
   }
-  const { data } = await callUpstream('POST', '/v1/videos', { json: withLocalImage(payload) });
+  const provider = currentProvider();
+  const { data } = await callUpstream('POST', '/v1/videos', { json: withLocalImages(payload), provider });
   const id = data?.id || data?.task_id;
-  if (!id) throw new HttpError(502, 'bad_upstream_response', 'Flatkey 没有返回任务 ID', data);
+  if (!id) throw new HttpError(502, 'bad_upstream_response', `${labelOf(provider)} 没有返回任务 ID`, data);
 
   const item = {
     id,
+    provider,
     kind: 'video',
     createdAt: data.created_at ? data.created_at * 1000 : Date.now(),
     model: payload.model,
-    prompt: hasContent ? payload.content.filter((c) => c.type === 'text').map((c) => c.text).join('\n') : payload.prompt.trim(),
+    prompt: hasContent ? payload.content.filter((c) => c.type === 'text').map((c) => c.text).join('\n') : String(payload.prompt || '').trim(),
     payload,
     form: form || null,
     status: 'queued',
@@ -681,13 +806,12 @@ route('POST', /^\/api\/images$/, async ({ req }) => {
   const items = Array.from({ length: count }, () =>
     newItem({ id: newId('img'), kind: 'image', model, prompt, payload: { model, prompt, aspect_ratio: request.aspect_ratio }, form: form || null }),
   );
+  const provider = currentProvider();
   runDirect(items, async () => {
-    const { data } = await callUpstream('POST', '/v1/images/generations', { json: request, timeoutMs: 3 * 60 * 1000 });
-    const images = listOf(data).filter((image) => image?.b64_json);
-    if (!images.length) throw new HttpError(502, 'bad_upstream_response', 'Flatkey 没有返回图片', data);
-    // 费用按张平摊。上游给的单位是 tick，一美元是 1e10 个 tick。
-    const ticks = Number(data?.usage?.cost_in_usd_ticks) || 0;
-    const usage = ticks ? { cost_usd: ticks / 1e10 / images.length } : null;
+    const { images, cost } = provider === 'openrouter' ? await openrouterImages(request) : await flatkeyImages(request);
+    if (!images.length) throw new HttpError(502, 'bad_upstream_response', `${labelOf(provider)} 没有返回图片`);
+    // 费用按张平摊。
+    const usage = cost ? { cost_usd: cost / images.length } : null;
     items.forEach((item, index) => {
       const image = images[index];
       if (!image) {
@@ -695,18 +819,54 @@ route('POST', /^\/api\/images$/, async ({ req }) => {
         item.error = { message: '这一张没有生成出来', code: 'missing_image' };
         return;
       }
-      const ext = { 'image/png': 'png', 'image/webp': 'webp' }[image.mime_type] || 'jpg';
+      // 两个平台说明图片格式的字段名字不同；没写格式的按 JPG 存。
+      const type = image.mime_type || image.media_type;
+      const ext = type ? IMAGE_EXT[type] : 'jpg';
+      if (!ext) {
+        item.status = 'failed';
+        item.error = { message: `这个模型返回的是 ${type}，这里存不了这种格式`, code: 'unsupported_image' };
+        return;
+      }
       finishItem(item, Buffer.from(image.b64_json, 'base64'), ext, { usage });
     });
   });
   return { items: items.map(historyView) };
 });
 
+const IMAGE_EXT = { 'image/png': 'png', 'image/webp': 'webp', 'image/jpeg': 'jpg' };
+
+// 上游给的费用单位是 tick，一美元是 1e10 个 tick。
+async function flatkeyImages(request) {
+  const { data } = await callUpstream('POST', '/v1/images/generations', { json: request, timeoutMs: 3 * 60 * 1000, provider: 'flatkey' });
+  return { images: listOf(data).filter((image) => image?.b64_json), cost: (Number(data?.usage?.cost_in_usd_ticks) || 0) / 1e10 };
+}
+
+// OpenRouter 的生图接口。很多模型一次只出一张，所以要几张就发几次、同时进行，各出一张；有一次失败了，其余成功的照样留下。
+// 模型不收的画面比例不发，由它用自己的默认比例。
+async function openrouterImages({ model, prompt, n, aspect_ratio }) {
+  const request = { model, prompt };
+  const ratios = openrouterImageRatios[model];
+  if (aspect_ratio && (!ratios || ratios.includes(aspect_ratio))) request.aspect_ratio = aspect_ratio;
+  const results = await Promise.allSettled(Array.from({ length: n }, () => callUpstream('POST', '/v1/images', { json: request, timeoutMs: 5 * 60 * 1000, provider: 'openrouter' })));
+  const done = results.filter((r) => r.status === 'fulfilled').map((r) => r.value.data);
+  if (!done.length) throw results[0].reason;
+  return {
+    images: done.flatMap((data) => listOf(data).filter((image) => image?.b64_json)),
+    cost: done.reduce((sum, data) => sum + (Number(data?.usage?.cost) || 0), 0),
+  };
+}
+
 // ---------- 音频 ----------
 
 let voices = null;
 
 route('GET', /^\/api\/voices$/, async () => {
+  // OpenRouter 上音色只有一串名字，写在模型列表里，没有试听，也没有性别和语言。
+  if (!voices && currentProvider() === 'openrouter') {
+    const { data } = await callUpstream('GET', '/v1/models?output_modalities=speech', { timeoutMs: 20000 });
+    const names = listOf(data).find((m) => m?.id === SPEECH_MODEL.openrouter)?.supported_voices || [];
+    voices = names.map((name) => ({ id: String(name), name: String(name).replace(/^./, (c) => c.toUpperCase()), gender: '', language: '', accent: '', previewUrl: '' }));
+  }
   if (!voices) {
     const { data } = await callUpstream('GET', '/v1/voices', { timeoutMs: 20000 });
     voices = (Array.isArray(data?.voices) ? data.voices : listOf(data))
@@ -729,17 +889,22 @@ route('POST', /^\/api\/audio\/speech$/, async ({ req }) => {
   if (!script) throw new HttpError(400, 'invalid_request', '请填写要朗读的文字');
   if (!/^[\w-]+$/.test(voiceId || '')) throw new HttpError(400, 'invalid_request', '请选择音色');
   requireKey();
+  const provider = currentProvider();
   const item = newItem({
     id: newId('aud'),
     kind: 'audio',
     tool: 'speech',
-    model: SPEECH_MODEL,
+    model: SPEECH_MODEL[provider],
     prompt: script,
     payload: { voice_id: voiceId, voice_name: String(voiceName || '') },
     form: form || null,
   });
   runDirect([item], async () => {
-    const { data } = await callUpstream('POST', `/v1/text-to-speech/${voiceId}`, { json: { text: script, model_id: SPEECH_MODEL }, binary: true, timeoutMs: 3 * 60 * 1000 });
+    // OpenRouter 的语音接口是 OpenAI 的那种格式，不指定格式的话返回的是没有文件头的 PCM。
+    const { data } =
+      provider === 'openrouter'
+        ? await callUpstream('POST', '/v1/audio/speech', { json: { model: SPEECH_MODEL.openrouter, input: script, voice: voiceId, response_format: 'mp3' }, binary: true, timeoutMs: 3 * 60 * 1000, provider })
+        : await callUpstream('POST', `/v1/text-to-speech/${voiceId}`, { json: { text: script, model_id: SPEECH_MODEL.flatkey }, binary: true, timeoutMs: 3 * 60 * 1000, provider });
     finishItem(item, data, 'mp3');
   });
   return historyView(item);
@@ -819,7 +984,8 @@ route('POST', /^\/api\/uploads$/, async ({ req }) => {
 
 // 账号里列着的文本模型不一定都调得通：有的被限流，有的通道本身有问题。
 // 所以选中的模型不行就换下一个；刚失败过的模型十分钟内先不再试，免得每次润色都白等一回。
-let polishAvailable = POLISH_MODELS;
+// 读到模型列表之前是 null，这时按登记的全部型号来试。
+let polishAvailable = null;
 const polishFailedAt = new Map();
 const POLISH_RETRY_MS = 10 * 60 * 1000;
 
@@ -831,9 +997,10 @@ route('POST', /^\/api\/polish$/, async ({ req }) => {
   if (draft.length > 4000) throw new HttpError(400, 'invalid_request', '提示词太长，润色最多支持 4000 字');
   if (!POLISH_KINDS.includes(kind)) throw new HttpError(400, 'invalid_request', '这种内容不支持润色');
   const guide = polishGuide({ kind, model: target.model, mode: target.mode, refs: target.refs });
-  if (!POLISH_MODELS.includes(model)) throw new HttpError(400, 'invalid_request', '不支持用这个模型润色');
+  const known = POLISH_MODELS[currentProvider()];
+  if (!known.includes(model)) throw new HttpError(400, 'invalid_request', '不支持用这个模型润色');
 
-  const others = polishAvailable.filter((id) => id !== model);
+  const others = (polishAvailable || known).filter((id) => id !== model);
   const fresh = (id) => Date.now() - (polishFailedAt.get(id) || 0) > POLISH_RETRY_MS;
   // 先试没失败过的；全都刚失败过，就还是从选中的那个试起。
   const candidates = [model, ...others].filter(fresh);
@@ -849,7 +1016,7 @@ route('POST', /^\/api\/polish$/, async ({ req }) => {
       polishFailedAt.delete(candidate);
       return { text: polished, model: candidate };
     } catch (err) {
-      // Key 有问题或者连不上 Flatkey，换模型也没用。
+      // Key 有问题或者连不上平台，换模型也没用。
       if (!(err instanceof HttpError) || err.status === 401 || err.code === 'upstream_unreachable') throw err;
       polishFailedAt.set(candidate, Date.now());
       lastError = err;
@@ -1015,6 +1182,8 @@ route('POST', /^\/api\/real-persons\/([\w-]+)\/assets$/, async ({ req, params })
 
 // ---------- 服务入口 ----------
 
+const FLATKEY_ONLY = /^\/api\/(audio\/(sfx|music)|assets|real-persons)(\/|$)/;
+
 async function handle(req, res) {
   const url = new URL(req.url, `http://${HOST}:${PORT}`);
   const pathname = decodeURIComponent(url.pathname);
@@ -1026,6 +1195,10 @@ async function handle(req, res) {
   }
 
   if (isApi) {
+    // 音效、配乐、素材库、真人档案只有 Flatkey 有。读本机已有的素材列表不受影响。
+    if (FLATKEY_ONLY.test(pathname) && currentProvider() !== 'flatkey' && !(req.method === 'GET' && pathname === '/api/assets')) {
+      throw new HttpError(400, 'not_on_provider', `这个功能只在 Flatkey 上可用，当前用的是 ${labelOf(currentProvider())}。可以在「设置」里切换平台。`);
+    }
     for (const { method, pattern, handler } of routes) {
       if (method !== req.method) continue;
       const match = pattern.exec(pathname);
@@ -1087,6 +1260,7 @@ server.listen(PORT, HOST, () => {
   console.log(`Seedance Studio 已启动：http://${HOST}:${PORT}`);
   console.log(`数据目录：${DATA_DIR}`);
   if (!fs.existsSync(path.join(PUBLIC_DIR, 'index.html'))) console.log('还没有构建页面，打开会是空的。先运行 npm run build（npm start 会自动构建）。');
+  console.log(`当前平台：${labelOf(currentProvider())}`);
   if (!apiKey()) console.log('还没有设置 API Key，打开页面后在「设置」里填写。');
   setInterval(tick, 2000);
   tick();
