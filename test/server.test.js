@@ -430,7 +430,7 @@ test('素材：超过大小上限的上传返回 413 和说明，而不是断开
   form.append('asset_type', 'Video');
   const res = await call('POST', '/api/assets/upload', form, { 'X-Asset-Name': encodeURIComponent('太大.mp4'), 'X-Asset-Type': 'Video' });
   assert.equal(res.status, 413);
-  assert.match(res.data.error.message, /文件太大/);
+  assert.match(res.data.error.message, /文件过大/);
   assert.equal(mock.log.slice(before).some((l) => l.path === '/v1/assets/upload'), false);
 });
 

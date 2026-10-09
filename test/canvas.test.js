@@ -67,7 +67,7 @@ test('有连线标了首帧或尾帧就按首尾帧生成', () => {
 test('首尾帧摆不通的情况会说明原因', () => {
   assert.match(videoFormFrom(base, node, '', [input('image', 'last', 1)]).problems[0], /还需要一张首帧/);
   assert.match(videoFormFrom(base, node, '', [input('image', 'first', 1), input('image', 'first', 2)]).problems[0], /首帧只能有一张/);
-  assert.match(videoFormFrom(base, node, '', [input('image', 'first', 1), input('image', 'reference', 2)]).problems[0], /不能一起用/);
+  assert.match(videoFormFrom(base, node, '', [input('image', 'first', 1), input('image', 'reference', 2)]).problems[0], /不能同时使用/);
 });
 
 test('存画布之前去掉只在页面上有意义的状态', () => {

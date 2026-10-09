@@ -41,7 +41,7 @@ function showVerificationUrl(url: string | undefined, title = '认证链接') {
     size: 'md',
     content: url ? (
       <>
-        <p className="confirm-text">把下面的链接交给真人本人，由本人打开并完成认证。</p>
+        <p className="confirm-text">请将链接发送给本人完成认证。</p>
         <div className="row">
           <input className="input mono" readOnly value={url} onFocus={(e) => e.currentTarget.select()} />
           <button className="btn btn-primary" onClick={() => copyText(url, '已复制认证链接')}>
@@ -49,11 +49,11 @@ function showVerificationUrl(url: string | undefined, title = '认证链接') {
           </button>
         </div>
         <div className="notice notice-warn">
-          <span>这个链接是一次性的，不要公开。关闭这个窗口后不会再显示，需要时可以重新生成。</span>
+          <span>链接仅可使用一次，关闭后不再显示，可重新生成。</span>
         </div>
       </>
     ) : (
-      <p className="confirm-text">Flatkey 的响应里没有认证链接，请稍后在档案上点「新的认证链接」重试。</p>
+      <p className="confirm-text">未获取到认证链接，请稍后重试。</p>
     ),
   });
 }
@@ -100,7 +100,7 @@ function openCreatePerson() {
 }
 
 async function newVerification(person: Person) {
-  const ok = await confirmDialog({ title: '生成新的认证链接？', message: `会为「${person.name || person.id}」创建一个新的认证会话。`, okText: '生成' });
+  const ok = await confirmDialog({ title: '生成新的认证链接？', message: `将为「${person.name || person.id}」创建新的认证会话。`, okText: '生成' });
   if (!ok) return;
   try {
     const data = await api<Person>('POST', `/api/real-persons/${person.id}/verification-sessions`, undefined, { 'Idempotency-Key': crypto.randomUUID() });
@@ -196,7 +196,7 @@ function openAddPersonAsset(person: Person) {
 async function deletePersonAsset(person: Person, asset: Asset) {
   const ok = await confirmDialog({
     title: '从 Flatkey 删除这个素材？',
-    message: `「${asset.name || asset.id}」删除后不能再用于新的生成任务，且无法恢复。`,
+    message: `删除「${asset.name || asset.id}」后无法恢复。`,
     okText: '删除',
     danger: true,
   });
@@ -211,15 +211,15 @@ async function deletePersonAsset(person: Person, asset: Asset) {
 }
 
 function PersonList() {
-  if (state.persons === null) return <div className="empty small-empty">正在读取…</div>;
+  if (state.persons === null) return <div className="empty small-empty">加载中…</div>;
   if (state.personsError) {
     return (
       <div className="notice notice-warn">
-        <span>读取失败：{state.personsError}</span>
+        <span>加载失败：{state.personsError}</span>
       </div>
     );
   }
-  if (!state.persons.length) return <div className="empty small-empty">还没有真人档案</div>;
+  if (!state.persons.length) return <div className="empty small-empty">暂无真人档案</div>;
   return state.persons.map((p) => {
     const s = statusOf(p);
     return (
@@ -240,7 +240,7 @@ function PersonDetail() {
     return (
       <div className="empty">
         <div className="empty-title">选择一个档案查看素材</div>
-        <div className="muted">流程：创建档案 → 本人完成认证 → 添加素材 → 素材可用后用于生成。</div>
+        <div className="muted">创建档案 → 本人认证 → 添加素材</div>
       </div>
     );
   }
@@ -272,7 +272,7 @@ function PersonDetail() {
       </div>
       {!active && (
         <div className="notice">
-          <span>{person.status === 'failed' || person.status === 'expired' ? '认证没有通过或已过期，请生成新的认证链接让本人重新认证。' : '等本人完成认证、状态变成「已认证」后，才能添加素材。'}</span>
+          <span>{person.status === 'failed' || person.status === 'expired' ? '认证未通过或已过期，请重新生成认证链接。' : '认证通过后方可添加素材。'}</span>
         </div>
       )}
       <h3>素材</h3>
@@ -281,9 +281,9 @@ function PersonDetail() {
           <span>{page.assetsError}</span>
         </div>
       ) : !assets ? (
-        <div className="empty small-empty">正在读取素材…</div>
+        <div className="empty small-empty">加载中…</div>
       ) : !assets.length ? (
-        <div className="empty small-empty">这个档案下还没有素材</div>
+        <div className="empty small-empty">暂无素材</div>
       ) : (
         <div className="asset-grid">
           {assets.map((asset) => (
@@ -304,7 +304,6 @@ export function Persons() {
       <header className="page-head">
         <div>
           <h1>真人档案</h1>
-          <p className="muted">用于特定真人的脸、声音或视频。需要本人完成认证后才能使用。</p>
         </div>
         <div className="row">
           <button className="btn" onClick={() => loadPersons()}>
@@ -316,7 +315,7 @@ export function Persons() {
         </div>
       </header>
       <div className="notice">
-        <span>真人素材是受邀开放的能力，需要 Flatkey 先为你的账号开通。没有开通时，这里的操作会返回错误。</span>
+        <span>真人素材为受邀开放功能，需 Flatkey 为账号开通后使用。</span>
       </div>
       <div className="person-layout">
         <div className="person-list">

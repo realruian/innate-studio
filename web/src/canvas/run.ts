@@ -35,9 +35,9 @@ async function libraryRef(flow: Flow, source: Node, output: NonNullable<ReturnTy
   let asset = data.assetOf === output.url ? findAsset(data.assetId) : null;
   if (!asset && data.assetOf === output.url && data.assetId) asset = await refreshAsset(data.assetId).catch(() => null);
   if (!asset) {
-    say('正在把素材传到素材库');
+    say('正在上传素材');
     const res = await fetch(output.url);
-    if (!res.ok) throw new Error('上游节点的文件已经不在本机了');
+    if (!res.ok) throw new Error('上游节点的文件已不存在');
     const blob = await res.blob();
     asset = await uploadVirtualAsset(new File([blob], `${output.name}.${output.url.split('.').pop()}`, { type: blob.type }), output.kind);
     flow.updateNodeData(source.id, { assetId: asset.id, assetOf: output.url });
@@ -46,8 +46,8 @@ async function libraryRef(flow: Flow, source: Node, output: NonNullable<ReturnTy
   for (;;) {
     const status = assetReadiness(asset, model);
     if (status.ready) return refFromAsset(asset, output.kind);
-    if (status.tone === 'error') throw new Error(`素材${status.label}，用不了`);
-    if (Date.now() > deadline) throw new Error('素材还在处理中，等一会儿再点生成');
+    if (status.tone === 'error') throw new Error(`素材${status.label}，无法使用`);
+    if (Date.now() > deadline) throw new Error('素材处理中，请稍后重试');
     say('素材处理中');
     await sleep(3000);
     asset = await refreshAsset(asset.id);
@@ -63,13 +63,13 @@ async function submitVideo(flow: Flow, node: Node, sources: { link: LinkData; no
   for (const { link, node: source } of media) {
     const kind = link.kind as Kind;
     const output = outputOf(source);
-    if (!output) throw new Error(`连进来的${NODE_LABELS[kind]}节点还没有结果，先让它生成完`);
-    if (!able.refKinds.includes(kind) || (kind !== 'image' && !able.reference)) throw new Error(`${data.model} 用不了参考${NODE_LABELS[kind]}`);
+    if (!output) throw new Error(`上游${NODE_LABELS[kind]}节点尚未生成`);
+    if (!able.refKinds.includes(kind) || (kind !== 'image' && !able.reference)) throw new Error(`${data.model} 不支持参考${NODE_LABELS[kind]}`);
     if (++counts[kind] > KINDS[kind].max) throw new Error(`参考${NODE_LABELS[kind]}最多 ${KINDS[kind].max} 个`);
     const role = kind === 'image' ? link.role || 'reference' : 'reference';
     if (role === 'last' && !able.lastFrame) throw new Error(`${data.model} 不支持尾帧`);
     // 素材库里的素材直接用；本机的文件看模型：能直接收的就直接给，Seedance 要先传进素材库。
-    if (output.asset && able.localFiles) throw new Error(`${data.model} 用不了素材库里的素材，请换成上传的文件或生成的结果`);
+    if (output.asset && able.localFiles) throw new Error(`${data.model} 不支持素材库素材，请改用上传的文件或生成结果`);
     const ref: Ref = output.asset
       ? { ...output.asset, uid: crypto.randomUUID() }
       : able.localFiles
@@ -99,7 +99,7 @@ async function submitImage(node: Node, sources: { link: LinkData; node: Node }[]
     .filter((s) => s.link.kind === 'image')
     .map((s) => {
       const output = outputOf(s.node);
-      if (!output) throw new Error('连进来的图片节点还没有结果，先让它生成完');
+      if (!output) throw new Error('上游图片节点尚未生成');
       return output.asset ? { ...output.asset, uid: crypto.randomUUID() } : { uid: crypto.randomUUID(), kind: 'image' as const, source: 'local' as const, url: output.url, name: output.name, thumb: null };
     });
   const form = { prompt, model: data.model, ratio: data.ratio, resolution: fitImageSize(data.model, data.resolution), count: data.count || 1, refs };
@@ -167,7 +167,7 @@ export async function generate(flow: Flow, id: string, snap: () => void = () => 
   const node = flow.getNode(id);
   if (!node || (node.data as AnyData).busy) return;
   if (node.type === 'text') return write(flow, id, snap);
-  if (!state.app.hasKey) return toast('还没有设置 API Key，请先到「设置」里填写', 'info');
+  if (!state.app.hasKey) return toast('请先在「设置」中配置 API Key', 'info');
   const say = (busy: string) => flow.updateNodeData(id, { busy });
   flow.updateNodeData(id, { busy: '准备中', error: '' });
   try {
@@ -189,7 +189,7 @@ export async function generate(flow: Flow, id: string, snap: () => void = () => 
           ids.push(await submitVideo(flow, node, sources, prompt, (text) => say(count > 1 ? `${text}（${n + 1}/${count}）` : text)));
         } catch (err) {
           if (!ids.length) throw err;
-          toast(`第 ${n + 1} 段没提交上：${(err as Error).message}`, 'error', 6000);
+          toast(`第 ${n + 1} 段提交失败：${(err as Error).message}`, 'error', 6000);
           break;
         }
       }
@@ -213,9 +213,9 @@ async function write(flow: Flow, id: string, snap: () => void) {
   const data = node.data as AnyData;
   const prompt = (data.prompt || '').trim();
   const model = state.catalog.polish.includes(data.model || '') ? data.model! : polishModel();
-  if (!prompt) return toast('先写下想让模型写什么', 'info');
-  if (!model) return toast('当前账号里没有可用的文本模型', 'info');
-  flow.updateNodeData(id, { busy: '正在写', error: '' });
+  if (!prompt) return toast('请输入写作要求', 'info');
+  if (!model) return toast('暂无可用的文本模型', 'info');
+  flow.updateNodeData(id, { busy: '生成中', error: '' });
   try {
     const sources = flow
       .getEdges()
@@ -248,7 +248,7 @@ export async function runAll(flow: Flow, ids: string[], snap: () => void) {
     // 没写要求的文本节点是留给人自己填的，跳过。
     return node.type !== 'text' || Boolean(((node.data as AnyData).prompt || '').trim());
   });
-  if (!todo.length) return toast('这一组里没有还空着、可以生成的节点', 'info');
+  if (!todo.length) return toast('该分组没有待生成的节点', 'info');
   toast(`开始执行，共 ${todo.length} 个节点`, 'info', 2400);
   for (const [index, id] of todo.entries()) {
     await generate(flow, id, snap);
@@ -259,12 +259,12 @@ export async function runAll(flow: Flow, ids: string[], snap: () => void) {
       const data = node.data as AnyData;
       const record = recordOf(data);
       const failed = Boolean(data.error) || record?.status === 'failed' || (node.type !== 'text' && !data.recordId);
-      if (failed || Date.now() > deadline) return toast(`执行到第 ${index + 1} 个节点停下了：${data.error || record?.error?.message || '没有出结果'}`, 'error', 6000);
+      if (failed || Date.now() > deadline) return toast(`第 ${index + 1} 个节点执行失败：${data.error || record?.error?.message || '未返回结果'}`, 'error', 6000);
       if (node.type === 'text' ? (data.text || '').trim() && !data.busy : outputOf(node)) break;
       await sleep(1000);
     }
   }
-  toast('这一组执行完了', 'success');
+  toast('分组执行完成', 'success');
 }
 
 // ---------- 新节点的默认参数 ----------

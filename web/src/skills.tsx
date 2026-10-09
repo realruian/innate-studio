@@ -26,7 +26,7 @@ function SkillLine({ skill, typed }: { skill: Skill; typed?: boolean }) {
           {skill.official && <span className="badge badge-pending">官方</span>}
           {typed && <span className="badge badge-pending">{TYPE_LABELS[skill.type]}</span>}
         </span>
-        <span className="skill-desc ellipsis">{skill.description || '没有说明'}</span>
+        <span className="skill-desc ellipsis">{skill.description || '暂无简介'}</span>
       </span>
     </>
   );
@@ -64,14 +64,14 @@ function Editor({ skill, done }: { skill: Partial<Skill>; done: () => void }) {
   return (
     <>
       <label className="field-label">名称</label>
-      <input ref={name} className="input" type="text" defaultValue={skill.name || ''} maxLength={30} readOnly={locked} placeholder="比如：产品展示" />
-      <label className="field-label">说明</label>
-      <input ref={description} className="input" type="text" defaultValue={skill.description || ''} maxLength={120} readOnly={locked} placeholder="一句话说清它帮你写什么，显示在技能列表里" />
-      <label className="field-label">用在</label>
+      <input ref={name} className="input" type="text" defaultValue={skill.name || ''} maxLength={30} readOnly={locked} placeholder="例如：产品展示" />
+      <label className="field-label">简介</label>
+      <input ref={description} className="input" type="text" defaultValue={skill.description || ''} maxLength={120} readOnly={locked} placeholder="技能简介" />
+      <label className="field-label">适用类型</label>
       <div>{locked ? <span className="badge badge-pending">{TYPE_LABELS[type]}</span> : <Segmented options={TYPE_OPTIONS} value={type} onChange={setType} />}</div>
       <label className="field-label">规则</label>
-      <textarea ref={rules} className="input skill-rules" rows={12} defaultValue={skill.rules || ''} maxLength={8000} readOnly={locked} placeholder="写给文本模型看的要求：拿到用户的一句话后，要把它写成什么样的提示词。写清楚该写哪些内容、不该写什么、按什么顺序，最后说明只输出提示词。" />
-      <p className="muted small">{locked ? '官方技能不能修改。想调整的话，可以把规则复制出去，新建一个自己的技能。' : '发送时，这段规则和你在输入框里写的那句话会一起交给文本模型，它写出来的提示词再拿去生成。'}</p>
+      <textarea ref={rules} className="input skill-rules" rows={12} defaultValue={skill.rules || ''} maxLength={8000} readOnly={locked} placeholder="提示词扩写规则：内容要求、禁止项、输出格式" />
+      {locked && <p className="muted small">官方技能不可修改</p>}
       {!locked && (
         <div className="modal-actions">
           <button className="btn btn-primary" disabled={saving} onClick={save}>
@@ -95,7 +95,7 @@ export function SkillPanel({ close }: { close: () => void }) {
   const [query, setQuery] = useState('');
   const search = useRef<HTMLInputElement>(null);
   useEffect(() => {
-    loadSkills().catch((err) => toast(`技能读不出来：${message(err)}`, 'error', 6000));
+    loadSkills().catch((err) => toast(`技能加载失败：${message(err)}`, 'error', 6000));
     const timer = setTimeout(() => search.current?.focus(), 0);
     return () => clearTimeout(timer);
   }, []);
@@ -132,7 +132,7 @@ export function SkillPanel({ close }: { close: () => void }) {
             </button>
           );
         })}
-        {state.skills && !list.length && <div className="empty small-empty">{query ? `没有带「${query}」的技能` : `还没有用在${TYPE_LABELS[type]}上的技能`}</div>}
+        {state.skills && !list.length && <div className="empty small-empty">{query ? `未找到「${query}」` : `暂无${TYPE_LABELS[type]}技能`}</div>}
       </div>
       <div className="skill-foot">
         <button className="menu-item skill-action" type="button" onClick={() => leave(() => openSkillEditor({ type }))}>
@@ -154,7 +154,7 @@ export function Skills() {
   useStore('skills');
   const [query, setQuery] = useState('');
   useEffect(() => {
-    loadSkills().catch((err) => toast(`技能读不出来：${message(err)}`, 'error', 6000));
+    loadSkills().catch((err) => toast(`技能加载失败：${message(err)}`, 'error', 6000));
   }, []);
 
   function more(button: HTMLElement, skill: Skill) {
@@ -167,7 +167,7 @@ export function Skills() {
       ],
       onSelect: async (action) => {
         if (action === 'edit') return openSkillEditor(skill);
-        if (!(await confirmDialog({ title: '删除这个技能？', message: `「${skill.name}」会被删掉。用它生成过的内容还在「创作记录」里。`, okText: '删除', danger: true }))) return;
+        if (!(await confirmDialog({ title: '删除这个技能？', message: `删除「${skill.name}」后无法恢复，已生成的内容不受影响。`, okText: '删除', danger: true }))) return;
         try {
           await api('DELETE', `/api/skills/${skill.id}`);
           await loadSkills();
@@ -184,7 +184,6 @@ export function Skills() {
       <header className="page-head">
         <div>
           <h1>技能</h1>
-          <p className="muted">一套写提示词的规则：在创作页选一个，只写一句话，发送时帮你扩写成完整的提示词。</p>
         </div>
         <div className="row">
           <div className="search-field">

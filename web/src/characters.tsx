@@ -26,7 +26,7 @@ function Editor({ character, done }: { character: Partial<Character>; done: () =
 
   async function save() {
     const body = { name: name.current!.value, description: description.current!.value, images };
-    if (!body.name.trim()) return toast('请给角色起个名字', 'info');
+    if (!body.name.trim()) return toast('请输入角色名称', 'info');
     setSaving(true);
     try {
       await (character.id ? api('PUT', `/api/characters/${character.id}`, body) : api('POST', '/api/characters', body));
@@ -40,10 +40,10 @@ function Editor({ character, done }: { character: Partial<Character>; done: () =
 
   return (
     <>
-      <label className="field-label">名字</label>
-      <input ref={name} className="input" type="text" defaultValue={character.name || ''} maxLength={60} placeholder="比如：林晚" />
+      <label className="field-label">名称</label>
+      <input ref={name} className="input" type="text" defaultValue={character.name || ''} maxLength={60} placeholder="例如：林晚" />
       <label className="field-label">描述</label>
-      <textarea ref={description} className="input" rows={3} defaultValue={character.description || ''} maxLength={2000} placeholder="年龄、发型、服装、体型这些固定的外貌。用这个角色生成时，提示词空着就先填上这段" />
+      <textarea ref={description} className="input" rows={3} defaultValue={character.description || ''} maxLength={2000} placeholder="外貌特征：年龄、发型、服装、体型" />
       <label className="field-label">
         参考图（{images.length} / {MAX_IMAGES}）
       </label>
@@ -67,7 +67,7 @@ function Editor({ character, done }: { character: Partial<Character>; done: () =
           </button>
         )}
       </div>
-      <p className="muted small">正脸、全身、侧面各一张，角色最稳定。图片只保存在这台电脑上。</p>
+      <p className="muted small">建议上传正脸、全身、侧面各一张</p>
       <div className="modal-actions">
         <button className="btn btn-primary" disabled={saving} onClick={save}>
           保存
@@ -84,7 +84,7 @@ export function openCharacterEditor(character: Partial<Character> = {}) {
 function generate(character: Character, type: 'image' | 'video') {
   try {
     useCharacter(character, type);
-    toast(`已带上「${character.name}」的参考图，写下想让这个角色做什么`, 'success');
+    toast(`已添加角色「${character.name}」`, 'success');
   } catch (err) {
     toast(message(err), 'error', 6000);
   }
@@ -94,7 +94,7 @@ export function Characters() {
   useStore('characters');
   const [query, setQuery] = useState('');
   useEffect(() => {
-    loadCharacters().catch((err) => toast(`角色读不出来：${message(err)}`, 'error', 6000));
+    loadCharacters().catch((err) => toast(`角色加载失败：${message(err)}`, 'error', 6000));
   }, []);
 
   function more(button: HTMLElement, character: Character) {
@@ -109,7 +109,7 @@ export function Characters() {
       onSelect: async (action) => {
         if (action === 'image' || action === 'video') return generate(character, action);
         if (action === 'edit') return openCharacterEditor(character);
-        if (!(await confirmDialog({ title: '删除这个角色？', message: `「${character.name}」会从角色库里删掉。用它生成过的内容还在「创作记录」里。`, okText: '删除', danger: true }))) return;
+        if (!(await confirmDialog({ title: '删除这个角色？', message: `删除「${character.name}」后无法恢复，已生成的内容不受影响。`, okText: '删除', danger: true }))) return;
         try {
           await api('DELETE', `/api/characters/${character.id}`);
           await loadCharacters();
@@ -127,7 +127,6 @@ export function Characters() {
       <header className="page-head">
         <div>
           <h1>角色</h1>
-          <p className="muted">把角色的参考图存在这里，生成图片和视频时带上，同一个角色就能在不同画面里反复出现。</p>
         </div>
         <div className="search-field">
           <Icon name="search" />
@@ -141,13 +140,12 @@ export function Characters() {
               <Icon name="plus" size={20} />
               <span>新建角色</span>
             </button>
-            <div className="project-hint">也可以在图片记录的「更多」里存为角色</div>
           </article>
         )}
         {shown.map((character) => (
           <article key={character.id} className="project">
             <div className="project-media">
-              <button className="project-cover" type="button" aria-label={`用「${character.name}」生成图片`} {...tip('用这个角色生成图片')} onClick={() => generate(character, 'image')}>
+              <button className="project-cover" type="button" aria-label={`用「${character.name}」生成图片`} {...tip('生成图片')} onClick={() => generate(character, 'image')}>
                 {character.images[0] ? <img src={character.images[0]} alt="" loading="lazy" draggable={false} /> : <Icon name="mask" size={32} stroke={1.2} />}
               </button>
               <button className="icon-btn icon-btn-sm on-media project-more" type="button" {...tip('更多')} aria-label="更多操作" aria-haspopup="menu" aria-expanded="false" onClick={(e) => more(e.currentTarget, character)}>
@@ -162,7 +160,7 @@ export function Characters() {
             </div>
           </article>
         ))}
-        {list && query && !shown.length && <div className="empty">没有名字里带「{query}」的角色</div>}
+        {list && query && !shown.length && <div className="empty">未找到「{query}」</div>}
       </div>
     </div>
   );

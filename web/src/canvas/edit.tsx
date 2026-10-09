@@ -14,7 +14,7 @@ const loadImage = (url: string) =>
   new Promise<HTMLImageElement>((resolve, reject) => {
     const img = new Image();
     img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error('这张图读不出来'));
+    img.onerror = () => reject(new Error('图片加载失败'));
     img.src = url;
   });
 
@@ -25,7 +25,7 @@ async function save(source: CanvasImageSource, sx: number, sy: number, sw: numbe
   canvas.height = Math.max(1, Math.round(sh));
   canvas.getContext('2d')!.drawImage(source, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
   const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
-  if (!blob) throw new Error('这块画面存不下来');
+  if (!blob) throw new Error('画面导出失败');
   const ref = await uploadLocalFile(new File([blob], `${name}.png`, { type: 'image/png' }), 'image');
   return { url: ref.url, name };
 }
@@ -53,13 +53,13 @@ export async function grabFrame(url: string, at: number | 'last', name: string) 
   video.src = url;
   await new Promise<void>((resolve, reject) => {
     video.onloadedmetadata = () => resolve();
-    video.onerror = () => reject(new Error('这段视频读不出来'));
+    video.onerror = () => reject(new Error('视频加载失败'));
   });
   // 最后一帧往前让一点点，停在真正有画面的地方。
   const time = at === 'last' ? Math.max(0, video.duration - 0.05) : Math.min(Math.max(0, at), Math.max(0, video.duration - 0.05));
   await new Promise<void>((resolve, reject) => {
     video.onseeked = () => resolve();
-    video.onerror = () => reject(new Error('这段视频读不出来'));
+    video.onerror = () => reject(new Error('视频加载失败'));
     video.currentTime = time;
   });
   return save(video, 0, 0, video.videoWidth, video.videoHeight, name);
@@ -82,7 +82,7 @@ export async function padImage(url: string, ratio: number, name: string): Promis
   ctx.fillRect(0, 0, width, height);
   ctx.drawImage(img, Math.round((width - w) / 2), Math.round((height - h) / 2));
   const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
-  if (!blob) throw new Error('底图做不出来');
+  if (!blob) throw new Error('底图生成失败');
   const ref = await uploadLocalFile(new File([blob], `${name}.png`, { type: 'image/png' }), 'image');
   return { url: ref.url, name };
 }

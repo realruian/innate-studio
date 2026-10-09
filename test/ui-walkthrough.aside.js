@@ -108,8 +108,8 @@ await shot('01-create');
 
 // 1b. 关键位置的颜色要等于从 Antigravity 截图取到的值；输入框底部要有灰色托边
 const REFERENCE = {
-  light: { 主区底色: 'rgb(249, 249, 249)', 侧栏底色: 'rgb(243, 243, 243)', 输入框底色: 'rgb(252, 252, 252)', 托边: 'rgb(233, 233, 233)' },
-  dark: { 主区底色: 'rgb(16, 16, 16)', 侧栏底色: 'rgb(22, 22, 22)', 输入框底色: 'rgb(28, 28, 28)', 托边: 'rgb(37, 37, 37)' },
+  light: { 主区底色: 'rgb(249, 249, 249)', 侧栏底色: 'rgba(0, 0, 0, 0.024)', 输入框底色: 'rgb(252, 252, 252)', 托边: 'rgb(233, 233, 233)' },
+  dark: { 主区底色: 'rgb(16, 16, 16)', 侧栏底色: 'rgba(255, 255, 255, 0.024)', 输入框底色: 'rgb(28, 28, 28)', 托边: 'rgb(37, 37, 37)' },
 }[THEME];
 const colours = await pg.evaluate(() => {
   const css = (selector) => getComputedStyle(document.querySelector(selector));
@@ -132,9 +132,11 @@ if (colours.托边高度 !== '0px 8px 0px 0px' || colours.托边占位 !== '8px'
 const edges = await pg.evaluate(() => {
   const left = (selector) => Math.round(document.querySelector(selector).getBoundingClientRect().left);
   const prompt = document.querySelector('textarea.prompt');
+  // 能加参考素材时，那一摞在提示词左边，由它对齐到这条线；不能加时是提示词自己。
+  const refs = document.querySelector('.composer-card .ref-row');
   const title = getComputedStyle(document.querySelector('.composer-title'));
   return {
-    提示词: Math.round(prompt.getBoundingClientRect().left + parseFloat(getComputedStyle(prompt).paddingLeft)),
+    提示词: refs ? Math.round(refs.getBoundingClientRect().left) : Math.round(prompt.getBoundingClientRect().left + parseFloat(getComputedStyle(prompt).paddingLeft)),
     工具栏图标: left('.composer-params .icon'),
     品牌标记: left('.brand-mark'),
     导航图标: left('.nav-item .icon'),
@@ -142,7 +144,7 @@ const edges = await pg.evaluate(() => {
     正文行高: Math.round((parseFloat(getComputedStyle(document.body).lineHeight) / parseFloat(getComputedStyle(document.body).fontSize)) * 100) / 100,
   };
 });
-if (edges.提示词 !== edges.工具栏图标) problems.push(`输入框里提示词和工具栏图标的左边线没对齐：${edges.提示词} / ${edges.工具栏图标}`);
+if (edges.提示词 !== edges.工具栏图标) problems.push(`输入框里的内容和工具栏图标的左边线没对齐：${edges.提示词} / ${edges.工具栏图标}`);
 if (edges.品牌标记 !== edges.导航图标) problems.push(`侧栏的品牌标记和导航图标的左边线没对齐：${edges.品牌标记} / ${edges.导航图标}`);
 if (edges.问句行高 !== 1.2 || edges.正文行高 !== 1.5) problems.push(`行高不对：问句 ${edges.问句行高}（应为 1.2），正文 ${edges.正文行高}（应为 1.5）`);
 
@@ -165,17 +167,18 @@ const pinned = await pg.evaluate(() => {
   return Boolean(card);
 });
 if (pinned) {
-  // 用真实的鼠标点击：浏览器只允许用户亲手触发的有声播放，脚本触发的会被拦下。
-  await pg.locator(`${P} .player-btn`).first().click();
+  // 卡片上没有控制条：鼠标移到画面上就静音播放，移开停下并回到开头。
+  if (await count(`${P} .player-bar`)) problems.push('记录卡片上不应该有控制条');
+  await pg.locator(`${P} .card-media`).hover();
   await sleep(900);
   const playing = await pg.evaluate((sel) => {
     const v = document.querySelector(`${sel} video`);
     if (!v) return null;
-    return { paused: v.paused, time: v.currentTime, label: document.querySelector(`${sel} .player-time`).textContent, fill: parseFloat(document.querySelector(`${sel} .player-fill`).style.width) || 0, ready: v.readyState, page: document.visibilityState };
+    return { paused: v.paused, time: v.currentTime, muted: v.muted, ready: v.readyState, page: document.visibilityState };
   }, P);
-  if (!playing) problems.push('刚点了播放的卡片被整张换掉了');
-  else if (playing.paused || playing.time <= 0) problems.push(`点了播放但视频没有动：${JSON.stringify(playing)}`);
-  else if (playing.fill <= 0 || playing.label.startsWith('0:00 / 0:00')) problems.push(`播放时进度和时间没有更新：${JSON.stringify(playing)}`);
+  if (!playing) problems.push('鼠标刚移上去的卡片被整张换掉了');
+  else if (playing.paused || playing.time <= 0) problems.push(`鼠标移到卡片上但视频没有动：${JSON.stringify(playing)}`);
+  else if (!playing.muted) problems.push('卡片上悬停播放的视频应该是静音的');
 
   // 视频存到本机后，记录里的视频地址会变。这时不能打断正在播放的画面。
   const kept = await pg.evaluate(async (sel) => {
@@ -194,20 +197,18 @@ if (pinned) {
   }, P);
   if (kept !== 'ok') problems.push(kept);
 
-  await must('点静音', click(`${P} .player-btn`, 1));
-  if (!(await pg.evaluate((sel) => document.querySelector(`${sel} video`)?.muted, P))) problems.push('点了静音但没有静音');
-  await must('取消静音', click(`${P} .player-btn`, 1));
-  await must('点暂停', click(`${P} .player-btn`, 0));
-  await sleep(200);
-  if (!(await pg.evaluate((sel) => document.querySelector(`${sel} video`)?.paused, P))) problems.push('点了暂停但还在播放');
+  await shot('01b-player');
+  await pg.locator('.brand').hover();
+  await sleep(300);
+  const rested = await pg.evaluate((sel) => { const v = document.querySelector(`${sel} video`); return v && { paused: v.paused, time: v.currentTime }; }, P);
+  if (!rested?.paused || rested.time !== 0) problems.push(`鼠标移开后视频没有停下并回到开头：${JSON.stringify(rested)}`);
   await shot('01b-player');
 
-  // 2b. 卡片：只有画面，下面没有文字；视频铺满画框；控制条和「更多」只在鼠标移到画面上时出现；操作都在「更多」的菜单里
+  // 2b. 卡片：只有画面，下面没有文字；视频铺满画框；「更多」只在鼠标移到画面上时出现；操作都在「更多」的菜单里
   const cardLook = () =>
     pg.evaluate((sel) => {
       const card = document.querySelector(sel);
       return {
-        bar: getComputedStyle(card.querySelector('.player-bar')).opacity,
         more: getComputedStyle(card.querySelector('.card-more')).opacity,
         length: card.querySelector('.player-length')?.textContent || '',
         lengthShown: getComputedStyle(card.querySelector('.player-length') || card).opacity,
@@ -220,9 +221,9 @@ if (pinned) {
   await pg.locator('.brand').hover();
   await sleep(350);
   const away = await cardLook();
-  if (away.bar !== '0' || away.more !== '0') problems.push(`鼠标不在卡片上时，控制条和「更多」应该隐藏：${JSON.stringify(away)}`);
+  if (away.more !== '0') problems.push(`鼠标不在卡片上时，「更多」应该隐藏：${JSON.stringify(away)}`);
   if (away.parts !== 1 || away.textBelow || !away.named) problems.push(`卡片应该只有画面，下面没有文字和按钮：${JSON.stringify(away)}`);
-  // 视频卡片左下角标着时长（00:05 这样），鼠标移上来、控制条出现时让开；画框空出来的地方是灰色底，不是黑色
+  // 视频卡片左下角标着时长（00:05 这样）；画框空出来的地方是灰色底，不是黑色
   if (!/^\d\d:\d\d$/.test(away.length) || away.lengthShown !== '1') problems.push(`视频卡片左下角应该标着时长：${JSON.stringify(away)}`);
   if (away.frame === 'rgb(0, 0, 0)') problems.push('视频卡片的画框底色不应该是黑色');
   // 视频比例和画框差不多时要铺满，四边都不露出播放器的黑底；差得多（比如竖屏）才完整显示
@@ -239,8 +240,7 @@ if (pinned) {
   await pg.locator(`${P} .card-media`).hover();
   await sleep(350);
   const over = await cardLook();
-  if (over.bar !== '1' || over.more !== '1') problems.push(`鼠标移到画面上时，控制条和「更多」应该出现：${JSON.stringify(over)}`);
-  if (over.lengthShown !== '0') problems.push('控制条出现时，左下角的时长应该让开');
+  if (over.more !== '1') problems.push(`鼠标移到画面上时，「更多」应该出现：${JSON.stringify(over)}`);
   await pg.locator(`${P} .card-more`).click();
   await sleep(300);
   const cardMenu = await pg.evaluate((sel) => {
@@ -271,7 +271,7 @@ if (pinned) {
 // 提示气泡：发送键在不能提交时说明原因，用的是自绘的气泡
 await pg.evaluate(() => document.querySelector('.send-btn').dispatchEvent(new MouseEvent('mouseover', { bubbles: true })));
 await sleep(750);
-if ((await text('.tooltip')).join('') !== '请填写提示词') problems.push(`发送键上的提示不对：${(await text('.tooltip')).join('')}`);
+if (!(await text('.tooltip')).join('').startsWith('请输入提示词')) problems.push(`发送键上的提示不对：${(await text('.tooltip')).join('')}`);
 await pg.evaluate(() => document.querySelector('.send-btn').dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body })));
 await sleep(100);
 if (await count('.tooltip')) problems.push('鼠标移开后提示气泡没有消失');
@@ -380,7 +380,7 @@ await pg.evaluate(() => {
 });
 await sleep(500);
 const tooBig = (await text('.modal .upload-row .error-text')).join('');
-if (!tooBig.includes('文件太大') || !tooBig.includes('30 MB') || tooBig.includes('连不上')) problems.push(`超过上限的文件提示不对：「${tooBig}」`);
+if (!tooBig.includes('文件过大') || !tooBig.includes('30 MB') || tooBig.includes('无法连接')) problems.push(`超过上限的文件提示不对：「${tooBig}」`);
 if ((await count('.modal')) !== 1) problems.push('文件太大时弹窗不应该关闭');
 await pg.evaluate(async () => {
   const c = document.createElement('canvas');
@@ -426,7 +426,7 @@ await shot('06-submitted');
 
 // 6. 点卡片画面打开详情（不是播放）；列表里正在放的视频要停下；详情里不出现请求内容；Esc 关闭；删除确认
 if (!(await count(P))) problems.push('做了记号的卡片不见了：它在中途被整张重建过');
-else await pg.locator(`${P} .player-btn`).first().click();
+else await pg.locator(`${P} .card-media`).hover();
 await sleep(500);
 if (await pg.evaluate((sel) => document.querySelector(`${sel} video`)?.paused !== false, P)) problems.push('打开详情前，列表里的视频没有播起来');
 await must('点已完成卡片的画面', click(`${P} video`, 0));
@@ -446,10 +446,6 @@ await sleep(400);
 if ((await text('.modal h2')).join('') !== '生成详情') problems.push('点生成中的卡片没有打开详情');
 await escape();
 await sleep(200);
-await must('点控制条上的静音', click(`${P} .player-btn`, 1));
-await sleep(200);
-if (await count('.modal')) problems.push('点控制条上的按钮不应该打开详情');
-await must('取消静音', click(`${P} .player-btn`, 1));
 await must('再点已完成卡片的画面', click(`${P} video`, 0));
 await sleep(600);
 // 详情的结构：左边是画面，中间是上一条、下一条，右边上面是分组的信息、下面是操作；组与组之间的间距明显大于组内
@@ -522,9 +518,9 @@ if (await pg.evaluate(() => [...document.querySelectorAll('.view-create video')]
 // 筛选这一行：左边是类型的分段（和创作页是同一组），右边是条数、状态下拉、搜索
 const total = await count(`${V} .card`);
 if (!total) problems.push('记录页没有列出记录');
-// 筛选这一行：左边是类型的分段，右边只有一个搜索图标。没有条数、没有状态筛选，搜索框平时不展开
+// 筛选这一行：左边是来源（创造、画布）和类型两组分段，右边只有一个搜索图标。没有条数、没有状态筛选，搜索框平时不展开
 const tools = await pg.evaluate((v) => ({ dropdowns: document.querySelectorAll(`${v} .page-tools .dropdown`).length, inputs: document.querySelectorAll(`${v} .page-tools input`).length, icon: document.querySelectorAll(`${v} .page-tools .icon-btn svg`).length, words: document.querySelector(`${v} .page-tools`).innerText.replace(/\s+/g, '') }), V);
-if (tools.dropdowns || tools.inputs || tools.icon !== 1 || tools.words !== '全部视频图片语音音效配乐') problems.push(`记录页的筛选行不对：${JSON.stringify(tools)}`);
+if (tools.dropdowns || tools.inputs || tools.icon !== 1 || tools.words !== '创造画布全部视频图片语音音效配乐') problems.push(`记录页的筛选行不对：${JSON.stringify(tools)}`);
 // 点搜索图标展开输入框并把光标放进去；words 为空且没展开时不用管
 const searchFor = async (words) => {
   if (!(await count(`${V} input.search`))) {
@@ -536,27 +532,30 @@ const searchFor = async (words) => {
   await pg.locator(`${V} input.search`).fill(words);
   await sleep(300);
 };
-if ((await text(`${V} .filters .seg`)).join('|') !== '全部|视频|图片|语音|音效|配乐') problems.push(`记录页的类型切换不对：${(await text(`${V} .filters .seg`)).join('|')}`);
+if ((await text(`${V} .filters .seg`)).join('|') !== '创造|画布|全部|视频|图片|语音|音效|配乐') problems.push(`记录页的类型切换不对：${(await text(`${V} .filters .seg`)).join('|')}`);
 await audit('创作记录页');
 await shot('08b-records');
 // 同一时间只放一个：播着一条再去播另一条，前一条要停下并回到开头
 const solo = (i) => `${V} [data-solo="${i}"]`;
 const playable = await pg.evaluate((v) => {
-  const cards = [...document.querySelectorAll(`${v} .card`)].filter((card) => card.querySelector('.player-btn, .audio-play')).slice(0, 2);
-  cards.forEach((card, i) => { card.dataset.solo = String(i); });
+  const cards = [...document.querySelectorAll(`${v} .card`)].filter((card) => card.querySelector('.player, .audio-play')).slice(0, 2);
+  // 模拟的音频只有一秒多，检查之前就放完了：这里让它循环着放。
+  cards.forEach((card, i) => { card.dataset.solo = String(i); const m = card.querySelector('video, audio'); if (m) m.loop = true; });
   return cards.length;
 }, V);
 if (playable < 2) problems.push('记录页里能播放的不到两条，「同一时间只放一个」没有测到');
 else {
-  const mediaOf = (i) => pg.evaluate((s) => { const m = document.querySelector(`${s} :is(video, audio)`); return m ? { paused: m.paused, time: m.currentTime } : null; }, solo(i));
-  await pg.locator(`${solo(0)} :is(.player-btn, .audio-play)`).first().click();
+  // 音频点播放键，视频把鼠标移上去。
+  const start = async (i) => ((await count(`${solo(i)} .audio-play`)) ? pg.locator(`${solo(i)} .audio-play`).first().click() : pg.locator(`${solo(i)} .card-media`).hover());
+  const mediaOf = (i) => pg.evaluate((s) => { const m = document.querySelector(`${s} :is(video, audio)`); return m ? { paused: m.paused, time: m.currentTime, ended: m.ended } : null; }, solo(i));
+  await start(0);
   await sleep(500);
   const before = await mediaOf(0);
-  await pg.locator(`${solo(1)} :is(.player-btn, .audio-play)`).first().click();
+  await start(1);
   await sleep(500);
   const after = { first: await mediaOf(0), second: await mediaOf(1) };
   if (!before || before.paused || before.time <= 0) problems.push(`记录页里点了播放但没有播起来：${JSON.stringify(before)}`);
-  else if (!after.first?.paused || after.first.time !== 0 || after.second?.paused !== false) problems.push(`播放另一条时，前一条没有停下并回到开头：${JSON.stringify(after)}`);
+  else if (!after.first?.paused || after.first.time !== 0 || (after.second?.paused !== false && !after.second?.ended)) problems.push(`播放另一条时，前一条没有停下并回到开头：${JSON.stringify(after)}`);
   await pg.evaluate((s) => document.querySelector(`${s} :is(video, audio)`)?.pause(), solo(1));
 }
 // 搜这次走查自己提交的那条，不依赖数据里碰巧有什么
@@ -565,7 +564,7 @@ await audit('创作记录页·搜索展开');
 const found = await pg.evaluate((v) => [...document.querySelectorAll(`${v} .card`)].map((c) => c.getAttribute('aria-label') || ''), V);
 if (!found.length || found.some((t) => !t.includes('工作室'))) problems.push('按提示词搜索的结果不对');
 await searchFor('不存在的提示词');
-if ((await count(`${V} .card`)) || !(await text(`${V} .empty`)).join('').includes('没有符合条件的记录')) problems.push('搜不到时没有显示空状态');
+if ((await count(`${V} .card`)) || !(await text(`${V} .empty`)).join('').includes('无匹配记录')) problems.push('搜不到时没有显示空状态');
 await searchFor('工作室');
 // 先清空输入框，才能确认「复用」真的把提示词填了回去
 await pg.evaluate(() => {
@@ -674,7 +673,7 @@ await sleep(200);
 if (await count('.view-create .feed-head .entry-action-btn:not([hidden])')) {
   await must('点查看全部', click('.view-create .feed-head .entry-action-btn'));
   await sleep(500);
-  const landed = await pg.evaluate((v) => ({ active: document.querySelector(`${v} .filters .seg.active`)?.textContent, others: document.querySelectorAll(`${v} .card :is(.player, .audio-player)`).length }), V);
+  const landed = await pg.evaluate((v) => ({ active: [...document.querySelectorAll(`${v} .filters .seg.active`)].pop()?.textContent, others: document.querySelectorAll(`${v} .card :is(.player, .audio-player)`).length }), V);
   if (landed.active !== '图片' || landed.others) problems.push(`从图片的「查看全部」进记录页，应该只看图片：${JSON.stringify(landed)}`);
   await must('回到创作', clickText('.nav-item', '创造'));
   await sleep(300);
@@ -770,7 +769,7 @@ if (cardSounding) {
 await pg.evaluate(() => document.querySelector('.view-create .card audio').pause());
 await openFirstCard();
 view = await detailOf();
-if (!view || view.titles !== '朗读的文字|生成参数|任务信息' || view.actions !== '下载音频|复用参数') problems.push(`语音的详情不对：${JSON.stringify(view)}`);
+if (!view || view.titles !== '朗读文本|生成参数|任务信息' || view.actions !== '下载音频|复用参数') problems.push(`语音的详情不对：${JSON.stringify(view)}`);
 await audit('语音详情');
 await shot('15-speech-detail');
 await escape();

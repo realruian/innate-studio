@@ -56,7 +56,7 @@ export function UploadPane<T>({ kind, limit = 1, upload, onUploaded, onAllDone, 
       }
       accepted.push({ file, kind: fileKind });
     }
-    if (accepted.length > limit) toast(`最多还能添加 ${limit} 个，多出的已忽略`, 'info');
+    if (accepted.length > limit) toast(`最多还可添加 ${limit} 个，超出部分已忽略`, 'info');
     let failed = 0;
     for (const { file, kind: fileKind } of accepted.slice(0, limit)) {
       const id = nextRow.current++;
@@ -92,7 +92,7 @@ export function UploadPane<T>({ kind, limit = 1, upload, onUploaded, onAllDone, 
           handle([...e.dataTransfer.files]);
         }}
       >
-        <div className="dropzone-title">点击选择文件，或把文件拖到这里</div>
+        <div className="dropzone-title">点击或拖拽文件到此处上传</div>
         <div className="muted small">{note || (kind ? `支持${KINDS[kind].label}文件` : '支持图片、视频、音频文件')}</div>
       </div>
       <input
@@ -172,7 +172,7 @@ const labelsOf = (kinds: Kind[]) => kinds.map((kind) => KINDS[kind].label).join(
 function RecordGrid({ kinds, local, onPick }: { kinds: Kind[]; local: boolean; onPick: (ref: Ref) => void }) {
   const [busy, setBusy] = useState('');
   const list = state.history.filter((i) => kinds.includes(i.kind) && i.status === 'completed' && i.savedLocally).slice(0, 60);
-  if (!list.length) return <div className="empty small-empty">还没有生成过{labelsOf(kinds)}。</div>;
+  if (!list.length) return <div className="empty small-empty">暂无{labelsOf(kinds)}</div>;
 
   async function choose(item: HistoryItem) {
     setBusy(item.id);
@@ -190,7 +190,7 @@ function RecordGrid({ kinds, local, onPick }: { kinds: Kind[]; local: boolean; o
         <button key={item.id} className="pick-card" type="button" disabled={Boolean(busy)} {...tip(item.prompt)} onClick={() => choose(item)}>
           <div className="pick-thumb">{item.kind === 'video' ? <video className="thumb-img" src={item.mediaUrl} preload="metadata" muted playsInline /> : <Thumb thumb={item.kind === 'image' ? item.mediaUrl : null} kind={item.kind} />}</div>
           <div className="pick-name ellipsis">{recordName(item)}</div>
-          <span className="badge badge-pending">{busy === item.id ? (local ? '读取中' : '上传中') : fmtTime(item.createdAt)}</span>
+          <span className="badge badge-pending">{busy === item.id ? (local ? '加载中' : '上传中') : fmtTime(item.createdAt)}</span>
         </button>
       ))}
     </div>
@@ -204,7 +204,7 @@ function CharacterGrid({ remaining, onPick }: { remaining: number; onPick: (refs
     if (!state.characters) loadCharacters().catch((err) => toast(message(err), 'error', 6000));
   }, []);
   const list = (state.characters || []).filter((c) => c.images.length);
-  if (!list.length) return <div className="empty small-empty">{state.characters ? '角色库里还没有带参考图的角色。可以到「角色」里新建。' : '正在读取…'}</div>;
+  if (!list.length) return <div className="empty small-empty">{state.characters ? '暂无可用角色' : '加载中…'}</div>;
   return (
     <div className="pick-grid">
       {list.map((character) => (
@@ -236,15 +236,15 @@ function PersonAssets({ kinds, used, onPick }: { kinds: Kind[]; used: Set<string
     loadPersonAssets(personId).catch((err) => setError(message(err)));
   }, [personId]);
 
-  if (state.persons === null) return <div className="empty small-empty">正在读取真人档案…</div>;
+  if (state.persons === null) return <div className="empty small-empty">加载中…</div>;
   if (state.personsError) {
     return (
       <div className="notice notice-warn">
-        <span>读取真人档案失败：{state.personsError}</span>
+        <span>真人档案加载失败：{state.personsError}</span>
       </div>
     );
   }
-  if (!active.length) return <div className="empty small-empty">还没有认证通过的真人档案。可以到「真人档案」页面创建。</div>;
+  if (!active.length) return <div className="empty small-empty">暂无已认证的真人档案</div>;
   const list = state.personAssets[personId];
   return (
     <>
@@ -256,9 +256,9 @@ function PersonAssets({ kinds, used, onPick }: { kinds: Kind[]; used: Set<string
             <span>{error}</span>
           </div>
         ) : !list ? (
-          <div className="empty small-empty">正在读取素材…</div>
+          <div className="empty small-empty">加载中…</div>
         ) : (
-          <AssetGrid list={list} kinds={kinds} used={used} emptyText={`这个档案下还没有${labelsOf(kinds)}素材。`} onPick={onPick} />
+          <AssetGrid list={list} kinds={kinds} used={used} emptyText={`暂无${labelsOf(kinds)}素材`} onPick={onPick} />
         )}
       </div>
     </>
@@ -285,8 +285,8 @@ function AssetPicker({ kind, remaining = 1, limits, usedIds = [], onPick, local 
   const pickAsset = (asset: Asset, k: Kind) => pickAndClose(refFromAsset(asset, k));
   // 上传的文件是什么类型就算什么。这里用不了的类型、已经加满的类型，在那一行说明原因。
   const upload = async (file: File, k: Kind, onProgress: Progress): Promise<Ref | Asset> => {
-    if (!(k in left)) throw new Error(`这里用不了${KINDS[k].label}`);
-    if (!open(k)) throw new Error(`${KINDS[k].label}已经加满了`);
+    if (!(k in left)) throw new Error(`不支持${KINDS[k].label}`);
+    if (!open(k)) throw new Error(`${KINDS[k].label}数量已达上限`);
     return local ? uploadLocalFile(file, k, onProgress) : uploadVirtualAsset(file, k, onProgress);
   };
   const several = Object.keys(left).length > 1;
@@ -305,10 +305,10 @@ function AssetPicker({ kind, remaining = 1, limits, usedIds = [], onPick, local 
             upload={upload}
             onUploaded={(result, k) => pick(local ? (result as Ref) : refFromAsset(result as Asset, k))}
             onAllDone={close}
-            note={local ? '文件只保存在这台电脑上' : `文件会先上传到你的 Flatkey 素材库，处理完成后才能用于生成${room > 1 ? `；最多还能添加 ${room} 个` : ''}`}
+            note={local ? undefined : `上传至 Flatkey 素材库，处理完成后可用${room > 1 ? `；最多还可添加 ${room} 个` : ''}`}
           />
         )}
-        {tab === 'library' && <AssetGrid list={state.assets} kinds={kinds} used={used} emptyText={`素材库里还没有${labelsOf(kinds)}素材。可以切到「本地上传」添加。`} onPick={pickAsset} />}
+        {tab === 'library' && <AssetGrid list={state.assets} kinds={kinds} used={used} emptyText={`暂无${labelsOf(kinds)}素材`} onPick={pickAsset} />}
         {tab === 'records' && <RecordGrid kinds={kinds} local={local} onPick={pickAndClose} />}
         {tab === 'person' && <PersonAssets kinds={kinds} used={used} onPick={pickAsset} />}
         {tab === 'character' && (
@@ -362,7 +362,7 @@ function AssetFromUrl({ close }: { close: () => void }) {
       <label className="field-label">公网 HTTPS 地址</label>
       <input ref={urlInput} className="input" type="url" placeholder="https://cdn.example.com/reference/product.png" autoComplete="off" />
       <label className="field-label">名称</label>
-      <input ref={nameInput} className="input" type="text" placeholder="可选，方便以后辨认" maxLength={80} />
+      <input ref={nameInput} className="input" type="text" placeholder="可选" maxLength={80} />
       <div className="modal-actions">
         <button className="btn btn-primary" disabled={busy} onClick={submit}>
           创建素材
@@ -397,7 +397,7 @@ function AssetById({ close }: { close: () => void }) {
           添加
         </button>
       </div>
-      <p className="muted small">用于把以前在别处创建、但不在这个列表里的素材加进来。需要是当前 API Key 能访问的素材。</p>
+      <p className="muted small">仅支持当前 API Key 可访问的素材</p>
     </>
   );
 }
@@ -448,13 +448,13 @@ function openDeleteAssetDialog(asset: Asset) {
     content: (
       <>
         <p className="confirm-text">「{asset.name || asset.id}」</p>
-        <p className="muted small">从 Flatkey 删除后，这个素材不能再用于新的生成任务，且无法恢复。只从列表移除不会影响 Flatkey 上的素材。</p>
+        <p className="muted small">从 Flatkey 删除后无法恢复；仅从列表移除不影响 Flatkey 上的素材。</p>
         <div className="modal-actions">
           <button className="btn" onClick={() => modal.close()}>
             取消
           </button>
           <button className="btn" onClick={() => run('local')}>
-            只从列表移除
+            仅从列表移除
           </button>
           <button className="btn btn-danger" onClick={() => run('remote')}>
             从 Flatkey 删除
@@ -480,7 +480,7 @@ export function AssetCard({ asset, onDelete, onRefresh }: { asset: Asset; onDele
           {asset.name || asset.id}
         </div>
         <div className="muted small">{`${KINDS[kind].label} · ${fmtTime(asset.created_at ? asset.created_at * 1000 : asset.addedAt)}`}</div>
-        {models.length ? <div className="entry-meta">可用模型：{models.join('、')}</div> : asset.kind === 'virtual' && r.tone === 'pending' ? <div className="muted small">还没有可用的模型</div> : null}
+        {models.length ? <div className="entry-meta">可用模型：{models.join('、')}</div> : asset.kind === 'virtual' && r.tone === 'pending' ? <div className="muted small">暂无可用模型</div> : null}
         {asset.error ? <div className="error-text small">{asset.error}</div> : null}
         <div className="asset-actions">
           <button className="entry-action-btn" type="button" {...tip('复制 asset:// 地址')} onClick={() => copyText(asset.asset_url || `asset://${asset.id}`, '已复制素材地址')}>
@@ -515,14 +515,13 @@ export function Library() {
       <header className="page-head">
         <div>
           <h1>素材库</h1>
-          <p className="muted">非真人的参考素材：商品图、背景视频、音频等。上传一次，可以在多次生成里反复引用。</p>
         </div>
         <button className="btn btn-primary" onClick={openAddAssetDialog}>
           添加素材
         </button>
       </header>
       <div className="notice">
-        <span>素材创建后需要处理一段时间。状态显示「可用」，或「可用模型」里出现你要用的模型，就可以用于生成。这里只列出通过本页面创建或添加的素材。</span>
+        <span>素材处理完成后可用。此处仅显示通过本页创建或添加的素材。</span>
       </div>
       <div>
         <Segmented options={[{ value: 'all', label: '全部' }, ...KIND_OPTIONS]} value={filter} onChange={setFilter} />
@@ -532,8 +531,7 @@ export function Library() {
           list.map((asset) => <AssetCard key={asset.id} asset={asset} onDelete={openDeleteAssetDialog} onRefresh={refresh} />)
         ) : (
           <div className="empty">
-            <div className="empty-title">{state.assets.length ? '这个分类下还没有素材' : '素材库还是空的'}</div>
-            <div className="muted">把常用的商品图、背景视频、音频存进来，以后生成时直接选用。</div>
+            <div className="empty-title">{state.assets.length ? '该分类暂无素材' : '暂无素材'}</div>
           </div>
         )}
       </div>

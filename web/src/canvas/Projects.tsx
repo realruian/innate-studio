@@ -46,7 +46,7 @@ export function Projects() {
   const load = useCallback(() => {
     api<{ items: ProjectMeta[] }>('GET', '/api/canvases')
       .then((data) => setList(data.items))
-      .catch((err) => toast(`项目列表读不出来：${(err as Error).message}`, 'error', 6000));
+      .catch((err) => toast(`项目加载失败：${(err as Error).message}`, 'error', 6000));
   }, []);
   useEffect(load, [load]);
 
@@ -114,7 +114,7 @@ export function Projects() {
             });
             return;
           }
-          if (!(await confirmDialog({ title: '删除这个项目？', message: `「${project.name}」里的节点和连线会一起删掉。已经生成的内容还在「创作记录」里。`, okText: '删除', danger: true }))) return;
+          if (!(await confirmDialog({ title: '删除这个项目？', message: `删除「${project.name}」后无法恢复，已生成的内容不受影响。`, okText: '删除', danger: true }))) return;
           await api('DELETE', `/api/canvases/${project.id}`);
           load();
         } catch (err) {
@@ -138,7 +138,6 @@ export function Projects() {
       <header className="page-head">
         <div>
           <h1>画布</h1>
-          <p className="muted">一个项目是一张无限画布：把文本、图片、视频、音频摆成节点，用连线串成一条生成流程。</p>
         </div>
         <div className="search-field">
           <Icon name="search" />
@@ -150,9 +149,8 @@ export function Projects() {
           <article className="project">
             <button className="project-cover project-new" type="button" onClick={create}>
               <Icon name="plus" size={20} />
-              <span>开始创作</span>
+              <span>新建项目</span>
             </button>
-            <div className="project-hint">新建一个项目</div>
           </article>
         )}
         {shown.map((project) => (
@@ -178,7 +176,7 @@ export function Projects() {
             <div className="project-date">{fmtTime(project.updatedAt)}</div>
           </article>
         ))}
-        {list && query && !shown.length && <div className="empty">没有名字里带「{query}」的项目</div>}
+        {list && query && !shown.length && <div className="empty">未找到「{query}」</div>}
       </div>
     </div>
   );

@@ -93,7 +93,7 @@ const saveWorkflows = () => writeJson('workflows.json', workflows);
 const isUsableKey = (value) => /^[\x21-\x7e]+$/.test(value);
 const badKeyMessage = (provider) => {
   const { keyPrefix } = PROVIDERS[provider];
-  return `这不像是 API Key：里面有中文、空格或其他不能用的字符。请到 ${labelOf(provider)} 的控制台复制${keyPrefix ? `以 ${keyPrefix} 开头的` : ''}那一串，再粘贴进来。`;
+  return `API Key 格式不正确：包含中文、空格或其他非法字符。请从 ${labelOf(provider)} 控制台复制${keyPrefix ? `以 ${keyPrefix} 开头的` : ''} Key。`;
 };
 
 // 当前用哪个平台。没选过就是 Flatkey。
@@ -147,29 +147,29 @@ class HttpError extends Error {
 
 const ERROR_HINTS = {
   invalid_api_key: 'API Key 无效或已被撤销',
-  insufficient_balance: '账号余额不足，任务没有创建',
-  model_not_allowed: '这个 Key 没有使用该模型的权限',
-  model_not_found: '平台不认识这个模型 ID',
-  rate_limit_exceeded: '请求太频繁，请稍后再试',
+  insufficient_balance: '账号余额不足，任务未创建',
+  model_not_allowed: '当前 Key 无权使用该模型',
+  model_not_found: '模型 ID 不存在',
+  rate_limit_exceeded: '请求过于频繁，请稍后重试',
   upstream_unavailable: '模型服务暂时不可用，请稍后重试',
   // 下面是火山方舟的错误码（官方文档《错误码》）。
   AuthenticationError: 'API Key 无效或已被删除',
-  AccountOverdueError: '火山引擎账号欠费了，充值后才能继续用',
-  ModelNotOpen: '账号还没有开通这个模型。Seedance 2.0、2.5 要账户余额大于 200 元才能开通，到火山方舟控制台的「开通管理」里开',
-  'InvalidEndpointOrModel.NotFound': '火山方舟不认识这个模型，或者账号没有开通它',
-  'InvalidEndpointOrModel.ModelIDAccessDisabled': '账号关掉了直接用模型 ID 调用，到火山方舟控制台里打开',
-  ModelAccountRpmRateLimitExceeded: '请求太频繁，请稍后再试',
-  ModelAccountIpmRateLimitExceeded: '生图太频繁，请稍后再试',
-  APIAccountRpmRateLimitExceeded: '请求太频繁，请稍后再试',
-  SetLimitExceeded: '达到了账号里给这个模型设置的用量上限，到火山方舟控制台里调整',
-  InputTextSensitiveContentDetected: '提示词没有通过内容审核',
-  InputImageSensitiveContentDetected: '参考图片没有通过内容审核',
-  'InputImageSensitiveContentDetected.PrivacyInformation': '参考图片里有真人人脸，Seedance 不收',
-  InputVideoSensitiveContentDetected: '参考视频没有通过内容审核',
-  'InputVideoSensitiveContentDetected.PrivacyInformation': '参考视频里有真人人脸，Seedance 不收',
-  InputAudioSensitiveContentDetected: '参考音频没有通过内容审核',
-  OutputVideoSensitiveContentDetected: '生成的视频没有通过内容审核',
-  OutputImageSensitiveContentDetected: '生成的图片没有通过内容审核',
+  AccountOverdueError: '火山引擎账号已欠费，请充值后重试',
+  ModelNotOpen: '账号未开通该模型。Seedance 2.0、2.5 需账户余额大于 200 元，请在火山方舟控制台「开通管理」中开通',
+  'InvalidEndpointOrModel.NotFound': '模型不存在，或账号未开通该模型',
+  'InvalidEndpointOrModel.ModelIDAccessDisabled': '账号已禁用模型 ID 直接调用，请在火山方舟控制台开启',
+  ModelAccountRpmRateLimitExceeded: '请求过于频繁，请稍后重试',
+  ModelAccountIpmRateLimitExceeded: '请求过于频繁，请稍后重试',
+  APIAccountRpmRateLimitExceeded: '请求过于频繁，请稍后重试',
+  SetLimitExceeded: '已达到该模型的用量上限，请在火山方舟控制台调整',
+  InputTextSensitiveContentDetected: '提示词未通过内容审核',
+  InputImageSensitiveContentDetected: '参考图片未通过内容审核',
+  'InputImageSensitiveContentDetected.PrivacyInformation': '参考图片包含真人人脸，Seedance 不支持',
+  InputVideoSensitiveContentDetected: '参考视频未通过内容审核',
+  'InputVideoSensitiveContentDetected.PrivacyInformation': '参考视频包含真人人脸，Seedance 不支持',
+  InputAudioSensitiveContentDetected: '参考音频未通过内容审核',
+  OutputVideoSensitiveContentDetected: '生成的视频未通过内容审核',
+  OutputImageSensitiveContentDetected: '生成的图片未通过内容审核',
 };
 
 // 这几种错误都发生在连接建立之前，请求还没发出去，重试不会重复下单。
@@ -181,7 +181,7 @@ const MAX_CONNECT_ATTEMPTS = 3;
 async function callUpstream(method, pathname, { json, body, headers = {}, timeoutMs = 60000, binary = false, provider = currentProvider() } = {}) {
   const name = labelOf(provider);
   const key = apiKey(provider);
-  if (!key) throw new HttpError(401, 'no_api_key', `还没有设置 ${name} 的 API Key，请先在「设置」里填写。`);
+  if (!key) throw new HttpError(401, 'no_api_key', `请先在「设置」中配置 ${name} 的 API Key。`);
 
   if (!isUsableKey(key)) throw new HttpError(400, 'invalid_key', badKeyMessage(provider));
 
@@ -212,7 +212,7 @@ async function callUpstream(method, pathname, { json, body, headers = {}, timeou
   if (binary && res.ok) {
     const type = res.headers.get('content-type') || '';
     const data = Buffer.from(await res.arrayBuffer());
-    if (/^(application\/json|text\/)/i.test(type) || !data.length) throw new HttpError(502, 'bad_upstream_response', `${name} 没有返回文件内容`);
+    if (/^(application\/json|text\/)/i.test(type) || !data.length) throw new HttpError(502, 'bad_upstream_response', `${name} 未返回文件内容`);
     return { status: res.status, data, type };
   }
 
@@ -301,7 +301,7 @@ async function pollTask(item) {
   } catch (err) {
     if (err.status === 404 || err.code === 'task_not_exist') {
       item.status = 'failed';
-      item.error = { message: `${labelOf(provider)} 查不到这个任务`, code: 'task_not_found' };
+      item.error = { message: `${labelOf(provider)} 上不存在该任务`, code: 'task_not_found' };
     } else {
       item.pollError = err.message;
     }
@@ -310,7 +310,7 @@ async function pollTask(item) {
     // 先查再判断：服务停了很久再启动时，任务可能早就完成了。查过这一次仍没有结果才算超时。
     if (isPending(item) && Date.now() - item.createdAt > MAX_PENDING_MS) {
       item.status = 'failed';
-      item.error = { message: `等了很久还没有结果，已停止自动查询。任务可能还在 ${labelOf(provider)} 那边进行，可以再查一次。`, code: 'poll_timeout' };
+      item.error = { message: '查询超时，请稍后重新查询。', code: 'poll_timeout' };
     }
     polling.delete(item.id);
     saveHistory();
@@ -340,10 +340,10 @@ async function downloadResult(item) {
     const res = await fetch(url, { headers, signal: AbortSignal.timeout(10 * 60 * 1000) });
     if (!res.ok || !res.body) throw new Error(`下载返回 ${res.status}`);
     const type = res.headers.get('content-type') || '';
-    if (/^(application\/json|text\/)/i.test(type)) throw new Error(`下载到的不是${audio ? '音频' : '视频'}（${type}）`);
+    if (/^(application\/json|text\/)/i.test(type)) throw new Error(`下载的文件不是${audio ? '音频' : '视频'}（${type}）`);
     await pipeline(Readable.fromWeb(res.body), fs.createWriteStream(tmp));
     const { size } = fs.statSync(tmp);
-    if (!size) throw new Error('下载到空文件');
+    if (!size) throw new Error('下载的文件为空');
     fs.renameSync(tmp, path.join(dir, file));
     item.localFile = file;
     item.fileSize = size;
@@ -426,7 +426,7 @@ for (const item of history) {
   if (item.provider !== 'openrouter' || item.direct) continue;
   if (isPending(item)) {
     item.status = 'failed';
-    item.error = { message: 'OpenRouter 已经从应用里移除，这条任务没法再查询。', code: 'provider_removed' };
+    item.error = { message: 'OpenRouter 已停用，无法查询该任务。', code: 'provider_removed' };
   }
   if (!item.localFile) item.downloadAttempts = MAX_DOWNLOAD_ATTEMPTS;
 }
@@ -435,11 +435,11 @@ for (const item of history) {
 for (const item of history) {
   if (!item.direct || !isPending(item)) continue;
   item.status = 'failed';
-  item.error = { message: '服务重启时这次生成被中断了，请重新生成。', code: 'interrupted' };
+  item.error = { message: '生成已中断，请重新生成。', code: 'interrupted' };
 }
 
 function requireKey() {
-  if (!apiKey()) throw new HttpError(401, 'no_api_key', '还没有设置 API Key，请先在「设置」里填写。');
+  if (!apiKey()) throw new HttpError(401, 'no_api_key', '请先在「设置」中配置 API Key。');
 }
 
 // ---------- 本机文件 ----------
@@ -451,7 +451,7 @@ const UPLOAD_TYPES = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'w
 function localMediaFile(url) {
   const match = MEDIA_PATH.exec(String(url || '').split('?')[0]);
   const file = match && path.join(mediaDir(match[1]), match[2]);
-  if (!file || !fs.existsSync(file)) throw new HttpError(400, 'file_not_found', '找不到这个本机文件，可能已经被删除');
+  if (!file || !fs.existsSync(file)) throw new HttpError(400, 'file_not_found', '文件不存在或已被删除');
   return file;
 }
 
@@ -473,7 +473,7 @@ function withLocalImages(payload) {
       // 参考视频和音频只收公网的 https 链接：火山方舟的参考视频不能内嵌，这里音频也按同样的规矩办。
       if (entry?.video_url || entry?.audio_url) {
         const url = (entry.video_url || entry.audio_url).url;
-        if (!/^https:\/\//i.test(url || '')) throw new HttpError(400, 'invalid_request', '参考视频和音频需要是公网能直接访问的 https 链接');
+        if (!/^https:\/\//i.test(url || '')) throw new HttpError(400, 'invalid_request', '参考视频和音频须为可公开访问的 https 链接');
         return entry;
       }
       return entry?.image_url ? { ...entry, image_url: inline(entry.image_url) } : entry;
@@ -491,7 +491,7 @@ function assetIdOf(data) {
 
 function upsertAsset(data, extra = {}) {
   const id = assetIdOf(data);
-  if (!id) throw new HttpError(502, 'bad_upstream_response', '平台没有返回素材 ID', data);
+  if (!id) throw new HttpError(502, 'bad_upstream_response', '平台未返回素材 ID', data);
   const prev = assets[id] || { id, addedAt: Date.now() };
   const next = { ...prev };
   for (const [key, value] of Object.entries(extra)) {
@@ -563,7 +563,7 @@ function readBody(req, limit) {
   return new Promise((resolve, reject) => {
     // 超过上限时不掐断连接：浏览器要等自己发完才读响应，中途断开它只会报"网络错误"，
     // 页面上就成了"连不上本地服务"。所以把剩下的内容读完丢掉，再正常返回 413。
-    const tooLarge = () => new HttpError(413, 'payload_too_large', `文件太大，超过 ${Math.round(limit / 1024 / 1024)} MB`);
+    const tooLarge = () => new HttpError(413, 'payload_too_large', `文件过大，超过 ${Math.round(limit / 1024 / 1024)} MB`);
     const chunks = [];
     let size = 0;
     req.on('data', (chunk) => {
@@ -668,7 +668,7 @@ function forgetAccount() {
 // 请求里指定了平台就用指定的，没指定就是当前平台。
 function providerIn(value) {
   if (value == null || value === '') return currentProvider();
-  if (!isProvider(value)) throw new HttpError(400, 'invalid_request', '没有这个平台');
+  if (!isProvider(value)) throw new HttpError(400, 'invalid_request', '平台不存在');
   return value;
 }
 
@@ -679,7 +679,7 @@ route('PUT', /^\/api\/key$/, async ({ req }) => {
   const provider = speech ? null : providerIn(wanted);
   const value = String(key || '').trim();
   if (!value) throw new HttpError(400, 'invalid_key', 'API Key 不能为空');
-  if (!isUsableKey(value)) throw new HttpError(400, 'invalid_key', speech ? '这不像是 API Key：里面有中文、空格或其他不能用的字符。请到豆包语音的控制台复制那一串，再粘贴进来。' : badKeyMessage(provider));
+  if (!isUsableKey(value)) throw new HttpError(400, 'invalid_key', speech ? 'API Key 格式不正确：包含中文、空格或其他非法字符。请从豆包语音控制台重新复制。' : badKeyMessage(provider));
   config[speech ? DOUBAO_SPEECH.configKey : UPSTREAMS[provider].configKey] = value;
   saveConfig();
   forgetAccount();
@@ -696,7 +696,7 @@ route('DELETE', /^\/api\/key$/, async ({ query }) => {
 // 切换平台。之后新提交的生成都走这个平台；已经提交的任务仍然回它原来的平台查询。
 route('PUT', /^\/api\/provider$/, async ({ req }) => {
   const { provider } = await readJsonBody(req);
-  if (!isProvider(provider)) throw new HttpError(400, 'invalid_request', '没有这个平台');
+  if (!isProvider(provider)) throw new HttpError(400, 'invalid_request', '平台不存在');
   config.provider = provider;
   saveConfig();
   forgetAccount();
@@ -748,7 +748,7 @@ route('GET', /^\/api\/models$/, async () => {
       audio: { speech: ids.has(SPEECH_MODEL), sfx: ids.has(SFX_MODEL), music: ids.has(MUSIC_MODEL) },
     };
     if (video.length) return { models: video, ...rest, source: 'remote' };
-    return { models: DEFAULT_MODELS.flatkey, ...rest, source: 'default', note: '账号的模型列表里没有 Seedance 模型，下面显示的是文档里的默认型号。' };
+    return { models: DEFAULT_MODELS.flatkey, ...rest, source: 'default', note: '账号下没有 Seedance 模型，已显示默认模型。' };
   } catch (err) {
     return { models: DEFAULT_MODELS.flatkey, ...none, source: 'default', error: err.message, errorCode: err.code };
   }
@@ -773,11 +773,11 @@ route('POST', /^\/api\/videos$/, async ({ req }) => {
     throw new HttpError(400, 'invalid_request', '请求缺少 model 或 content');
   }
   const provider = currentProvider();
-  if (provider === 'ark' && !Object.hasOwn(ARK_VIDEO_MODELS, payload.model)) throw new HttpError(400, 'invalid_request', `火山方舟上没有 ${payload.model} 这个视频模型`);
+  if (provider === 'ark' && !Object.hasOwn(ARK_VIDEO_MODELS, payload.model)) throw new HttpError(400, 'invalid_request', `火山方舟不支持视频模型 ${payload.model}`);
   const request = withLocalImages(payload);
   const { data } = await callUpstream('POST', VIDEO_TASKS_PATH[provider], { json: provider === 'ark' ? arkVideoRequest(request) : request, provider });
   const id = data?.id || data?.task_id;
-  if (!id) throw new HttpError(502, 'bad_upstream_response', `${labelOf(provider)} 没有返回任务 ID`, data);
+  if (!id) throw new HttpError(502, 'bad_upstream_response', `${labelOf(provider)} 未返回任务 ID`, data);
 
   const item = {
     id,
@@ -824,7 +824,7 @@ route('GET', /^\/api\/history$/, async () => ({ items: history.map(historyView) 
 
 route('POST', /^\/api\/history\/([^/]+)\/refresh$/, async ({ params }) => {
   const item = history.find((h) => h.id === params[0]);
-  if (!item) throw new HttpError(404, 'not_found', '没有这条记录');
+  if (!item) throw new HttpError(404, 'not_found', '记录不存在');
   if (item.direct) return historyView(item);
   if (isPending(item) || isTimedOut(item)) {
     await pollTask(item);
@@ -837,7 +837,7 @@ route('POST', /^\/api\/history\/([^/]+)\/refresh$/, async ({ params }) => {
 
 route('DELETE', /^\/api\/history\/([^/]+)$/, async ({ params }) => {
   const index = history.findIndex((h) => h.id === params[0]);
-  if (index === -1) throw new HttpError(404, 'not_found', '没有这条记录');
+  if (index === -1) throw new HttpError(404, 'not_found', '记录不存在');
   const [item] = history.splice(index, 1);
   if (item.localFile) fs.rmSync(path.join(resultDir(item), path.basename(item.localFile)), { force: true });
   saveHistory();
@@ -860,10 +860,10 @@ route('POST', /^\/api\/images$/, async ({ req }) => {
   // 参考图（图生图）。火山方舟的 Seedream 收，每个型号收几张登记在 shared/models.ts；Flatkey 的不收。
   const refs = Array.isArray(payload.input_references) ? payload.input_references.filter((entry) => typeof entry?.image_url?.url === 'string') : [];
   if (refs.length) {
-    if (currentProvider() !== 'ark') throw new HttpError(400, 'not_on_provider', '参考图生图只在火山方舟上可用');
+    if (currentProvider() !== 'ark') throw new HttpError(400, 'not_on_provider', '参考图生图仅支持火山方舟');
     const limit = ARK_IMAGE_MODELS[model]?.refs;
-    if (limit === 0) throw new HttpError(400, 'invalid_request', `${model} 不收参考图`);
-    if (limit && refs.length > limit) throw new HttpError(400, 'invalid_request', `${model} 最多收 ${limit} 张参考图`);
+    if (limit === 0) throw new HttpError(400, 'invalid_request', `${model} 不支持参考图`);
+    if (limit && refs.length > limit) throw new HttpError(400, 'invalid_request', `${model} 最多支持 ${limit} 张参考图`);
     request.input_references = withLocalImages({ input_references: refs }).input_references;
   }
 
@@ -874,14 +874,14 @@ route('POST', /^\/api\/images$/, async ({ req }) => {
   const provider = currentProvider();
   runDirect(items, async () => {
     const { images, cost } = await { flatkey: flatkeyImages, ark: arkImages }[provider](request);
-    if (!images.length) throw new HttpError(502, 'bad_upstream_response', `${labelOf(provider)} 没有返回图片`);
+    if (!images.length) throw new HttpError(502, 'bad_upstream_response', `${labelOf(provider)} 未返回图片`);
     // 费用按张平摊。
     const usage = cost ? { cost_usd: cost / images.length } : null;
     items.forEach((item, index) => {
       const image = images[index];
       if (!image) {
         item.status = 'failed';
-        item.error = { message: '这一张没有生成出来', code: 'missing_image' };
+        item.error = { message: '该图片生成失败', code: 'missing_image' };
         return;
       }
       // 各平台说明图片格式的字段名字不同；没写格式的按 JPG 存（火山方舟的 Seedream 默认出 JPG）。
@@ -889,7 +889,7 @@ route('POST', /^\/api\/images$/, async ({ req }) => {
       const ext = type ? IMAGE_EXT[type] : 'jpg';
       if (!ext) {
         item.status = 'failed';
-        item.error = { message: `这个模型返回的是 ${type}，这里存不了这种格式`, code: 'unsupported_image' };
+        item.error = { message: `不支持模型返回的格式（${type}）`, code: 'unsupported_image' };
         return;
       }
       finishItem(item, Buffer.from(image.b64_json, 'base64'), ext, { usage });
@@ -911,8 +911,8 @@ async function flatkeyImages(request) {
 // 返回的用量只有张数和 token，没有金额，所以不记费用。
 async function arkImages({ model, prompt, n, aspect_ratio, resolution, input_references }) {
   const spec = ARK_IMAGE_MODELS[model];
-  if (!spec) throw new HttpError(400, 'invalid_request', `火山方舟上没有 ${model} 这个图片模型`);
-  if (resolution && !spec.sizes[resolution]) throw new HttpError(400, 'invalid_request', `${model} 没有 ${resolution} 这一档分辨率，能选的是 ${Object.keys(spec.sizes).join('、')}`);
+  if (!spec) throw new HttpError(400, 'invalid_request', `火山方舟不支持图片模型 ${model}`);
+  if (resolution && !spec.sizes[resolution]) throw new HttpError(400, 'invalid_request', `${model} 不支持 ${resolution}，可选：${Object.keys(spec.sizes).join('、')}`);
   const sizes = spec.sizes[resolution || spec.size];
   const request = { model, prompt, size: sizes[aspect_ratio] || sizes['1:1'], response_format: 'b64_json', watermark: false };
   if (input_references) request.image = input_references.map((ref) => ref.image_url.url);
@@ -948,11 +948,11 @@ route('GET', /^\/api\/voices$/, async () => {
 route('POST', /^\/api\/audio\/speech$/, async ({ req }) => {
   const { text, voiceId, voiceName, form } = await readJsonBody(req);
   const script = String(text || '').trim();
-  if (!script) throw new HttpError(400, 'invalid_request', '请填写要朗读的文字');
+  if (!script) throw new HttpError(400, 'invalid_request', '请输入朗读文本');
   if (!/^[\w-]+$/.test(voiceId || '')) throw new HttpError(400, 'invalid_request', '请选择音色');
   const provider = currentProvider();
   const doubao = provider === 'ark';
-  if (doubao && !speechKey()) throw new HttpError(401, 'no_api_key', '还没有设置豆包语音的 API Key。语音用的是火山引擎的另一个产品，请先在「设置」里填它的 Key。');
+  if (doubao && !speechKey()) throw new HttpError(401, 'no_api_key', '请先在「设置」中配置豆包语音的 API Key。');
   if (!doubao) requireKey();
   const item = newItem({
     id: newId('aud'),
@@ -990,11 +990,11 @@ async function doubaoSpeech(text, speaker) {
   const failed = parts.find((part) => !DOUBAO_OK.has(Number(part?.code ?? 0)));
   if (!res.ok || failed) {
     const reason = failed?.message || parts[0]?.message || parts[0]?.error?.message || `HTTP ${res.status}`;
-    const hint = res.status === 401 || res.status === 403 ? '豆包语音的 API Key 无效，或者账号还没有开通语音合成。' : '';
+    const hint = res.status === 401 || res.status === 403 ? '豆包语音的 API Key 无效，或账号未开通语音合成。' : '';
     throw new HttpError(res.ok ? 502 : res.status, String(failed?.code || `http_${res.status}`), `${hint}豆包语音返回（${res.status}）：${reason}`);
   }
   const audio = Buffer.concat(parts.filter((part) => typeof part?.data === 'string' && part.data).map((part) => Buffer.from(part.data, 'base64')));
-  if (!audio.length) throw new HttpError(502, 'bad_upstream_response', '豆包语音没有返回音频');
+  if (!audio.length) throw new HttpError(502, 'bad_upstream_response', '豆包语音未返回音频');
   return audio;
 }
 
@@ -1030,13 +1030,13 @@ function jsonSequence(text) {
 route('POST', /^\/api\/audio\/sfx$/, async ({ req }) => {
   const { text, duration, influence, form } = await readJsonBody(req);
   const prompt = String(text || '').trim();
-  if (!prompt) throw new HttpError(400, 'invalid_request', '请描述想要的声音');
+  if (!prompt) throw new HttpError(400, 'invalid_request', '请输入音效描述');
   requireKey();
   // 不带时长时由模型自己决定。
   const request = { text: prompt };
   const seconds = Number(duration);
   if (duration != null && duration !== '') {
-    if (!(seconds >= 0.5 && seconds <= 22)) throw new HttpError(400, 'invalid_request', '音效时长需要在 0.5 到 22 秒之间');
+    if (!(seconds >= 0.5 && seconds <= 22)) throw new HttpError(400, 'invalid_request', '音效时长须在 0.5–22 秒之间');
     request.duration_seconds = seconds;
   }
   const weight = Number(influence);
@@ -1054,9 +1054,9 @@ route('POST', /^\/api\/audio\/sfx$/, async ({ req }) => {
 route('POST', /^\/api\/audio\/music$/, async ({ req }) => {
   const { video, duration, form } = await readJsonBody(req);
   const file = localMediaFile(video);
-  if (!/\.(mp4|mov|webm)$/i.test(file)) throw new HttpError(400, 'invalid_request', '配乐需要一段视频');
+  if (!/\.(mp4|mov|webm)$/i.test(file)) throw new HttpError(400, 'invalid_request', '请选择视频');
   const seconds = Number(duration);
-  if (!(seconds > 0)) throw new HttpError(400, 'invalid_request', '没有读到视频时长');
+  if (!(seconds > 0)) throw new HttpError(400, 'invalid_request', '无法获取视频时长');
 
   const body = new FormData();
   body.append('model', MUSIC_MODEL);
@@ -1064,7 +1064,7 @@ route('POST', /^\/api\/audio\/music$/, async ({ req }) => {
   body.append('video', new Blob([fs.readFileSync(file)], { type: MIME[path.extname(file).toLowerCase()] }), path.basename(file));
   const { data } = await callUpstream('POST', '/v1/video-to-music', { body, timeoutMs: 5 * 60 * 1000 });
   const id = data?.id || data?.task_id;
-  if (!id) throw new HttpError(502, 'bad_upstream_response', 'Flatkey 没有返回任务 ID', data);
+  if (!id) throw new HttpError(502, 'bad_upstream_response', 'Flatkey 未返回任务 ID', data);
 
   const item = newItem({
     id,
@@ -1089,7 +1089,7 @@ route('POST', /^\/api\/uploads$/, async ({ req }) => {
   const ext = UPLOAD_TYPES[String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase()];
   if (!ext) throw new HttpError(415, 'unsupported_media_type', '只支持 JPG、PNG、WebP 图片，MP4、MOV、WebM 视频，MP3、WAV 音频');
   const body = await readBody(req, MAX_UPLOAD_BYTES);
-  if (!body.length) throw new HttpError(400, 'invalid_request', '文件是空的');
+  if (!body.length) throw new HttpError(400, 'invalid_request', '文件为空');
   const file = `${newId('up')}.${ext}`;
   fs.writeFileSync(path.join(mediaDir('uploads'), file), body);
   return { url: `/media/uploads/${file}`, size: body.length };
@@ -1103,7 +1103,7 @@ const canvasMeta = (canvas) => ({ id: canvas.id, name: canvas.name, cover: canva
 const canvasName = (name) => String(name || '').trim().slice(0, 60) || '未命名画布';
 function findCanvas(id) {
   const canvas = canvases.find((c) => c.id === id);
-  if (!canvas) throw new HttpError(404, 'not_found', '没有这张画布');
+  if (!canvas) throw new HttpError(404, 'not_found', '画布不存在');
   return canvas;
 }
 
@@ -1151,16 +1151,16 @@ const CHARACTER_IMAGE_EXTS = ['jpg', 'jpeg', 'png', 'webp'];
 const characterName = (name) => String(name || '').trim().slice(0, 60) || '未命名角色';
 function findCharacter(id) {
   const character = characters.find((c) => c.id === id);
-  if (!character) throw new HttpError(404, 'not_found', '没有这个角色');
+  if (!character) throw new HttpError(404, 'not_found', '角色不存在');
   return character;
 }
 function characterImages(urls) {
   if (!Array.isArray(urls)) throw new HttpError(400, 'invalid_request', 'images 需要是数组');
-  if (urls.length > MAX_CHARACTER_IMAGES) throw new HttpError(400, 'invalid_request', `一个角色最多放 ${MAX_CHARACTER_IMAGES} 张参考图`);
+  if (urls.length > MAX_CHARACTER_IMAGES) throw new HttpError(400, 'invalid_request', `每个角色最多 ${MAX_CHARACTER_IMAGES} 张参考图`);
   return urls.map((url) => {
     const file = localMediaFile(url);
     const ext = path.extname(file).slice(1).toLowerCase();
-    if (!CHARACTER_IMAGE_EXTS.includes(ext)) throw new HttpError(400, 'invalid_request', '角色的参考图只能是图片');
+    if (!CHARACTER_IMAGE_EXTS.includes(ext)) throw new HttpError(400, 'invalid_request', '角色参考图仅支持图片');
     if (path.dirname(file) === mediaDir('uploads')) return `/media/uploads/${path.basename(file)}`;
     const copy = `${newId('up')}.${ext}`;
     fs.copyFileSync(file, path.join(mediaDir('uploads'), copy));
@@ -1204,12 +1204,12 @@ const SKILL_TYPES = ['video', 'image'];
 const allSkills = () => [...OFFICIAL_SKILLS, ...[...skills].sort((a, b) => b.updatedAt - a.updatedAt)];
 function findSkill(id) {
   const skill = allSkills().find((item) => item.id === id);
-  if (!skill) throw new HttpError(404, 'not_found', '没有这个技能');
+  if (!skill) throw new HttpError(404, 'not_found', '技能不存在');
   return skill;
 }
 function ownSkill(id) {
   const skill = findSkill(id);
-  if (skill.official) throw new HttpError(400, 'invalid_request', '官方技能不能修改');
+  if (skill.official) throw new HttpError(400, 'invalid_request', '官方技能不可修改');
   return skill;
 }
 // 名称、说明、规则都要有；规则太短等于没有规则。
@@ -1220,9 +1220,9 @@ function skillFields(body, current = {}) {
     type: body.type === undefined ? current.type : body.type,
     rules: body.rules === undefined ? current.rules : String(body.rules || '').trim(),
   };
-  if (!next.name) throw new HttpError(400, 'invalid_request', '请给技能起个名字');
-  if (!SKILL_TYPES.includes(next.type)) throw new HttpError(400, 'invalid_request', '技能只能用在视频或图片上');
-  if (next.rules.length < 10) throw new HttpError(400, 'invalid_request', '请写下这个技能的规则：希望模型怎样把一句话写成提示词');
+  if (!next.name) throw new HttpError(400, 'invalid_request', '请输入技能名称');
+  if (!SKILL_TYPES.includes(next.type)) throw new HttpError(400, 'invalid_request', '技能仅支持视频或图片');
+  if (next.rules.length < 10) throw new HttpError(400, 'invalid_request', '请输入技能规则');
   if (next.rules.length > 8000) throw new HttpError(400, 'invalid_request', '规则太长，最多 8000 字');
   return next;
 }
@@ -1242,9 +1242,9 @@ route('POST', /^\/api\/skills\/expand$/, async ({ req }) => {
   const { id, text, context, model } = await readJsonBody(req);
   const skill = findSkill(id);
   const draft = String(text || '').trim();
-  if (!draft) throw new HttpError(400, 'invalid_request', '请先写下想生成什么');
+  if (!draft) throw new HttpError(400, 'invalid_request', '请先输入提示词');
   if (draft.length > 4000) throw new HttpError(400, 'invalid_request', '内容太长，技能最多处理 4000 字');
-  if (!POLISH_MODELS[currentProvider()].includes(model)) throw new HttpError(400, 'invalid_request', '不支持用这个模型扩写');
+  if (!POLISH_MODELS[currentProvider()].includes(model)) throw new HttpError(400, 'invalid_request', '该模型不支持扩写');
   const setup = String(context || '').trim().slice(0, 500);
   return askTextModel(model, [{ role: 'system', content: skill.rules }, { role: 'user', content: setup ? `${setup}\n\n${draft}` : draft }], 2000);
 });
@@ -1271,7 +1271,7 @@ const workflowName = (name) => String(name || '').trim().slice(0, 60) || '未命
 const workflowMeta = (flow) => ({ id: flow.id, name: flow.name, count: flow.nodes.length, updatedAt: flow.updatedAt });
 function findWorkflow(id) {
   const flow = workflows.find((w) => w.id === id);
-  if (!flow) throw new HttpError(404, 'not_found', '没有这份工作流');
+  if (!flow) throw new HttpError(404, 'not_found', '工作流不存在');
   return flow;
 }
 
@@ -1279,8 +1279,8 @@ route('GET', /^\/api\/workflows$/, async () => ({ items: [...workflows].sort((a,
 
 route('POST', /^\/api\/workflows$/, async ({ req }) => {
   const { name, nodes, edges } = await readJsonBody(req);
-  if (!Array.isArray(nodes) || !nodes.length) throw new HttpError(400, 'invalid_request', '工作流里至少要有一个节点');
-  if (nodes.length > MAX_WORKFLOW_NODES) throw new HttpError(400, 'invalid_request', `一份工作流最多 ${MAX_WORKFLOW_NODES} 个节点`);
+  if (!Array.isArray(nodes) || !nodes.length) throw new HttpError(400, 'invalid_request', '工作流至少包含一个节点');
+  if (nodes.length > MAX_WORKFLOW_NODES) throw new HttpError(400, 'invalid_request', `工作流最多 ${MAX_WORKFLOW_NODES} 个节点`);
   if (!Array.isArray(edges)) throw new HttpError(400, 'invalid_request', 'edges 需要是数组');
   const now = Date.now();
   const flow = { id: newId('wf'), name: workflowName(name), nodes, edges, createdAt: now, updatedAt: now };
@@ -1321,12 +1321,12 @@ route('POST', /^\/api\/polish$/, async ({ req }) => {
   // target 是这条提示词要拿去用的生成模型和生成方式。
   const { text, kind, model, target = {} } = await readJsonBody(req);
   const draft = String(text || '').trim();
-  if (!draft) throw new HttpError(400, 'invalid_request', '请先写下提示词');
+  if (!draft) throw new HttpError(400, 'invalid_request', '请先输入提示词');
   if (draft.length > 4000) throw new HttpError(400, 'invalid_request', '提示词太长，润色最多支持 4000 字');
-  if (!POLISH_KINDS.includes(kind)) throw new HttpError(400, 'invalid_request', '这种内容不支持润色');
+  if (!POLISH_KINDS.includes(kind)) throw new HttpError(400, 'invalid_request', '该类型不支持润色');
   const guide = polishGuide({ kind, model: target.model, mode: target.mode, refs: target.refs });
   const known = POLISH_MODELS[currentProvider()];
-  if (!known.includes(model)) throw new HttpError(400, 'invalid_request', '不支持用这个模型润色');
+  if (!known.includes(model)) throw new HttpError(400, 'invalid_request', '该模型不支持润色');
 
   return askTextModel(model, [{ role: 'system', content: guide }, { role: 'user', content: draft }], 1200);
 });
@@ -1351,7 +1351,7 @@ async function askTextModel(model, messages, maxTokens) {
     try {
       const { data } = await callUpstream('POST', CHAT_PATH[currentProvider()] || '/v1/chat/completions', { json: chatRequest(candidate, messages, maxTokens), timeoutMs: 90000 });
       const text = String(data?.choices?.[0]?.message?.content || '').trim();
-      if (!text) throw new HttpError(502, 'bad_upstream_response', '模型没有返回内容', data);
+      if (!text) throw new HttpError(502, 'bad_upstream_response', '模型未返回内容', data);
       polishFailedAt.delete(candidate);
       return { text, model: candidate };
     } catch (err) {
@@ -1371,9 +1371,9 @@ route('POST', /^\/api\/text$/, async ({ req }) => {
   const { prompt, context, model } = await readJsonBody(req);
   const ask = String(prompt || '').trim();
   const given = String(context || '').trim();
-  if (!ask) throw new HttpError(400, 'invalid_request', '请先写下想让模型写什么');
+  if (!ask) throw new HttpError(400, 'invalid_request', '请输入写作要求');
   if (ask.length + given.length > 12000) throw new HttpError(400, 'invalid_request', '内容太长，要求和参考内容加起来最多 12000 字');
-  if (!POLISH_MODELS[currentProvider()].includes(model)) throw new HttpError(400, 'invalid_request', '不支持用这个模型写');
+  if (!POLISH_MODELS[currentProvider()].includes(model)) throw new HttpError(400, 'invalid_request', '该模型不支持文本生成');
   const user = given ? `参考内容：\n${given}\n\n要求：\n${ask}` : ask;
   return askTextModel(model, [{ role: 'system', content: WRITER_GUIDE }, { role: 'user', content: user }], 3000);
 });
@@ -1386,7 +1386,7 @@ route('GET', /^\/api\/assets$/, async () => ({
 
 route('POST', /^\/api\/assets$/, async ({ req }) => {
   const { url, asset_type: assetType, name } = await readJsonBody(req);
-  if (!/^https:\/\//i.test(url || '')) throw new HttpError(400, 'invalid_request', '需要一个 https:// 开头的公网地址');
+  if (!/^https:\/\//i.test(url || '')) throw new HttpError(400, 'invalid_request', '请填写 https:// 开头的公网地址');
   const { data } = await callUpstream('POST', '/v1/assets', {
     json: { url, asset_type: assetType, moderation: { strategy: 'Default' } },
   });
@@ -1396,7 +1396,7 @@ route('POST', /^\/api\/assets$/, async ({ req }) => {
 route('POST', /^\/api\/assets\/upload$/, async ({ req }) => {
   const contentType = req.headers['content-type'] || '';
   if (!/^multipart\/form-data/i.test(contentType)) throw new HttpError(400, 'invalid_request', '上传必须是 multipart/form-data');
-  if (!apiKey()) throw new HttpError(401, 'no_api_key', '还没有设置 API Key，请先在「设置」里填写。');
+  if (!apiKey()) throw new HttpError(401, 'no_api_key', '请先在「设置」中配置 API Key。');
   const body = await readBody(req, MAX_UPLOAD_BYTES);
   const { data } = await callUpstream('POST', '/v1/assets/upload', {
     body,
@@ -1414,7 +1414,7 @@ route('POST', /^\/api\/assets\/upload$/, async ({ req }) => {
 route('POST', /^\/api\/assets\/import$/, async ({ req }) => {
   const body = await readJsonBody(req);
   const id = String(body.id || '').trim().replace(/^asset:\/\//, '');
-  if (!/^[\w-]+$/.test(id)) throw new HttpError(400, 'invalid_request', '素材 ID 格式不对，应为 ast_ 开头');
+  if (!/^[\w-]+$/.test(id)) throw new HttpError(400, 'invalid_request', '素材 ID 格式不正确，应以 ast_ 开头');
   const { data } = await callUpstream('GET', `/v1/assets/${id}`);
   return upsertAsset({ id, ...data }, { kind: assets[id]?.kind || 'virtual', source: assets[id]?.source || 'import' });
 });
@@ -1505,7 +1505,7 @@ route('POST', /^\/api\/real-persons\/([\w-]+)\/assets$/, async ({ req, params })
   let name = '';
   let assetType = '';
   if (/^multipart\/form-data/i.test(contentType)) {
-    if (!apiKey()) throw new HttpError(401, 'no_api_key', '还没有设置 API Key，请先在「设置」里填写。');
+    if (!apiKey()) throw new HttpError(401, 'no_api_key', '请先在「设置」中配置 API Key。');
     const body = await readBody(req, MAX_UPLOAD_BYTES);
     name = decodeHeader(req.headers['x-asset-name']);
     assetType = decodeHeader(req.headers['x-asset-type']);
@@ -1516,7 +1516,7 @@ route('POST', /^\/api\/real-persons\/([\w-]+)\/assets$/, async ({ req, params })
     });
   } else {
     const body = await readJsonBody(req);
-    if (!/^https:\/\//i.test(body.url || '')) throw new HttpError(400, 'invalid_request', '需要一个 https:// 开头的公网地址');
+    if (!/^https:\/\//i.test(body.url || '')) throw new HttpError(400, 'invalid_request', '请填写 https:// 开头的公网地址');
     name = body.name || '';
     assetType = body.asset_type || '';
     result = await callUpstream('POST', `/v1/real-persons/${personId}/assets`, {
@@ -1550,7 +1550,7 @@ async function handle(req, res) {
   if (isApi) {
     // 音效、配乐、素材库、真人档案只有 Flatkey 有。读本机已有的素材列表不受影响。
     if (FLATKEY_ONLY.test(pathname) && currentProvider() !== 'flatkey' && !(req.method === 'GET' && pathname === '/api/assets')) {
-      throw new HttpError(400, 'not_on_provider', `这个功能只在 Flatkey 上可用，当前用的是 ${labelOf(currentProvider())}。可以在「设置」里切换平台。`);
+      throw new HttpError(400, 'not_on_provider', `该功能仅支持 Flatkey，当前平台为 ${labelOf(currentProvider())}，可在「设置」中切换。`);
     }
     for (const { method, pattern, handler } of routes) {
       if (method !== req.method) continue;
@@ -1563,7 +1563,7 @@ async function handle(req, res) {
       }
       return sendJson(res, 200, result);
     }
-    return sendJson(res, 404, { error: { code: 'not_found', message: '没有这个接口' } });
+    return sendJson(res, 404, { error: { code: 'not_found', message: '接口不存在' } });
   }
 
   if (req.method !== 'GET' && req.method !== 'HEAD') {

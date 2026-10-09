@@ -22,14 +22,14 @@ function Settings() {
 
   async function readCredits() {
     if (!state.app.hasKey) return setCredits('—');
-    setCredits('读取中…');
+    setCredits('加载中…');
     try {
       const { remaining, used, unavailable } = await api('GET', '/api/credits');
       // 火山方舟没有查余额的接口。
       if (unavailable) return setCredits('');
       setCredits(`剩余 ${amount(remaining)} · 已用 ${amount(used)}`);
     } catch {
-      setCredits('没有读到');
+      setCredits('获取失败');
     }
   }
   useEffect(() => {
@@ -54,7 +54,7 @@ function Settings() {
 
   async function save(value: string) {
     if (!value.startsWith(keyPrefix)) {
-      const ok = await confirmDialog({ title: `这看起来不像 ${platform} 的 Key`, message: `${platform} 的 Key 通常以 ${keyPrefix} 开头，你粘贴的内容不是。仍然保存吗？`, okText: '仍然保存' });
+      const ok = await confirmDialog({ title: 'Key 格式异常', message: `${platform} 的 Key 通常以 ${keyPrefix} 开头，是否仍然保存？`, okText: '仍然保存' });
       if (!ok) return false;
     }
     try {
@@ -72,7 +72,7 @@ function Settings() {
   }
 
   async function remove() {
-    const ok = await confirmDialog({ title: `清除已保存的 ${platform} API Key？`, message: '清除后需要重新填写才能生成。进行中的任务也会暂停查询。', okText: '清除', danger: true });
+    const ok = await confirmDialog({ title: `清除已保存的 ${platform} API Key？`, message: '清除后，进行中的任务将暂停查询。', okText: '清除', danger: true });
     if (!ok) return;
     try {
       await api('DELETE', `/api/key?provider=${provider}`);
@@ -122,7 +122,7 @@ function Settings() {
                 }}
               />
             ) : (
-              <span className="muted">{state.catalog.known ? '账号里没有可用的文本模型' : '读到模型列表后才能选'}</span>
+              <span className="muted">{state.catalog.known ? '暂无可用的文本模型' : '加载中…'}</span>
             )}
           </FormRow>
         </div>
@@ -144,7 +144,7 @@ function Settings() {
             key={provider}
             name={`${platform} `}
             placeholder={keyPrefix ? `${keyPrefix}…` : `粘贴 ${platform} 的 API Key`}
-            copyHint={`请复制 ${platform} 控制台里${keyPrefix ? `以 ${keyPrefix} 开头的` : ''}那一串。`}
+            copyHint={`请从 ${platform} 控制台复制${keyPrefix ? `以 ${keyPrefix} 开头的` : ''} Key。`}
             hasKey={hasKey}
             keyHint={keyHint}
             keySource={keySource}
@@ -158,7 +158,7 @@ function Settings() {
           )}
         </div>
         <p className="settings-hint">
-          Key 只保存在这台电脑上，在{' '}
+          Key 仅保存在本地，在{' '}
           <a href={keysUrl} target="_blank" rel="noopener">
             {platform} 控制台
           </a>{' '}
@@ -185,10 +185,10 @@ function KeyRow({ name, desc, placeholder, copyHint = '', hasKey, keyHint, keySo
 
   async function submit() {
     const value = input.current!.value.trim();
-    if (!value) return toast(`请粘贴${name}API Key`, 'error');
+    if (!value) return toast(`请输入${name}API Key`, 'error');
     if (/[^\x21-\x7e]/.test(value)) {
       setMasked(false);
-      return toast(`这不像是 API Key：里面有中文或空格，可能是剪贴板里的其他内容。${copyHint}`, 'error', 8000);
+      return toast(`API Key 格式不正确：包含中文或空格。${copyHint}`, 'error', 8000);
     }
     setSaving(true);
     try {
@@ -261,7 +261,7 @@ function SpeechKey() {
   }
 
   async function remove() {
-    const ok = await confirmDialog({ title: `清除已保存的${label} API Key？`, message: '清除后需要重新填写才能生成语音。', okText: '清除', danger: true });
+    const ok = await confirmDialog({ title: `清除已保存的${label} API Key？`, message: '清除后将无法生成语音。', okText: '清除', danger: true });
     if (!ok) return;
     try {
       await api('DELETE', '/api/key?service=speech');
@@ -276,14 +276,14 @@ function SpeechKey() {
     <section className="settings-group">
       <h3>{label}</h3>
       <div className="settings-card">
-        <KeyRow name={label} desc="生成语音用" placeholder={`粘贴${label}的 API Key`} hasKey={hasKey} keyHint={keyHint} keySource={keySource} onSave={save} onRemove={remove} />
+        <KeyRow name={label} desc="用于语音生成" placeholder={`粘贴${label}的 API Key`} hasKey={hasKey} keyHint={keyHint} keySource={keySource} onSave={save} onRemove={remove} />
       </div>
       <p className="settings-hint">
         先开通「语音合成大模型」，再在{' '}
         <a href={keysUrl} target="_blank" rel="noopener">
           {label}控制台
         </a>{' '}
-        创建；和火山方舟的 Key 不通用。
+        创建，与火山方舟的 Key 不通用。
       </p>
     </section>
   );

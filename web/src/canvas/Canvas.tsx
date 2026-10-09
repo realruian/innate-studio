@@ -137,7 +137,7 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
       // 没存上的这一份留着，点「没存上」或者再有改动时重发。
       if (!pending.current) pending.current = body;
       setSaving('failed');
-      toast(`画布没存上：${(err as Error).message}`, 'error', 6000);
+      toast(`保存失败：${(err as Error).message}`, 'error', 6000);
     }
   }, [id]);
 
@@ -160,7 +160,7 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
         });
       })
       .catch((err) => {
-        toast(`画布读不出来：${(err as Error).message}`, 'error', 6000);
+        toast(`画布加载失败：${(err as Error).message}`, 'error', 6000);
         onExit();
       });
   }, [flow, id, onExit, setEdges, setNodes]);
@@ -333,7 +333,7 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
   const upload = useCallback(
     async (picked: File, at?: { x: number; y: number }) => {
       const kind = kindOfFile(picked);
-      if (!kind) return toast('画布上只能上传图片、视频和音频', 'info');
+      if (!kind) return toast('仅支持上传图片、视频和音频', 'info');
       toast(`正在上传${MEDIA[kind].label}…`, 'info', 1800);
       try {
         const ref = await uploadLocalFile(picked, kind);
@@ -435,7 +435,7 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
   // 把选中的节点打成一组（至少两个）。它们原来在别的组里就先从那边拿出来。
   const group = useCallback(() => {
     const picked = flow.getNodes().filter((node) => node.selected && !isGroup(node));
-    if (picked.length < 2) return toast('先选中至少两个节点，再打组', 'info');
+    if (picked.length < 2) return toast('请至少选中两个节点', 'info');
     snap();
     const ids = new Set(picked.map((node) => node.id));
     setNodes((items) => {
@@ -538,8 +538,8 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
     const picked = flow.getNodes().filter((node) => node.selected && !isGroup(node));
     const loose = picked.filter((node) => !isStack(node));
     const members = [...picked.filter(isStack).flatMap(membersOf), ...loose.map((node) => node.id)];
-    if (members.length < 2 || !loose.length) return toast('先选中至少两个节点，再堆叠', 'info');
-    if (members.length > MAX_STACK) return toast(`一叠最多放 ${MAX_STACK} 个节点`, 'info');
+    if (members.length < 2 || !loose.length) return toast('请至少选中两个节点', 'info');
+    if (members.length > MAX_STACK) return toast(`堆叠最多包含 ${MAX_STACK} 个节点`, 'info');
     snap();
     const inside = new Set(loose.map((node) => node.id));
     const merged = new Set(picked.filter(isStack).map((node) => node.id));
@@ -615,7 +615,7 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
       const data = made.data as unknown as GroupData;
       try {
         await api('POST', '/api/workflows', { name: data.name?.trim() || `分组 ${data.no || ''}`.trim(), ...clip });
-        toast('已存为工作流，在左侧工具栏的「工作流」里', 'success');
+        toast('已存为工作流', 'success');
       } catch (err) {
         toast((err as Error).message, 'error', 6000);
       }
@@ -895,17 +895,17 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
         kind,
         off: !able.includes(kind)
           ? downstream
-            ? `${NODE_LABELS[node.type as NodeKind]}节点的内容给不了${NODE_LABELS[kind]}节点`
-            : `${NODE_LABELS[node.type as NodeKind]}节点用不了${NODE_LABELS[kind]}节点的内容`
+            ? `${NODE_LABELS[node.type as NodeKind]}节点不能连接到${NODE_LABELS[kind]}节点`
+            : `${NODE_LABELS[node.type as NodeKind]}节点不支持${NODE_LABELS[kind]}输入`
           : kind === 'image' && node.type === 'image' && !imageOk
             ? downstream
-              ? '默认的图片模型不收参考图'
-              : '这个节点的模型不收参考图，或者已经连满了'
+              ? '默认图片模型不支持参考图'
+              : '当前模型不支持参考图，或已达上限'
             : undefined,
       }));
       // 选中了好几个节点、从其中一个的右边接出去：新节点把选中的这些一起接上。
       const also = downstream && node.selected ? flow.getNodes().filter((n) => n.selected && n.id !== node.id) : [];
-      menuAt(x, y, offer, downstream ? { from: node, also } : { to: node }, place, downstream ? '引用该节点生成' : '接一个节点进来', onClose);
+      menuAt(x, y, offer, downstream ? { from: node, also } : { to: node }, place, downstream ? '引用该节点生成' : '连接上游节点', onClose);
     },
     [flow, menuAt],
   );
@@ -931,7 +931,7 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
     try {
       list = (await api<{ items: { id: string; name: string }[] }>('GET', '/api/canvases')).items;
     } catch (err) {
-      return toast(`项目列表读不出来：${(err as Error).message}`, 'error', 6000);
+      return toast(`项目加载失败：${(err as Error).message}`, 'error', 6000);
     }
     openMenu(button, {
       label: '切换画布',
@@ -1127,7 +1127,7 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
             ))}
             {saving === 'failed' ? (
               <button className="canvas-saved is-failed" type="button" onClick={flush}>
-                没存上，点这里重试
+                保存失败，点击重试
               </button>
             ) : (
               <span className="canvas-saved" role="status">
@@ -1173,7 +1173,7 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
             <button className="icon-btn" type="button" {...tip('重做（⇧ ⌘ Z）')} aria-label="重做" disabled={!future.current.length} onClick={redo}>
               <Icon name="redo" />
             </button>
-            <button className={`icon-btn ${hand ? 'active' : ''}`} type="button" {...tip(hand ? '回到选择（V）' : '抓手（H）')} aria-label="抓手" aria-pressed={hand} onClick={() => setHand((on) => !on)}>
+            <button className={`icon-btn ${hand ? 'active' : ''}`} type="button" {...tip(hand ? '选择（V）' : '抓手（H）')} aria-label="抓手" aria-pressed={hand} onClick={() => setHand((on) => !on)}>
               <Icon name="hand" />
             </button>
             <button className="icon-btn" type="button" {...tip('整理节点')} aria-label="整理节点" disabled={nodes.length < 2} onClick={arrange}>

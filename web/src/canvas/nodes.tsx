@@ -200,10 +200,10 @@ function Prompt({ id, value, placeholder, presets }: { id: string; value: string
   // typed：菜单是打 @ 打出来的，选了之后要把那个 @ 一起换掉。
   function mention(typed: boolean) {
     const el = area.current!;
-    if (!inputs.length) return typed ? undefined : toast('还没有节点连进来。先把文本、图片这些节点连到它上面，再 @ 它们', 'info');
+    if (!inputs.length) return typed ? undefined : toast('请先连接上游节点', 'info');
     const at = el.selectionStart ?? el.value.length;
     openMenu(el, {
-      label: '引用连进来的节点',
+      label: '引用上游节点',
       items: inputs.map((input) => ({ value: nameOf(input.node), label: nameOf(input.node), note: input.link.kind === 'text' ? ((input.node.data as unknown as TextData).text || '').slice(0, 12) : linkLabel(input.link) })),
       onSelect: (name) => {
         const text = el.value;
@@ -220,7 +220,7 @@ function Prompt({ id, value, placeholder, presets }: { id: string; value: string
 
   function preset(typed: boolean) {
     const el = area.current!;
-    const why = (item: Preset) => (!item.needsRef ? null : !presets!.limit ? '这个模型不收参考图，换一个模型再用' : !presets!.refs ? '先连一张参考图进来' : null);
+    const why = (item: Preset) => (!item.needsRef ? null : !presets!.limit ? '当前模型不支持参考图，请更换模型' : !presets!.refs ? '请先连接参考图' : null);
     openMenu(el, {
       label: '预设',
       items: IMAGE_PRESETS.map((item) => ({ value: item.id, label: item.label, note: item.note, disabled: Boolean(why(item)), title: why(item) })),
@@ -260,7 +260,7 @@ function Prompt({ id, value, placeholder, presets }: { id: string; value: string
           /
         </button>
       )}
-      <button className="cnode-at" type="button" data-mention {...tip('引用连进来的节点')} aria-label="引用连进来的节点" aria-haspopup="menu" onClick={() => mention(false)}>
+      <button className="cnode-at" type="button" data-mention {...tip('引用上游节点')} aria-label="引用上游节点" aria-haspopup="menu" onClick={() => mention(false)}>
         @
       </button>
     </>
@@ -369,7 +369,7 @@ function Result({ kind, data, onShape }: { kind: NodeKind; data: MediaData; onSh
     );
   }
   if (data.upload) return <Clip src={data.upload.url} label={data.upload.name} onShape={onShape} />;
-  if (!record) return blank(data.recordId && state.historyLoaded ? '这条生成记录已经删除' : <Icon name={NODE_ICONS[kind]} size={28} stroke={1.2} />);
+  if (!record) return blank(data.recordId && state.historyLoaded ? '生成记录已删除' : <Icon name={NODE_ICONS[kind]} size={28} stroke={1.2} />);
   if (isPendingTask(record)) return waiting(record.status === 'queued' ? '排队中' : record.progress ? `生成中 ${Math.round(record.progress)}%` : '生成中');
   if (record.status === 'failed') {
     return blank(
@@ -380,7 +380,7 @@ function Result({ kind, data, onShape }: { kind: NodeKind; data: MediaData; onSh
       true,
     );
   }
-  if (!record.mediaUrl) return waiting('已生成，正在存到本机');
+  if (!record.mediaUrl) return waiting('已生成，保存中…');
   if (kind === 'image') return <img className="cnode-pic" src={record.mediaUrl} alt={record.prompt || '生成的图片'} draggable={false} onLoad={measure} />;
   if (kind === 'video') return <Clip src={record.mediaUrl} label={record.prompt || '生成的视频'} onShape={onShape} />;
   return (
@@ -444,7 +444,7 @@ function Clip({ src, label, onShape }: { src: string; label: string; onShape?: (
   );
 }
 
-// 名字行右端的操作：有内容时一个「全屏查看」，再加一个「更多」（下载、存到素材库、换一张图）。
+// 名字行右端的操作：有内容时一个「全屏查看」，再加一个「更多」（下载、存到素材库、替换图片）。
 // onUpload：图片节点可以上传一张图放进来；节点还空着的时候只有这一个按钮。
 function NodeTools({ id, kind, data, onUpload }: { id: string; kind: Kind; data: MediaData; onUpload?: () => void }) {
   const flow = useReactFlow();
@@ -476,15 +476,15 @@ function NodeTools({ id, kind, data, onUpload }: { id: string; kind: Kind; data:
 
   async function save() {
     if (!file) return;
-    toast('正在存到素材库…', 'info', 1800);
+    toast('正在保存到素材库…', 'info', 1800);
     try {
       const res = await fetch(file.url);
-      if (!res.ok) throw new Error('这个文件已经不在本机了');
+      if (!res.ok) throw new Error('文件已不存在');
       const blob = await res.blob();
       const asset = await uploadVirtualAsset(new File([blob], `${file.name}.${file.url.split('.').pop()}`, { type: blob.type }), kind);
       // 记在节点上：之后拿它去给 Seedance 当参考，不用再传一遍。
       flow.updateNodeData(id, { assetId: asset.id, assetOf: file.url });
-      toast('已存到素材库', 'success');
+      toast('已保存到素材库', 'success');
     } catch (err) {
       toast((err as Error).message, 'error', 6000);
     }
@@ -521,12 +521,12 @@ function NodeTools({ id, kind, data, onUpload }: { id: string; kind: Kind; data:
   // 扩图：把画面往外补成另一个比例。先在本地做一张放大了画布的底图，再让这个节点的模型去补；结果放进右边一个新的图片节点。
   async function outpaint(ratio: string) {
     const model = (data as ImageData).model;
-    if (!imageRefLimit(model)) return toast(`${modelLabel(model)} 不支持参考图，先换一个模型再扩图`, 'info');
+    if (!imageRefLimit(model)) return toast(`${modelLabel(model)} 不支持参考图，请更换模型`, 'info');
     toast('正在准备扩图…', 'info', 1800);
     try {
       const [w, h] = ratio.split(':').map(Number);
       const padded = await padImage(file!.url, w / h, `${file!.name}-扩图底图`);
-      if (!padded) return toast(`这张图已经是 ${ratio} 了`, 'info');
+      if (!padded) return toast(`图片已是 ${ratio}`, 'info');
       const made = addNodeBeside(id, { prompt: `扩图成 ${ratio}`, ratio, count: 1 });
       // 等新节点真的上了画布再让它生成。
       await new Promise((resolve) => setTimeout(resolve, 120));
@@ -536,7 +536,7 @@ function NodeTools({ id, kind, data, onUpload }: { id: string; kind: Kind; data:
     }
   }
   async function extend() {
-    if (!traits((data as VideoData).model).frames) return toast(`${modelLabel((data as VideoData).model)} 不支持首帧，接不了。先在下面的面板里换一个模型`, 'info');
+    if (!traits((data as VideoData).model).frames) return toast(`${modelLabel((data as VideoData).model)} 不支持首帧，请更换模型`, 'info');
     toast('正在截取最后一帧…', 'info', 1800);
     try {
       continueVideo(id, await grabFrame(file!.url, 'last', `${file!.name}-尾帧`));
@@ -550,10 +550,10 @@ function NodeTools({ id, kind, data, onUpload }: { id: string; kind: Kind; data:
   const moreButton = useRef<HTMLButtonElement>(null);
   const items = [
     ...(local && kind === 'image' ? [{ value: 'crop', label: '裁剪' }, { value: 'grid', label: '切成宫格…' }, ...(ratios.length ? [{ value: 'outpaint', label: '扩图…' }] : [])] : []),
-    ...(local && kind === 'video' ? [{ value: 'extend', label: '延长：接着往后拍' }, { value: 'frame', label: '截取当前帧' }, { value: 'first', label: '截取首帧' }, { value: 'last', label: '截取尾帧' }] : []),
+    ...(local && kind === 'video' ? [{ value: 'extend', label: '延长' }, { value: 'frame', label: '截取当前帧' }, { value: 'first', label: '截取首帧' }, { value: 'last', label: '截取尾帧' }] : []),
     ...(file ? [{ value: 'download', label: '下载' }] : []),
-    ...(canSave ? [{ value: 'save', label: '存到素材库' }] : []),
-    ...(onUpload ? [{ value: 'upload', label: file || data.asset ? '换一张图' : '上传图片' }] : []),
+    ...(canSave ? [{ value: 'save', label: '保存到素材库' }] : []),
+    ...(onUpload ? [{ value: 'upload', label: file || data.asset ? '替换图片' : '上传图片' }] : []),
   ];
   const acts: Record<string, () => void> = {
     crop,
@@ -579,7 +579,7 @@ function NodeTools({ id, kind, data, onUpload }: { id: string; kind: Kind; data:
         </button>
       )}
       {!hasContent && onUpload ? (
-        <button className="icon-btn icon-btn-sm cnode-btn" type="button" {...tip('上传一张图片放进这个节点')} aria-label="上传图片" onClick={onUpload}>
+        <button className="icon-btn icon-btn-sm cnode-btn" type="button" {...tip('上传图片')} aria-label="上传图片" onClick={onUpload}>
           <Icon name="upload" size={16} />
         </button>
       ) : (
@@ -599,7 +599,7 @@ function useWorking(data: MediaData) {
   return Boolean(data.busy) || Boolean(record && isPendingTask(record));
 }
 
-const promptHint = (linked: boolean, own: string) => (linked ? '已连上文本节点，这里可以再补充' : own);
+const promptHint = (linked: boolean, own: string) => (linked ? '补充提示词（可选）' : own);
 
 // ---------- 文本 ----------
 
@@ -638,13 +638,13 @@ export function TextNode({ id, data: raw, selected, dragging }: NodeProps) {
       panel={
         <>
           <Refs id={id} kind="text" />
-          <Prompt id={id} value={data.prompt || ''} placeholder={data.text ? '想怎么改？例如：改成三个分镜，每个一句话' : '想让模型写什么？例如：写一段 15 秒短视频的分镜'} />
+          <Prompt id={id} value={data.prompt || ''} placeholder={data.text ? '描述修改要求，例如：改成三个分镜，每个一句话' : '描述写作要求，例如：写一段 15 秒短视频的分镜'} />
           {data.error && !data.busy && <p className="cnode-error">{data.error}</p>}
-          <Bar working={Boolean(data.busy)} ready={Boolean((data.prompt || '').trim())} action="让模型写" onSend={write}>
+          <Bar working={Boolean(data.busy)} ready={Boolean((data.prompt || '').trim())} action="生成文本" onSend={write}>
             {models.length > 0 ? (
               <Dropdown variant="tool" chevron label="文本模型" value={model} options={models.map((m) => ({ value: m, label: m }))} onChange={(next) => flow.updateNodeData(id, { model: next })} />
             ) : (
-              <span className="cnode-note">还没读到可用的文本模型</span>
+              <span className="cnode-note">暂无可用的文本模型</span>
             )}
           </Bar>
         </>
@@ -667,7 +667,7 @@ export function TextNode({ id, data: raw, selected, dragging }: NodeProps) {
         />
       ) : (
         <div className={`cnode-text-view nowheel ${data.text ? '' : 'is-empty'}`} onDoubleClick={() => setEditing(true)}>
-          {data.text || '双击开始编辑，或者选中后让模型写'}
+          {data.text || '双击编辑'}
         </div>
       )}
     </Frame>
@@ -717,7 +717,7 @@ export function ImageNode({ id, data: raw, selected, dragging }: NodeProps) {
       panel={
         <>
           <Refs id={id} kind="image" model={data.model} limit={refLimit} />
-          <Prompt id={id} value={data.prompt} placeholder={promptHint(linked, hasRefs ? '想怎么改这张图？例如：把背景改成雪夜' : '描述想生成的图片：主体、环境、构图、光线和风格')} presets={{ refs: inputs.filter((i) => i.link.kind === 'image').length, limit: refLimit, run: (prompt) => generate(flow, id, snap, { prompt }) }} />
+          <Prompt id={id} value={data.prompt} placeholder={promptHint(linked, hasRefs ? '描述修改要求，例如：把背景改成雪夜' : '描述主体、环境、构图、光线与风格')} presets={{ refs: inputs.filter((i) => i.link.kind === 'image').length, limit: refLimit, run: (prompt) => generate(flow, id, snap, { prompt }) }} />
           {data.error && !data.busy && <p className="cnode-error">{data.error}</p>}
           <Bar working={working} ready={Boolean(data.prompt.trim()) || linked} action="生成图片" onSend={() => generate(flow, id, snap)}>
             <Dropdown variant="tool" chevron label="模型" value={data.model} options={models.map((m) => ({ value: m, label: modelLabel(m) }))} onChange={(model) => flow.updateNodeData(id, { model, ratio: imageRatios(model).includes(data.ratio) ? data.ratio : imageRatios(model)[0] || data.ratio, resolution: fitImageSize(model, data.resolution) })} />
@@ -761,8 +761,8 @@ function pickRole(anchor: HTMLElement, model: string | undefined, current: Frame
   const able = traits(model);
   const usable: Record<FrameRole, boolean> = { reference: able.reference, first: able.frames, last: able.lastFrame };
   openMenu(anchor, {
-    label: '这张图怎么用',
-    items: ROLES.map((role) => ({ value: role, label: ROLE_LABELS[role], selected: role === current, disabled: !usable[role], title: usable[role] ? null : '这个视频模型不支持' })),
+    label: '图片用途',
+    items: ROLES.map((role) => ({ value: role, label: ROLE_LABELS[role], selected: role === current, disabled: !usable[role], title: usable[role] ? null : '当前模型不支持' })),
     onSelect: (role) => onPick(role as FrameRole),
   });
 }
@@ -786,7 +786,7 @@ function Refs({ id, kind, model = '', limit = 0 }: { id: string; kind: NodeKind;
 
   async function upload(picked: File) {
     const kind = kindOfFile(picked);
-    if (!kind || (forImage && kind !== 'image')) return toast(forImage ? '这里只能上传图片' : '这里只能上传图片、视频和音频', 'info');
+    if (!kind || (forImage && kind !== 'image')) return toast(forImage ? '仅支持上传图片' : '仅支持上传图片、视频和音频', 'info');
     toast(`正在上传${MEDIA[kind].label}…`, 'info', 1800);
     try {
       const ref = await uploadLocalFile(picked, kind);
@@ -802,7 +802,7 @@ function Refs({ id, kind, model = '', limit = 0 }: { id: string; kind: NodeKind;
     const kinds = Object.keys(MEDIA) as Kind[];
     const items = [
       ...(canUpload ? [{ value: 'upload', label: forImage ? '上传参考图' : '上传图片、视频或音频' }] : []),
-      ...(hasLibrary ? kinds.map((item) => ({ value: item, label: `从素材库选${MEDIA[item].label}` })) : []),
+      ...(hasLibrary ? kinds.map((item) => ({ value: item, label: `从素材库选择${MEDIA[item].label}` })) : []),
       { value: 'text', label: '文本节点' },
     ];
     const pick = (value: string) => {
@@ -811,7 +811,7 @@ function Refs({ id, kind, model = '', limit = 0 }: { id: string; kind: NodeKind;
       openAssetPicker({ kind: value as Kind, remaining: 1, sources: [...sources], onPick: (asset) => addInput(id, value as NodeKind, { asset }) });
     };
     if (items.length === 1) return pick(items[0].value);
-    openMenu(button, { label: '接一个节点进来', items, onSelect: pick });
+    openMenu(button, { label: '连接上游节点', items, onSelect: pick });
   }
 
   return (
@@ -820,7 +820,7 @@ function Refs({ id, kind, model = '', limit = 0 }: { id: string; kind: NodeKind;
         if (link.kind === 'text') {
           const text = ((node.data as unknown as TextData).text || '').trim();
           return (
-            <span key={edgeId} className="cnode-ref is-text" {...tip(text ? (text.length > 80 ? `${text.slice(0, 80)}…` : text) : '连进来的文本节点还是空的')}>
+            <span key={edgeId} className="cnode-ref is-text" {...tip(text ? (text.length > 80 ? `${text.slice(0, 80)}…` : text) : '上游文本节点为空')}>
               <Icon name="type" size={18} />
               <span className="cnode-ref-tag">文本</span>
             </span>
@@ -842,7 +842,7 @@ function Refs({ id, kind, model = '', limit = 0 }: { id: string; kind: NodeKind;
             type="button"
             aria-haspopup="listbox"
             aria-expanded="false"
-            aria-label={`这张图怎么用：${label}`}
+            aria-label={`图片用途：${label}`}
             onClick={(e) =>
               pickRole(e.currentTarget, model, link.role || 'reference', (role) => {
                 snap();
@@ -858,7 +858,7 @@ function Refs({ id, kind, model = '', limit = 0 }: { id: string; kind: NodeKind;
           </span>
         );
       })}
-      <button className="cnode-ref cnode-ref-add" type="button" {...tip(only ? '接一个文本节点进来，它的内容会拼进提示词' : forImage ? '添加参考图或文本' : '添加参考素材或文本')} aria-label={only ? '接一个文本节点进来' : '接一个节点进来'} aria-haspopup={only ? undefined : 'menu'} aria-expanded={only ? undefined : 'false'} onClick={(e) => add(e.currentTarget)}>
+      <button className="cnode-ref cnode-ref-add" type="button" {...tip(only ? '添加文本' : forImage ? '添加参考图或文本' : '添加参考素材或文本')} aria-label={only ? '添加文本节点' : '添加上游节点'} aria-haspopup={only ? undefined : 'menu'} aria-expanded={only ? undefined : 'false'} onClick={(e) => add(e.currentTarget)}>
         <Icon name="plus" size={18} />
       </button>
       <input
@@ -900,7 +900,7 @@ export function VideoNode({ id, data: raw, selected, dragging }: NodeProps) {
       panel={
         <>
           <Refs id={id} kind="video" model={data.model} />
-          <Prompt id={id} value={data.prompt} placeholder={promptHint(linked, '描述想生成的视频：主体、动作、场景、镜头运动、光线和风格')} />
+          <Prompt id={id} value={data.prompt} placeholder={promptHint(linked, '描述主体、动作、场景、运镜、光线与风格')} />
           {data.error && !data.busy && <p className="cnode-error">{data.error}</p>}
           <Bar working={working} ready={Boolean(data.prompt.trim()) || inputs.length > 0} action="生成视频" onSend={() => generate(flow, id, snap)}>
             <Dropdown variant="tool" chevron label="模型" value={data.model} options={models.map((m) => ({ value: m, label: modelLabel(m), note: modelNote(m) || undefined }))} onChange={(model) => set(fitVideo({ ...data, model }))} />
@@ -967,7 +967,7 @@ export function AudioNode({ id, data: raw, selected, dragging }: NodeProps) {
       panel={
         <>
           <Refs id={id} kind="audio" />
-          <Prompt id={id} value={data.prompt} placeholder={promptHint(linked, speech ? '输入要朗读的文字' : '描述想要的声音：来源、材质、动作')} />
+          <Prompt id={id} value={data.prompt} placeholder={promptHint(linked, speech ? '输入朗读文本' : '描述声音的来源、材质与动作')} />
           {data.error && !data.busy && <p className="cnode-error">{data.error}</p>}
           <Bar working={working} ready={Boolean(data.prompt.trim()) || linked} action={speech ? '生成语音' : '生成音效'} onSend={() => generate(flow, id)}>
             {tools.length > 1 && <Dropdown variant="tool" chevron label="类型" value={data.tool} options={tools} onChange={(tool) => flow.updateNodeData(id, { tool })} />}
@@ -1061,7 +1061,7 @@ export function GroupNode({ id, data: raw, selected }: NodeProps) {
 function Mini({ node }: { node: Node }) {
   useStore('history');
   const kind = node.type as NodeKind;
-  if (kind === 'text') return <span className="cstack-words">{((node.data as unknown as TextData).text || '').slice(0, 40) || '空的文本'}</span>;
+  if (kind === 'text') return <span className="cstack-words">{((node.data as unknown as TextData).text || '').slice(0, 40) || '空文本'}</span>;
   const output = outputOf(node);
   const thumb = output?.asset ? output.asset.thumb : output?.url;
   if (thumb && kind === 'image') return <img src={thumb} alt="" draggable={false} />;
@@ -1102,7 +1102,7 @@ export function StackNode({ id, data: raw, selected, dragging }: NodeProps) {
         <div className="cnode-panel cstack-panel nowheel">
           <div className="cstack-grid">
             {members.map((member) => (
-              <button key={member.id} type="button" className="cstack-item" {...tip('点一下把它取回画布')} aria-label={`取回 ${NODE_LABELS[member.type as NodeKind]}${member.data.no ? ` ${member.data.no}` : ''}`} onClick={() => unstack(id, member.id)}>
+              <button key={member.id} type="button" className="cstack-item" {...tip('取回画布')} aria-label={`取回 ${NODE_LABELS[member.type as NodeKind]}${member.data.no ? ` ${member.data.no}` : ''}`} onClick={() => unstack(id, member.id)}>
                 <Mini node={member} />
                 <span className="chist-cap ellipsis">{`${NODE_LABELS[member.type as NodeKind]}${member.data.no ? ` ${member.data.no}` : ''}`}</span>
               </button>

@@ -15,10 +15,10 @@ const STUDIO_KEY = 'seedance-studio.studio.v1';
 
 // 能生成的五种内容。polish 表示这种内容的提示词可以让模型帮忙补充（要朗读的文字不能改写，配乐没有提示词）。
 export const TYPES: { value: CreateType; label: string; title: string; action: string; polish?: boolean; placeholder?: string }[] = [
-  { value: 'video', label: '视频', title: '想生成什么视频？', action: '生成视频', polish: true, placeholder: '描述你想生成的视频：主体、动作、场景、镜头运动、光线和风格' },
-  { value: 'image', label: '图片', title: '想生成什么图片？', action: '生成图片', polish: true, placeholder: '描述你想生成的图片：主体、环境、构图、光线和风格' },
-  { value: 'speech', label: '语音', title: '想让它读什么？', action: '生成语音', placeholder: '输入要朗读的文字' },
-  { value: 'sfx', label: '音效', title: '想要什么声音？', action: '生成音效', polish: true, placeholder: '描述想要的声音：来源、材质、动作，是一次声响还是持续的环境声' },
+  { value: 'video', label: '视频', title: '想生成什么视频？', action: '生成视频', polish: true, placeholder: '描述主体、动作、场景、运镜、光线与风格' },
+  { value: 'image', label: '图片', title: '想生成什么图片？', action: '生成图片', polish: true, placeholder: '描述主体、环境、构图、光线与风格' },
+  { value: 'speech', label: '语音', title: '想让它读什么？', action: '生成语音', placeholder: '输入朗读文本' },
+  { value: 'sfx', label: '音效', title: '想要什么声音？', action: '生成音效', polish: true, placeholder: '描述声音的来源、材质与动作' },
   { value: 'music', label: '配乐', title: '给哪段视频配乐？', action: '生成配乐' },
 ];
 
@@ -362,7 +362,7 @@ export async function useImageForVideo(item: HistoryItem) {
   } else if (isGrok()) {
     Object.assign(composer.form, { mode: 'frames', frames: { first: await refFromRecord(item), last: null } });
   } else {
-    toast('正在把图片传到素材库…', 'info');
+    toast('正在上传图片…', 'info');
     const ref = refFromAsset(await assetFromRecord(item), 'image');
     Object.assign(composer.form, { mode: 'reference', refs: { image: [ref], video: [], audio: [] } });
   }
@@ -378,20 +378,20 @@ export const refsFromCharacter = (character: Character): Ref[] => character.imag
 // 视频：火山方舟上当参考图；Flatkey 上的 Grok 只能给一张首帧；Flatkey 上的 Seedance 只认素材库，本机的图用不了。
 export function useCharacter(character: Character, type: 'image' | 'video') {
   const refs = refsFromCharacter(character);
-  if (!refs.length) throw new Error('这个角色还没有参考图，先给它加一张');
+  if (!refs.length) throw new Error('该角色暂无参考图，请先添加');
   const { form, studio } = composer;
   // 角色的图排在已有参考图的后面，同一张不重复加。
   const merged = (current: Ref[]) => [...current, ...refs.filter((ref) => !current.some((r) => r.url === ref.url))];
   if (type === 'image') {
     const model = [studio.image.model, ...state.catalog.image].find((id) => imageRefLimit(id) > 0);
-    if (!model) throw new Error(specDriven() ? '账号里没有能带参考图的图片模型' : '带参考图生成图片在 Flatkey 上用不了，换到火山方舟');
+    if (!model) throw new Error(specDriven() ? '暂无支持参考图的图片模型' : 'Flatkey 不支持参考图生图，请切换到火山方舟');
     Object.assign(studio.image, { model, refs: merged(studio.image.refs || []).slice(0, imageRefLimit(model)) });
     if (!studio.image.prompt.trim()) studio.image.prompt = character.description;
     fitImage();
   } else {
     if (specDriven()) Object.assign(form, { mode: 'reference', refs: { ...form.refs, image: merged(form.refs.image).slice(0, KINDS.image.max) } });
     else if (isGrok()) Object.assign(form, { mode: 'frames', frames: { first: refs[0], last: null } });
-    else throw new Error('Flatkey 上的 Seedance 只认素材库里的素材，角色的图用不了。换到火山方舟，或者换成 Grok 的视频模型');
+    else throw new Error('Flatkey 上的 Seedance 仅支持素材库素材，请切换到火山方舟或改用 Grok 视频模型');
     if (!form.prompt.trim()) form.prompt = character.description;
     fitModel();
   }
@@ -404,14 +404,14 @@ export function useCharacter(character: Character, type: 'image' | 'video') {
 const sourceAssets = new Map<string, Asset>();
 export async function useVideoAsSource(item: HistoryItem, task: VideoTask) {
   // 火山方舟的参考视频只收公网链接，本机的视频发不过去，所以这两件事只在 Flatkey 上做。
-  if (specDriven()) throw new Error('延长和编辑只在 Flatkey 上可用');
+  if (specDriven()) throw new Error('延长和编辑仅支持 Flatkey');
   // 只有 Seedance 能做。当前选的不是，就换成账号里的第一个 Seedance 型号。
   const model = [composer.form.model, item.model, ...state.models].find((id) => videoFamilyOf(id) === 'seedance' && state.models.includes(id));
-  if (!model) throw new Error('账号里没有 Seedance 模型，延长和编辑用不了');
+  if (!model) throw new Error('暂无 Seedance 模型，无法延长或编辑');
   // 同一条视频这次打开页面期间传过，就接着用那份素材，不重复上传。
   let asset = sourceAssets.get(item.id);
   if (!asset || !findAsset(asset.id)) {
-    toast('正在把视频传到素材库…', 'info');
+    toast('正在上传视频…', 'info');
     asset = await assetFromRecord(item);
     sourceAssets.set(item.id, asset);
   }
@@ -491,7 +491,7 @@ export function togglePreview(voice: Voice) {
     stopPreview();
   } else {
     preview.src = voice.previewUrl!;
-    preview.play().catch(() => toast('这个音色的试听播放不了', 'error'));
+    preview.play().catch(() => toast('试听播放失败', 'error'));
     composer.previewing = voice.id;
   }
   emit('composer');
@@ -529,7 +529,7 @@ function setPrompt(text: string) {
 export async function polish() {
   const { type } = composer.studio;
   const original = draftPrompt();
-  if (!original.trim()) return toast('先写几个字，再让它补充', 'info');
+  if (!original.trim()) return toast('请先输入提示词', 'info');
   composer.polishing = true;
   emit('composer');
   try {
@@ -547,7 +547,7 @@ export async function polish() {
     if (composer.studio.type === type && draftPrompt() === original) {
       composer.beforePolish = original;
       setPrompt(text);
-      if (model !== wanted) toast('选的润色模型暂时用不了，这次换了一个', 'info', 5000);
+      if (model !== wanted) toast('润色模型不可用，已自动切换', 'info', 5000);
     }
   } catch (err) {
     toast((err as Error).message, 'error', 6000);
@@ -569,7 +569,7 @@ export async function submit() {
   let request = currentRequest();
   if (request.problems.length) return toast(request.problems[0], 'info');
   const skill = activeSkill();
-  if (skill && !polishModel()) return toast('账号里没有可用的文本模型，技能用不了。可以先取消技能再生成', 'info');
+  if (skill && !polishModel()) return toast('暂无可用的文本模型，请取消技能后重试', 'info');
   composer.submitting = true;
   composer.submitError = '';
   emit('composer');
@@ -636,7 +636,7 @@ export function initComposer() {
     if (state.catalog.image.length && !state.catalog.image.includes(composer.studio.image.model)) composer.studio.image.model = state.catalog.image[0];
     fitImage();
     persist();
-    if (state.app.hasKey && info.source === 'default' && info.error) toast(`没能读到账号的模型列表，暂时显示默认型号。${info.error}`, 'error', 6000);
+    if (state.app.hasKey && info.source === 'default' && info.error) toast(`模型列表加载失败，已显示默认模型。${info.error}`, 'error', 6000);
     changed();
   });
   // 素材状态变了（比如处理完成），用到它的地方才需要重画。

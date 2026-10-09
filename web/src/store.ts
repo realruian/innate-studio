@@ -27,7 +27,7 @@ export async function api<T = any>(method: string, url: string, body?: unknown, 
   try {
     res = await fetch(url, init);
   } catch {
-    throw new ApiError(0, 'network', '连不上本地服务，请确认终端里的 node server.js 还在运行。');
+    throw new ApiError(0, 'network', '无法连接服务，请确认服务已启动。');
   }
   const text = await res.text();
   let data: any = null;

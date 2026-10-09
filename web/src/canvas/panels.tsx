@@ -50,7 +50,7 @@ export function Finder({ nodes, onJump, onClose }: { nodes: Node[]; onJump: (id:
         <input
           ref={input}
           value={query}
-          placeholder="搜索节点的名字、提示词、文本"
+          placeholder="搜索节点"
           aria-label="搜索节点"
           spellCheck={false}
           onChange={(e) => {
@@ -81,7 +81,7 @@ export function Finder({ nodes, onJump, onClose }: { nodes: Node[]; onJump: (id:
             <span className="cfind-text ellipsis">{excerpt(node, word)}</span>
           </button>
         ))}
-        {!found.length && <div className="cfind-empty">{nodes.length ? '没有搜到' : '画布上还没有节点'}</div>}
+        {!found.length && <div className="cfind-empty">{nodes.length ? '无匹配结果' : '暂无节点'}</div>}
       </div>
     </div>
   );
@@ -111,7 +111,7 @@ export function HistoryPicker({ onPick }: { onPick: (item: HistoryItem) => void 
         <Segmented options={FILTERS} value={filter} onChange={setFilter} />
         <div className="pop-search">
           <Icon name="search" />
-          <input value={query} placeholder="搜提示词" aria-label="搜提示词" spellCheck={false} onChange={(e) => setQuery(e.target.value)} />
+          <input value={query} placeholder="搜索提示词" aria-label="搜索提示词" spellCheck={false} onChange={(e) => setQuery(e.target.value)} />
         </div>
       </div>
       <div className="chist-grid">
@@ -127,7 +127,7 @@ export function HistoryPicker({ onPick }: { onPick: (item: HistoryItem) => void 
             <span className="chist-cap ellipsis">{item.kind === 'audio' ? item.prompt || '音频' : fmtTime(item.completedAt || item.createdAt || 0)}</span>
           </button>
         ))}
-        {!shown.length && <div className="cfind-empty">{done.length ? '没有符合的内容' : '还没有生成过内容'}</div>}
+        {!shown.length && <div className="cfind-empty">{done.length ? '无匹配结果' : '暂无生成记录'}</div>}
       </div>
     </div>
   );
@@ -148,7 +148,7 @@ export function WorkflowPicker({ onPick }: { onPick: (id: string) => void }) {
   const load = () =>
     api<{ items: WorkflowMeta[] }>('GET', '/api/workflows')
       .then((data) => setList(data.items))
-      .catch((err) => toast(`工作流读不出来：${(err as Error).message}`, 'error', 6000));
+      .catch((err) => toast(`工作流加载失败：${(err as Error).message}`, 'error', 6000));
   useEffect(() => {
     load();
   }, []);
@@ -169,12 +169,12 @@ export function WorkflowPicker({ onPick }: { onPick: (id: string) => void }) {
             <span className="cflows-name ellipsis">{item.name}</span>
             <span className="cflows-count">{item.count} 个节点</span>
           </button>
-          <button type="button" className="icon-btn icon-btn-sm cnode-btn" {...tip('删除这份工作流')} aria-label={`删除工作流「${item.name}」`} onClick={() => remove(item)}>
+          <button type="button" className="icon-btn icon-btn-sm cnode-btn" {...tip('删除工作流')} aria-label={`删除工作流「${item.name}」`} onClick={() => remove(item)}>
             <Icon name="trash" size={16} />
           </button>
         </div>
       ))}
-      {list && !list.length && <div className="cfind-empty">还没有工作流。把几个节点打成一组，在分组的「更多」里选「存为工作流」。</div>}
+      {list && !list.length && <div className="cfind-empty">暂无工作流</div>}
     </div>
   );
 }

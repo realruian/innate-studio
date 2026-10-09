@@ -91,7 +91,7 @@ export function xhrUpload<T = any>(url: string, body: FormData | File, headers: 
       if (xhr.status >= 200 && xhr.status < 300) resolve(data);
       else reject(new ApiError(xhr.status, data?.error?.code || '', data?.error?.message || `上传失败（${xhr.status}）`));
     };
-    xhr.onerror = () => reject(new ApiError(0, 'network', '连不上本地服务，请确认终端里的 node server.js 还在运行。'));
+    xhr.onerror = () => reject(new ApiError(0, 'network', '无法连接服务，请确认服务已启动。'));
     xhr.send(body);
   });
 }
@@ -99,7 +99,7 @@ export function xhrUpload<T = any>(url: string, body: FormData | File, headers: 
 // 接口对每类素材有大小上限。超了的文件不发出去，直接说明原因。
 export function checkFileSize(file: File, kind: Kind) {
   const { label, maxBytes } = KINDS[kind];
-  if (file.size > maxBytes) throw new Error(`文件太大：${label}最大 ${Math.round(maxBytes / 1024 / 1024)} MB，这个文件有 ${fmtBytes(file.size)}。请先裁剪或压缩。`);
+  if (file.size > maxBytes) throw new Error(`文件过大：${label}上限 ${Math.round(maxBytes / 1024 / 1024)} MB，当前 ${fmtBytes(file.size)}`);
 }
 
 export async function uploadVirtualAsset(file: File, kind: Kind, onProgress?: Progress): Promise<Asset> {
@@ -152,7 +152,7 @@ export async function refFromRecord(item: HistoryItem): Promise<Ref> {
 // Seedance 只认素材库里的素材：把生成记录里的文件取出来，传进 Flatkey 的素材库。
 export async function assetFromRecord(item: HistoryItem) {
   const res = await fetch(item.mediaUrl!);
-  if (!res.ok) throw new Error('这条记录的文件已经不在本机了');
+  if (!res.ok) throw new Error('文件已不存在');
   const blob = await res.blob();
   const file = new File([blob], `${recordName(item)}.${item.mediaUrl!.split('.').pop()}`, { type: blob.type });
   return uploadVirtualAsset(file, item.kind);

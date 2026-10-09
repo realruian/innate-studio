@@ -29,11 +29,11 @@ const SR_SCENES = [
 ];
 const MODES: { value: VideoForm['mode']; label: string; icon: IconName; note: string }[] = [
   { value: 'text', label: '文生视频', icon: 'type', note: '只用文字' },
-  { value: 'frames', label: '首尾帧', icon: 'frames', note: '指定首帧，尾帧可选' },
-  { value: 'reference', label: '参考生成', icon: 'layers', note: '可以加参考素材，不加就只按文字生成' },
+  { value: 'frames', label: '首尾帧', icon: 'frames', note: '尾帧可选' },
+  { value: 'reference', label: '参考生成', icon: 'layers', note: '参考素材可选' },
 ];
 // 只能给首帧、不能给尾帧的模型，第二种方式叫「图生视频」。
-const FIRST_FRAME_MODE: (typeof MODES)[number] = { value: 'frames', label: '图生视频', icon: 'frames', note: '给一张首帧' };
+const FIRST_FRAME_MODE: (typeof MODES)[number] = { value: 'frames', label: '图生视频', icon: 'frames', note: '以图片为首帧' };
 // 当前模型能用的生成方式。默认是带参考素材的那种，名字跟着模型走：Seedance 叫「全能参考」，别的模型叫「参考生成」。
 // 它不加素材就是文生视频，所以不再单列「文生视频」；只有不支持参考素材的模型才有这一种。
 function modesFor() {
@@ -116,7 +116,7 @@ function MediaBlock() {
   } else if (type === 'music') {
     const video = studio.music.video;
     const setVideo = (next: Ref | null) => updateStudio('music', { video: next });
-    const label = video?.duration ? `要配乐的视频 · ${Math.round(video.duration)} 秒` : '要配乐的视频';
+    const label = video?.duration ? `待配乐视频 · ${Math.round(video.duration)} 秒` : '待配乐视频';
     // 配乐要把视频文件传给模型，所以只能选本机有的：生成记录里的，或者从电脑里选一个。
     content = (
       <div className="frames-row">
@@ -337,10 +337,10 @@ function SfxToolbar() {
         icon="clock"
         label="时长"
         value={String(sub.duration)}
-        options={[{ value: 'auto', label: '由模型决定', display: '时长自动' }, ...SFX_DURATIONS.map((d) => ({ value: String(d), label: `${d} 秒` }))]}
+        options={[{ value: 'auto', label: '自动', display: '时长自动' }, ...SFX_DURATIONS.map((d) => ({ value: String(d), label: `${d} 秒` }))]}
         onChange={(duration) => updateStudio('sfx', { duration })}
       />
-      <Dropdown key="influence" variant="tool" control="influence" icon="sliders" label="和描述的贴合度" value={String(sub.influence)} options={SFX_INFLUENCES} onChange={(influence) => updateStudio('sfx', { influence })} />
+      <Dropdown key="influence" variant="tool" control="influence" icon="sliders" label="提示词相关性" value={String(sub.influence)} options={SFX_INFLUENCES} onChange={(influence) => updateStudio('sfx', { influence })} />
     </>
   );
 }
@@ -349,7 +349,7 @@ function Toolbar() {
   const { studio } = composer;
   if (studio.type === 'image') return <ImageToolbar />;
   if (studio.type === 'sfx') return <SfxToolbar />;
-  if (studio.type === 'music') return <span className="composer-hint">会按画面生成一段和视频一样长的音乐</span>;
+  if (studio.type === 'music') return <span className="composer-hint">根据画面生成等长配乐</span>;
   if (studio.type === 'speech') {
     const name = studio.speech.voiceName;
     return (
@@ -385,7 +385,7 @@ function FramePanel() {
       <div className="popover-title">分辨率</div>
       <Segmented options={resolutions.map((r) => ({ value: r, label: r, disabled: !allowed.includes(r) }))} value={form.resolution} onChange={(resolution) => update({ resolution })} />
       {!specDriven() && allowed.length < RESOLUTIONS.length && <div className="small muted">{form.model} 不支持 1080p</div>}
-      {(isGrok() || specDriven()) && form.mode === 'frames' && <div className="small muted">有首帧时，画面比例跟着首帧走</div>}
+      {(isGrok() || specDriven()) && form.mode === 'frames' && <div className="small muted">画面比例跟随首帧</div>}
     </>
   );
 }
@@ -417,7 +417,7 @@ function DurationPanel() {
         </label>
       </div>
       {autoDuration && (
-        <FormRow label="由模型决定" desc="不指定秒数，模型按内容自己定">
+        <FormRow label="自动时长">
           <Toggle checked={form.durationAuto} onChange={(durationAuto) => update({ durationAuto })} label="时长由模型决定" />
         </FormRow>
       )}
@@ -445,7 +445,7 @@ function MorePanel() {
     <>
       {(can.audio || can.seedanceExtras) && <div className="popover-title">输出</div>}
       {can.audio && (
-        <FormRow label="生成有声视频" desc="同时生成与画面同步的声音">
+        <FormRow label="生成有声视频">
           <Toggle checked={form.generateAudio} onChange={(generateAudio) => update({ generateAudio })} label="生成有声视频" />
         </FormRow>
       )}
@@ -476,13 +476,13 @@ function SeedanceExtras() {
   const sr = form.sr;
   return (
     <>
-      <FormRow label="联网搜索" desc="让任务先联网检索相关信息">
+      <FormRow label="联网搜索">
         <Toggle checked={form.webSearch} onChange={(webSearch) => update({ webSearch })} label="联网搜索" />
       </FormRow>
       <FormRow label="输入模式">
         <Dropdown label="输入模式" value={form.inputType} options={INPUT_TYPES} onChange={(inputType) => update({ inputType })} />
       </FormRow>
-      <FormRow label="画质超分" desc="生成后再提升分辨率或帧率">
+      <FormRow label="画质超分" desc="提升分辨率或帧率">
         <Toggle checked={sr.enabled} onChange={(enabled) => updateSr({ enabled })} label="画质超分" />
       </FormRow>
       {sr.enabled && (
@@ -498,7 +498,7 @@ function SeedanceExtras() {
             />
           </FormRow>
           {sr.by === 'resolution' ? (
-            <FormRow label="目标分辨率" desc="必须高于原始分辨率">
+            <FormRow label="目标分辨率" desc="需高于原始分辨率">
               <Segmented options={SR_RESOLUTIONS.map((r) => ({ value: r, label: r.toUpperCase().replace('P', 'p'), disabled: RES_RANK[r] <= RES_RANK[form.resolution] }))} value={sr.resolution} onChange={(resolution) => updateSr({ resolution })} />
             </FormRow>
           ) : (
@@ -531,7 +531,7 @@ function SeedanceExtras() {
 // 「音色」面板：按语言筛一下，每个音色可以先试听再选。
 function VoicePanel({ close }: { close: () => void }) {
   useStore('composer');
-  if (!state.voices) return <div className="empty small-empty">{composer.voicesError ? `读取音色失败：${composer.voicesError}` : '正在读取音色…'}</div>;
+  if (!state.voices) return <div className="empty small-empty">{composer.voicesError ? `音色加载失败：${composer.voicesError}` : '加载中…'}</div>;
   const match = { all: () => true, zh: (language: string) => language === 'zh', en: (language: string) => language === 'en', other: (language: string) => language !== 'zh' && language !== 'en' };
   // 有的平台只给音色的名字，不知道是什么语言，这时不显示按语言筛选的那一排。
   const languages = state.voices.some((voice) => voice.language);
@@ -601,7 +601,7 @@ async function pickCharacter(button: HTMLElement, type: 'image' | 'video') {
       if (!character) return goTo('characters');
       try {
         useCharacter(character, type);
-        toast(`已带上「${character.name}」的参考图`, 'success');
+        toast(`已添加角色「${character.name}」`, 'success');
       } catch (err) {
         toast((err as Error).message, 'error', 6000);
       }
@@ -625,7 +625,7 @@ function SendArea() {
   return (
     <>
       {(type.value === 'image' || type.value === 'video') && (
-        <button key="character" className="entry-action-btn" type="button" data-control="character" aria-haspopup="menu" aria-expanded="false" {...tip('用角色的参考图')} onClick={(e) => pickCharacter(e.currentTarget, type.value as 'image' | 'video')}>
+        <button key="character" className="entry-action-btn" type="button" data-control="character" aria-haspopup="menu" aria-expanded="false" {...tip('使用角色')} onClick={(e) => pickCharacter(e.currentTarget, type.value as 'image' | 'video')}>
           角色
         </button>
       )}
@@ -637,7 +637,7 @@ function SendArea() {
           data-control="skill"
           aria-haspopup="dialog"
           aria-expanded="false"
-          {...tip('按一套规则扩写提示词')}
+          {...tip('按技能扩写提示词')}
           onClick={(e) => {
             const layer = openPopover(e.currentTarget, <div className="popover-body">{<SkillPanel close={() => layer?.close()} />}</div>, { className: 'skill-popover', label: '技能', align: 'end' });
           }}
@@ -654,7 +654,7 @@ function SendArea() {
             撤销润色
           </button>
         ) : (
-          <button key="polish" className="entry-action-btn" type="button" data-control="polish" {...tip('把提示词写得更具体')} disabled={polishing} onClick={polish}>
+          <button key="polish" className="entry-action-btn" type="button" data-control="polish" {...tip('润色提示词')} disabled={polishing} onClick={polish}>
             {polishing && <span className="spinner" />}
             润色
           </button>
@@ -741,7 +741,7 @@ export function Composer() {
       {/* 平台上只有视频一种时，不用选类型。 */}
       <div ref={types} className="composer-types" hidden={availableTypes().length < 2}>
         <Segmented
-          options={availableTypes().map((t) => ({ value: t.value, label: t.label, disabled: missing[t.value] && t.value !== studio.type, title: missing[t.value] ? '这个账号没有对应的模型' : null }))}
+          options={availableTypes().map((t) => ({ value: t.value, label: t.label, disabled: missing[t.value] && t.value !== studio.type, title: missing[t.value] ? '暂无可用模型' : null }))}
           value={studio.type}
           onChange={setType}
           className="type-switch"
@@ -767,8 +767,8 @@ export function Composer() {
           rows={3}
           defaultValue={text}
           hidden={!type.placeholder}
-          placeholder={skill ? '写一句简单的话就行，发送时会按技能的规则扩写成完整的提示词' : type.placeholder || ''}
-          aria-label={type.value === 'speech' ? '要朗读的文字' : '提示词'}
+          placeholder={skill ? '输入简要描述，发送时自动扩写' : type.placeholder || ''}
+          aria-label={type.value === 'speech' ? '朗读文本' : '提示词'}
           onInput={(e) => typePrompt(e.currentTarget.value)}
           onKeyDown={(e) => {
             if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {

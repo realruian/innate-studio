@@ -22,8 +22,6 @@ const STATUS_LABELS: Record<string, string> = { queued: '排队中', in_progress
 const KIND_LABELS = { video: '视频', image: '图片', audio: '音频' };
 // 五种内容，和创作页输入框上方的切换是同一组。
 const TYPE_LABELS: Record<CreateType, string> = { video: '视频', image: '图片', speech: '语音', sfx: '音效', music: '配乐' };
-// 生成中的卡片上那句说明：各种内容要等多久差别很大。
-const WAIT_HINTS: Record<CreateType, string> = { video: '通常需要几分钟，可以关掉页面，回来再看', image: '通常十几秒', speech: '通常几秒', sfx: '通常几秒', music: '通常不到一分钟' };
 
 const message = (err: unknown) => (err as Error).message;
 
@@ -66,7 +64,7 @@ function refsOf(item: HistoryItem): Ref[] {
 async function removeItem(item: HistoryItem) {
   const ok = await confirmDialog({
     title: '删除这条记录？',
-    message: '只删除本机上的记录和已保存的文件，不影响平台上的任务和计费。删除后无法恢复。',
+    message: '删除后无法恢复。',
     okText: '删除',
     danger: true,
   });
@@ -93,7 +91,7 @@ function reuse(item: HistoryItem) {
     setForm(Object.fromEntries(Object.entries(basics).filter(([, value]) => value != null)));
   }
   goTo('create');
-  toast('已把这次的参数填回创作面板', 'success');
+  toast('已复用参数', 'success');
 }
 
 async function refresh(item: HistoryItem) {
@@ -110,8 +108,8 @@ async function recheck(item: HistoryItem) {
   try {
     const next = await api<HistoryItem>('POST', `/api/history/${encodeURIComponent(item.id)}/refresh`);
     await loadHistory();
-    if (next.status === 'completed') toast('任务已经完成', 'success');
-    else if (isTimedOutTask(next)) toast(next.pollError ? `查询状态出错：${next.pollError}` : '还是没有结果', 'info');
+    if (next.status === 'completed') toast('任务已完成', 'success');
+    else if (isTimedOutTask(next)) toast(next.pollError ? `状态查询失败：${next.pollError}` : '暂无结果', 'info');
   } catch (err) {
     toast(message(err), 'error');
   }
@@ -121,7 +119,7 @@ async function recheck(item: HistoryItem) {
 async function animate(item: HistoryItem) {
   try {
     await useImageForVideo(item);
-    toast('已选好这张图，写下提示词就可以生成视频', 'success');
+    toast('已添加为首帧', 'success');
   } catch (err) {
     toast(message(err), 'error', 6000);
   }
@@ -130,19 +128,19 @@ async function animate(item: HistoryItem) {
 // 延长或编辑一条视频。只有 Flatkey 上的 Seedance 能做（要把视频传进素材库当参考），用的是火山方舟或者账号里没有 Seedance 型号时不出现这两个入口。
 const canRework = (item: HistoryItem) => done(item) && item.kind === 'video' && state.app.provider === 'flatkey' && state.models.some((id) => videoFamilyOf(id) === 'seedance');
 async function rework(item: HistoryItem, task: VideoTask) {
-  if (!item.savedLocally) return toast('这条视频还没保存到本机，稍后再试', 'info');
+  if (!item.savedLocally) return toast('视频保存中，请稍后重试', 'info');
   try {
     await useVideoAsSource(item, task);
-    toast(`已选好这段视频，${VIDEO_TASKS[task].hint}`, 'success');
+    toast('已添加视频', 'success');
   } catch (err) {
     toast(message(err), 'error', 6000);
   }
 }
 
 async function score(item: HistoryItem) {
-  if (!item.savedLocally) return toast('这条视频还没保存到本机，稍后再试', 'info');
+  if (!item.savedLocally) return toast('视频保存中，请稍后重试', 'info');
   await useVideoForMusic(item);
-  toast('已选好这段视频，点右下角的发送键生成配乐', 'success');
+  toast('已添加视频', 'success');
 }
 
 // 已经存到本机的直接下载，还没存下来的在新标签页打开原地址。
@@ -157,7 +155,7 @@ function download(item: HistoryItem) {
   link.remove();
 }
 
-// 卡片右上角的「更多」。菜单内容按点开那一刻的状态来定：生成中的可以刷新，查询超时的可以再查一次，已完成的可以下载。
+// 卡片右上角的「更多」。菜单内容按点开那一刻的状态来定：生成中的可以刷新，查询超时的可以重新查询，已完成的可以下载。
 // 已完成的视频可以拿去配乐，已完成的图片可以拿去生成视频、存为角色。
 function openCardMenu(button: HTMLElement, id: string, scope: Scope) {
   const item = state.history.find((i) => i.id === id);
@@ -182,7 +180,7 @@ function openCardMenu(button: HTMLElement, id: string, scope: Scope) {
       done(item) && { value: 'download', label: '下载' },
       // 图片、语音、音效没有任务可查，生成中只能等。
       isPendingTask(item) && !item.direct && { value: 'refresh', label: '刷新' },
-      isTimedOutTask(item) && { value: 'recheck', label: '再查一次' },
+      isTimedOutTask(item) && { value: 'recheck', label: '重新查询' },
       { value: 'reuse', label: '复用' },
       canRework(item) && { value: 'extend', label: VIDEO_TASKS.extend.label },
       canRework(item) && { value: 'edit', label: VIDEO_TASKS.edit.label },
@@ -222,13 +220,13 @@ function AudioView({ item, large }: { item: HistoryItem; large: boolean }) {
   if (large && source) return <VideoPlayer src={source} soundtrack={item.mediaUrl} autoplay fit label="配乐预览" />;
   // 配乐没有提示词，写上它是给多长的视频配的。
   const seconds = item.tool === 'music' && Math.round(item.payload?.duration_seconds || 0);
-  const text = item.prompt || (seconds ? `给一段 ${seconds} 秒的视频配的音乐` : '');
+  const text = item.prompt || (seconds ? `${seconds} 秒视频配乐` : '');
   return <AudioPlayer src={item.mediaUrl} kind={voice ? `${typeLabel(item)} · ${voice}` : typeLabel(item)} text={text} label={nameOf(item)} />;
 }
 
 // 平台返回的失败原因是英文的。认识的换成人话，并说一句可以怎么办；不认识的原样显示，只去掉末尾的请求编号。
 // 只登记实际遇到过的。
-const KNOWN_FAILURES: [RegExp, string][] = [[/output audio .*copyright/i, '生成的声音可能涉及版权，被平台拦下了。可以关掉「更多」里的「生成有声视频」再试一次。']];
+const KNOWN_FAILURES: [RegExp, string][] = [[/output audio .*copyright/i, '音频涉及版权，未通过平台审核。请关闭「生成有声视频」后重试。']];
 function explainFailure(message?: string) {
   if (!message) return '未知错误';
   return KNOWN_FAILURES.find(([pattern]) => pattern.test(message))?.[1] || message.replace(/\s*Request id:.*$/i, '').trim();
@@ -252,7 +250,7 @@ function MediaBox({ item, large = false }: { item: HistoryItem; large?: boolean 
         <div className="state-text" {...clipTip(reason)}>
           {reason}
         </div>
-        {item.kind === 'video' && !isTimedOutTask(item) && <div className="state-note">预扣的余额会自动退还</div>}
+        {item.kind === 'video' && !isTimedOutTask(item) && <div className="state-note">预扣余额将自动退还</div>}
       </div>
     );
   }
@@ -268,13 +266,13 @@ function MediaBox({ item, large = false }: { item: HistoryItem; large?: boolean 
   const progress = Math.max(0, Math.min(100, item.progress || 0));
   return (
     <div className="card-state is-pending">
-      <div className="state-title cursor-text">{item.status === 'queued' ? '排队中' : video ? `生成中 ${progress}%` : `正在生成${typeLabel(item)}`}</div>
+      <div className="state-title cursor-text">{item.status === 'queued' ? '排队中' : video ? `生成中 ${progress}%` : '生成中…'}</div>
       {video && (
         <div className="bar wide">
           <div className="bar-fill" style={{ width: `${item.status === 'queued' ? 4 : Math.max(6, progress)}%` }} />
         </div>
       )}
-      <div className="small muted">{item.pollError ? `查询状态出错：${item.pollError}` : WAIT_HINTS[typeOf(item)]}</div>
+      {item.pollError && <div className="small muted">状态查询失败：{item.pollError}</div>}
     </div>
   );
 }
@@ -341,11 +339,11 @@ const present = ([, value]: Entry) => value != null && value !== '' && value !==
 function paramsOf(item: HistoryItem): Entry[] {
   const p = item.payload || {};
   // 用了技能的记录：提示词是扩写出来的，这里标出用的是哪个技能、用户原来写的是什么。
-  const skill: Entry[] = item.form?.skill ? [['技能', item.form.skill.name], ['你写的', item.form.prompt, true]] : [];
+  const skill: Entry[] = item.form?.skill ? [['技能', item.form.skill.name], ['原始输入', item.form.prompt, true]] : [];
   if (item.kind === 'image') return [['模型', item.model, true], ['画面比例', p.aspect_ratio], ['分辨率', p.resolution], ...skill];
   if (item.tool === 'speech') return [['模型', item.model, true], ['音色', p.voice_name || p.voice_id]];
   if (item.tool === 'sfx') {
-    return [['模型', item.model, true], ['时长', p.duration_seconds ? `${p.duration_seconds} 秒` : '由模型决定'], ['和描述的贴合度', p.prompt_influence]];
+    return [['模型', item.model, true], ['时长', p.duration_seconds ? `${p.duration_seconds} 秒` : '自动'], ['提示词相关性', p.prompt_influence]];
   }
   if (item.tool === 'music') return [['模型', item.model, true], ['视频时长', p.duration_seconds && `${Math.round(p.duration_seconds * 10) / 10} 秒`]];
   const ratio = p.ratio || p.aspect_ratio;
@@ -354,7 +352,7 @@ function paramsOf(item: HistoryItem): Entry[] {
     ['模型', item.model, true],
     ['分辨率', p.resolution],
     ['画面比例', ratio === 'adaptive' ? '自适应' : ratio],
-    ['时长', p.duration === -1 ? '由模型决定' : p.duration && `${p.duration} 秒`],
+    ['时长', p.duration === -1 ? '自动' : p.duration && `${p.duration} 秒`],
     ['生成有声视频', p.generate_audio === undefined ? null : p.generate_audio ? '开' : '关'],
     ['水印', p.watermark === undefined ? null : p.watermark ? '开' : '关'],
     ['随机种子', p.seed],
@@ -445,7 +443,7 @@ function Detail({ item, close, nav }: { item: HistoryItem; close: () => void; na
       ['生成耗时', item.completedAt && item.createdAt ? fmtDuration(item.completedAt - item.createdAt) : null],
       ['Token 用量', item.usage?.total_tokens != null ? String(item.usage.total_tokens) : null],
       ['费用', item.usage?.cost_usd != null ? `约 $${item.usage.cost_usd.toFixed(2)}` : null],
-      [`${kindLabel}文件`, item.status !== 'completed' ? null : item.savedLocally ? `已保存到本机${item.fileSize ? `（${fmtBytes(item.fileSize)}）` : ''}` : item.downloadError ? `还没存到本机：${item.downloadError}` : '正在保存到本机…'],
+      [`${kindLabel}文件`, item.status !== 'completed' ? null : item.savedLocally ? `已保存${item.fileSize ? `（${fmtBytes(item.fileSize)}）` : ''}` : item.downloadError ? `保存失败：${item.downloadError}` : '保存中…'],
     ] as Entry[]
   ).filter(present);
 
@@ -475,10 +473,10 @@ function Detail({ item, close, nav }: { item: HistoryItem; close: () => void; na
       {canRework(item) && leaveTo(VIDEO_TASKS.edit.label, (it) => rework(it, 'edit'))}
       {done(item) && item.kind === 'video' && state.catalog.audio.music && leaveTo('配乐', score)}
       {done(item) && item.kind === 'image' && leaveTo('生成视频', animate)}
-      {isTimedOutTask(item) && leaveTo('再查一次', recheck)}
+      {isTimedOutTask(item) && leaveTo('重新查询', recheck)}
       {!item.savedLocally && item.status === 'completed' && !item.direct && (
         <button className="btn" onClick={() => refresh(item).then(() => toast('已重新尝试保存', 'info'))}>
-          重新保存到本机
+          重新保存
         </button>
       )}
     </div>
@@ -496,7 +494,7 @@ function Detail({ item, close, nav }: { item: HistoryItem; close: () => void; na
         <div className="detail-info">
           {item.tool !== 'music' && (
             <Section
-              title={item.tool === 'speech' ? '朗读的文字' : '提示词'}
+              title={item.tool === 'speech' ? '朗读文本' : '提示词'}
               action={
                 item.prompt && (
                   <button className="entry-action-btn" type="button" onClick={() => copyText(item.prompt!, '已复制')}>
@@ -505,7 +503,7 @@ function Detail({ item, close, nav }: { item: HistoryItem; close: () => void; na
                 )
               }
             >
-              <p className="detail-prompt">{item.prompt || '（没有提示词）'}</p>
+              <p className="detail-prompt">{item.prompt || '（无提示词）'}</p>
             </Section>
           )}
           {refs.length > 0 && (
@@ -583,8 +581,7 @@ export function Recent() {
         all={list}
         empty={
           <div className="empty">
-            <div className="empty-title">{state.historyLoaded ? `还没有生成过${TYPE_LABELS[type]}` : '正在读取记录…'}</div>
-            {state.historyLoaded ? <div className="muted">生成的结果和参数都会保存下来，在这里看进度。</div> : null}
+            <div className="empty-title">{state.historyLoaded ? `暂无${TYPE_LABELS[type]}` : '加载中…'}</div>
           </div>
         }
       />
@@ -652,7 +649,6 @@ export function Records() {
       <header className="page-head">
         <div>
           <h1>创作记录</h1>
-          <p className="muted">生成过的全部视频、图片和音频，创作页和画布里生成的分开看。点画面看详情，点「复用」把那次的参数填回创作面板。</p>
         </div>
       </header>
       <div className="page-tools">
@@ -682,8 +678,7 @@ export function Records() {
         list={list}
         empty={
           <div className="empty">
-            <div className="empty-title">{!state.historyLoaded ? '正在读取记录…' : from.length ? '没有符合条件的记录' : source === 'canvas' ? '画布里还没有生成过内容' : '还没有生成过内容'}</div>
-            {state.historyLoaded && !from.length ? <div className="muted">点左边的「{source === 'canvas' ? '画布' : '创造'}」开始。生成的结果和参数都会保存在这里。</div> : null}
+            <div className="empty-title">{!state.historyLoaded ? '加载中…' : from.length ? '无匹配记录' : source === 'canvas' ? '暂无画布记录' : '暂无创作记录'}</div>
           </div>
         }
       />

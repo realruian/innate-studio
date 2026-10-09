@@ -101,7 +101,7 @@ test('切到火山方舟：Key 单独存，没有固定开头也能存；能做�
 
   const bad = await call('PUT', '/api/key', { apiKey: '中文 key', provider: 'ark' });
   assert.equal(bad.status, 400);
-  assert.match(bad.data.error.message, /火山方舟 的控制台复制那一串/);
+  assert.match(bad.data.error.message, /火山方舟 控制台复制/);
 });
 
 test('模型列表：型号和各自支持什么是登记好的，连一次接口只为确认 Key 能用', async () => {
@@ -175,7 +175,7 @@ test('不是方舟的型号不发出去；上游拒绝、模型没开通、任�
   const before = sent('/contents/generations/tasks').length;
   const wrong = await call('POST', '/api/videos', { payload: videoPayload('猫', { model: 'bytedance/seedance-2.0' }) });
   assert.equal(wrong.status, 400);
-  assert.match(wrong.data.error.message, /火山方舟上没有/);
+  assert.match(wrong.data.error.message, /火山方舟不支持视频模型/);
   assert.equal(sent('/contents/generations/tasks').length, before);
 
   const rejected = await call('POST', '/api/videos', { payload: videoPayload('REJECT') });
@@ -184,12 +184,12 @@ test('不是方舟的型号不发出去；上游拒绝、模型没开通、任�
 
   const notOpen = await call('POST', '/api/videos', { payload: videoPayload('NOTOPEN') });
   assert.equal(notOpen.status, 404);
-  assert.match(notOpen.data.error.message, /还没有开通这个模型.*余额大于 200 元/);
+  assert.match(notOpen.data.error.message, /未开通该模型.*余额大于 200 元/);
 
   const created = await call('POST', '/api/videos', { payload: videoPayload('FAIL') });
   const failed = await waitItem(created.data.id, (i) => i.status === 'failed', '任务失败');
   assert.equal(failed.error.code, 'OutputVideoSensitiveContentDetected');
-  assert.match(failed.error.message, /^生成的视频没有通过内容审核（/);
+  assert.match(failed.error.message, /^生成的视频未通过内容审核（/);
 });
 
 test('生图：要几张发几次，大小按画面比例换成像素值，不要水印；参考图放进 image 数组', async () => {
@@ -213,7 +213,7 @@ test('生图：要几张发几次，大小按画面比例换成像素值，不�
   assert.equal(largeItem.payload.resolution, '4K');
   const wrong = await call('POST', '/api/images', { payload: { model: IMAGE, prompt: '没有这一档', n: 1, aspect_ratio: '16:9', resolution: '4K' } });
   const wrongItem = await waitFor(async () => (await call('GET', '/api/history')).data.items.find((i) => i.id === wrong.data.items[0].id && i.status === 'failed'), '没有的档位失败');
-  assert.match(wrongItem.error.message, /没有 4K 这一档/);
+  assert.match(wrongItem.error.message, /不支持 4K/);
   assert.equal(sent('/images/generations').some((r) => r.prompt === '没有这一档'), false);
 
   const url = await upload();
@@ -228,7 +228,7 @@ test('生图：要几张发几次，大小按画面比例换成像素值，不�
 
   const tooMany = await call('POST', '/api/images', { payload: { model: IMAGE, prompt: '改', n: 1, input_references: Array(11).fill(ref) } });
   assert.equal(tooMany.status, 400);
-  assert.match(tooMany.data.error.message, /最多收 10 张/);
+  assert.match(tooMany.data.error.message, /最多支持 10 张/);
 
   const failed = await call('POST', '/api/images', { payload: { model: IMAGE, prompt: 'FAIL', n: 1 } });
   const item = await waitFor(async () => (await call('GET', '/api/history')).data.items.find((i) => i.id === failed.data.items[0].id && i.status === 'failed'), '生图失败');
@@ -295,7 +295,7 @@ test('已经拿掉的平台不认：切不过去，Key 也存不进去，带厂�
   const before = sent('/images/generations').length;
   const created = await call('POST', '/api/images', { payload: { model: 'openai/gpt-image-2', prompt: '猫', n: 1 } });
   const item = await waitFor(async () => (await call('GET', '/api/history')).data.items.find((i) => i.id === created.data.items[0].id && i.status === 'failed'), '生图失败');
-  assert.match(item.error.message, /火山方舟上没有 openai\/gpt-image-2/);
+  assert.match(item.error.message, /火山方舟不支持图片模型 openai\/gpt-image-2/);
   assert.equal(sent('/images/generations').length, before);
 });
 

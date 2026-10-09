@@ -55,7 +55,7 @@ export function buildRequest(form: VideoForm, refStatus: (ref: Ref) => RefStatus
   if (text) content.push({ type: 'text', text });
 
   if (form.mode === 'text') {
-    if (!text) problems.push('请填写提示词');
+    if (!text) problems.push('请输入提示词');
   } else if (form.mode === 'frames') {
     if (form.frames.first) content.push(media(form.frames.first, 'first_frame'));
     else problems.push('请添加首帧图片');
@@ -65,15 +65,15 @@ export function buildRequest(form: VideoForm, refStatus: (ref: Ref) => RefStatus
     for (const ref of form.refs.video) content.push(media(ref, 'reference_video'));
     for (const ref of form.refs.audio) content.push(media(ref, 'reference_audio'));
     if (!text && !form.refs.image.length && !form.refs.video.length) {
-      problems.push(form.refs.audio.length ? '只有音频不够，还需要提示词、图片或视频' : '请填写提示词，或添加参考图片、视频');
+      problems.push(form.refs.audio.length ? '仅有音频无法生成，请添加提示词、图片或视频' : '请输入提示词，或添加参考图片、视频');
     }
   }
 
   const statuses = refsInUse(form).map(refStatus);
   // 只存在本机的文件（为 Grok 选的首帧）Seedance 读不到，它只认素材库里的素材和公网链接。
-  if (refsInUse(form).some((r) => r.source === 'local')) problems.push('有素材只存在本机，Seedance 用不了，请移除后重新添加');
-  else if (statuses.some((s) => s.tone === 'error')) problems.push('有素材不可用，请移除后再生成');
-  else if (statuses.some((s) => !s.ready)) problems.push(`有素材还在处理中，可用于 ${form.model} 后才能生成`);
+  if (refsInUse(form).some((r) => r.source === 'local')) problems.push('Seedance 不支持本地素材，请移除后重新添加');
+  else if (statuses.some((s) => s.tone === 'error')) problems.push('部分素材不可用，请移除后重试');
+  else if (statuses.some((s) => !s.ready)) problems.push('部分素材处理中，请稍后重试');
 
   const payload: Record<string, unknown> = {
     model: form.model,
@@ -88,7 +88,7 @@ export function buildRequest(form: VideoForm, refStatus: (ref: Ref) => RefStatus
   const seed = String(form.seed).trim();
   if (seed !== '') {
     if (/^-?\d+$/.test(seed)) payload.seed = Number(seed);
-    else problems.push('随机种子需要是整数');
+    else problems.push('随机种子须为整数');
   }
   if (form.webSearch) payload.web_search = true;
   if (form.inputType !== 'auto') payload.input_type = form.inputType;
@@ -97,11 +97,11 @@ export function buildRequest(form: VideoForm, refStatus: (ref: Ref) => RefStatus
     const sr: Record<string, unknown> = {};
     if (form.sr.by === 'resolution') {
       sr.resolution = form.sr.resolution;
-      if (RES_RANK[form.sr.resolution] <= RES_RANK[form.resolution]) problems.push('超分的目标分辨率必须高于原始分辨率');
+      if (RES_RANK[form.sr.resolution] <= RES_RANK[form.resolution]) problems.push('超分目标分辨率须高于原始分辨率');
     } else {
       const limit = Number(form.sr.limit);
       if (Number.isInteger(limit) && limit >= 64 && limit <= 2160) sr.resolution_limit = limit;
-      else problems.push('超分的短边像素需要是 64 到 2160 之间的整数');
+      else problems.push('超分短边像素须为 64–2160 的整数');
     }
     if (form.sr.scene) sr.scene = form.sr.scene;
     sr.tool_version = form.sr.tool;
@@ -109,7 +109,7 @@ export function buildRequest(form: VideoForm, refStatus: (ref: Ref) => RefStatus
     if (fps !== '') {
       const n = Number(fps);
       if (Number.isInteger(n) && n >= 1 && n <= 120) sr.fps = n;
-      else problems.push('超分的帧率需要是 1 到 120 之间的整数');
+      else problems.push('超分帧率须为 1–120 的整数');
     }
     payload.super_resolution_config = sr;
   }
@@ -128,7 +128,7 @@ export function buildSpecRequest(form: VideoForm, spec: VideoSpec, platform = '�
   const media = (ref: Ref) => ({ type: MEDIA_FIELD[ref.kind], [MEDIA_FIELD[ref.kind]]: { url: ref.url } });
 
   if (form.mode === 'text') {
-    if (!text) problems.push('请填写提示词');
+    if (!text) problems.push('请输入提示词');
   } else if (form.mode === 'frames') {
     const frames: Record<string, unknown>[] = [];
     if (form.frames.first) frames.push({ ...media(form.frames.first), frame_type: 'first_frame' });
@@ -139,21 +139,21 @@ export function buildSpecRequest(form: VideoForm, spec: VideoSpec, platform = '�
     const refs = [...form.refs.image, ...form.refs.video, ...form.refs.audio];
     payload.input_references = refs.map(media);
     if (!text && !form.refs.image.length && !form.refs.video.length) {
-      problems.push(form.refs.audio.length ? '只有音频不够，还需要提示词、图片或视频' : '请填写提示词，或添加参考图片、视频');
+      problems.push(form.refs.audio.length ? '仅有音频无法生成，请添加提示词、图片或视频' : '请输入提示词，或添加参考图片、视频');
     }
   }
   // 有首帧时画面比例跟着图片走，其余情况才需要指定。
   if (form.mode !== 'frames') payload.aspect_ratio = form.ratio;
 
   const used = refsInUse(form);
-  if (used.some((r) => r.source === 'asset')) problems.push(`有素材来自 Flatkey 的素材库，${platform} 读不到，请移除后重新添加`);
-  else if (used.some((r) => r.kind !== 'image' && r.source === 'local')) problems.push('参考视频和音频需要用公网链接，本机的文件发不过去');
+  if (used.some((r) => r.source === 'asset')) problems.push(`${platform} 不支持 Flatkey 素材库的素材，请移除后重新添加`);
+  else if (used.some((r) => r.kind !== 'image' && r.source === 'local')) problems.push('参考视频和音频仅支持公网链接');
 
   if (spec.audio) payload.generate_audio = Boolean(form.generateAudio);
   const seed = String(form.seed).trim();
   if (spec.seed && seed !== '') {
     if (/^-?\d+$/.test(seed)) payload.seed = Number(seed);
-    else problems.push('随机种子需要是整数');
+    else problems.push('随机种子须为整数');
   }
   return { payload, problems };
 }
@@ -163,13 +163,13 @@ function buildGrokRequest(form: VideoForm): BuiltRequest {
   const problems: string[] = [];
   const text = form.prompt.trim();
   const payload: Record<string, unknown> = { model: form.model, prompt: text, duration: Number(form.duration), resolution: form.resolution };
-  if (!text) problems.push('请填写提示词');
-  if (form.mode === 'reference') problems.push('这个模型不支持参考生成，请改用文生视频或图生视频');
+  if (!text) problems.push('请输入提示词');
+  if (form.mode === 'reference') problems.push('当前模型不支持参考生成，请改用文生视频或图生视频');
 
   if (form.mode === 'frames') {
     const first = form.frames.first;
     if (!first) problems.push('请添加首帧图片');
-    else if (first.source === 'asset') problems.push('这个模型用不了素材库里的素材，请移除后重新添加首帧');
+    else if (first.source === 'asset') problems.push('当前模型不支持素材库素材，请移除后重新添加首帧');
     else payload.image = { url: first.url };
   } else {
     // 有首帧时画面比例跟着图片走，只有纯文字生成才需要指定。
@@ -185,11 +185,11 @@ export function buildImageRequest(form: ImageForm, refLimit = 0): BuiltRequest {
   const problems: string[] = [];
   const payload: Record<string, unknown> = { model: form.model, prompt, n: Number(form.count) || 1, aspect_ratio: form.ratio };
   if (form.resolution) payload.resolution = form.resolution;
-  if (!prompt) problems.push(refs.length ? '请写下想怎么改这张图' : '请填写提示词');
+  if (!prompt) problems.push(refs.length ? '请输入修改要求' : '请输入提示词');
   if (refs.length) {
-    if (!refLimit) problems.push(`${form.model} 不收参考图，请移除参考图或换一个模型`);
-    else if (refs.length > refLimit) problems.push(`${form.model} 最多收 ${refLimit} 张参考图`);
-    if (refs.some((r) => r.source === 'asset')) problems.push('有参考图来自 Flatkey 的素材库，这里读不到，请移除后重新添加');
+    if (!refLimit) problems.push(`${form.model} 不支持参考图，请移除参考图或更换模型`);
+    else if (refs.length > refLimit) problems.push(`${form.model} 最多支持 ${refLimit} 张参考图`);
+    if (refs.some((r) => r.source === 'asset')) problems.push('不支持 Flatkey 素材库的参考图，请移除后重新添加');
     payload.input_references = refs.map((ref) => ({ type: 'image_url', image_url: { url: ref.url } }));
   }
   return { payload, problems };
@@ -198,7 +198,7 @@ export function buildImageRequest(form: ImageForm, refLimit = 0): BuiltRequest {
 export function buildSpeechRequest(form: SpeechForm): BuiltRequest {
   const text = form.prompt.trim();
   const problems: string[] = [];
-  if (!text) problems.push('请填写要朗读的文字');
+  if (!text) problems.push('请输入朗读文本');
   else if (!form.voiceId) problems.push('请选择音色');
   return { body: { text, voiceId: form.voiceId, voiceName: form.voiceName }, problems };
 }
@@ -208,13 +208,13 @@ export function buildSfxRequest(form: SfxForm): BuiltRequest {
   const body: Record<string, unknown> = { text, influence: Number(form.influence) };
   // 时长选"自动"时不传，由模型决定。
   if (form.duration !== 'auto') body.duration = Number(form.duration);
-  return { body, problems: text ? [] : ['请描述想要的声音'] };
+  return { body, problems: text ? [] : ['请输入音效描述'] };
 }
 
 export function buildMusicRequest(form: MusicForm): BuiltRequest {
   const video = form.video;
   const problems: string[] = [];
-  if (!video) problems.push('请选择要配乐的视频');
-  else if (!((video.duration ?? 0) > 0)) problems.push('没有读到这段视频的时长，请重新选择');
+  if (!video) problems.push('请选择视频');
+  else if (!((video.duration ?? 0) > 0)) problems.push('无法获取视频时长，请重新选择');
   return { body: { video: video?.url, duration: video?.duration }, problems };
 }

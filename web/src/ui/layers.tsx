@@ -66,7 +66,7 @@ export async function copyText(text: string, okMessage = '已复制') {
     await navigator.clipboard.writeText(text);
     toast(okMessage, 'success', 1800);
   } catch {
-    toast('复制失败，请手动选中复制', 'error');
+    toast('复制失败，请手动复制', 'error');
   }
 }
 

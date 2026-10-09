@@ -30,7 +30,7 @@ const VIEWS: { id: ViewId; label: string; icon: IconName; size?: number; stroke?
   { id: 'persons', label: '真人档案', icon: 'userCircle', feature: 'persons' },
 ];
 const NAV_STROKE = 2;
-const NO_KEY = '还没有设置 API Key';
+const NO_KEY = '未配置 API Key';
 
 export function App() {
   const visit = useStore('view');

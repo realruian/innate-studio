@@ -189,10 +189,10 @@ export function videoFormFrom(base: VideoForm, data: VideoData, prompt: string, 
   if (firsts.length || lasts.length) {
     form.mode = 'frames';
     form.frames = { first: firsts[0]?.ref || null, last: lasts[0]?.ref || null };
-    if (firsts.length > 1) problems.push('首帧只能有一张，请把多余的连线改成别的用途或删掉');
-    if (lasts.length > 1) problems.push('尾帧只能有一张，请把多余的连线改成别的用途或删掉');
+    if (firsts.length > 1) problems.push('首帧只能有一张');
+    if (lasts.length > 1) problems.push('尾帧只能有一张');
     if (!firsts.length) problems.push('只有尾帧不够，还需要一张首帧');
-    if (inputs.length > firsts.length + lasts.length) problems.push('首尾帧和参考素材不能一起用：把连线都改成参考图，或者只留首帧、尾帧');
+    if (inputs.length > firsts.length + lasts.length) problems.push('首尾帧与参考素材不能同时使用');
   } else if (inputs.length) {
     form.mode = 'reference';
     for (const input of inputs) form.refs[input.kind].push(input.ref);
