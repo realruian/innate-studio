@@ -19,21 +19,31 @@
 
 ---
 
-> **设计理念**：深色工作台美学（深度参考 Google Antigravity 与 OpenAI Codex）。侧栏纯粹导航，居中一体化创作输入框，全局采用低对比层次与系统无衬线排版。界面本身保持克制中性，将所有视觉焦点留给生成内容本身。
+> **设计理念**：工作台美学（深度参考 Google Antigravity 与 OpenAI Codex）。**默认浅色，原生支持深浅双主题，跟随系统自适应无缝切换**。侧栏纯粹导航，居中一体化创作输入框，全局采用低对比层次与系统无衬线排版。界面本身保持克制中性，将所有视觉焦点留给生成内容本身。
 
 ---
 
 ## 📸 界面预览
 
+> 🌗 **自适应双色主题**：默认浅色，支持深浅双色与系统偏好自适应（下方配图自适应您当前 GitHub 的浅色/深色主题）。
+
 <p align="center">
-  <img src="docs/screenshots/workbench.png" alt="Innate Studio Workbench" width="100%" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/workbench-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="docs/screenshots/workbench-light.png">
+    <img src="docs/screenshots/workbench-light.png" alt="Innate Studio Workbench" width="100%">
+  </picture>
 </p>
-<p align="center"><em>中性暗色多模态创作工作台：居中一体化输入框、多模态参数集约控制与最近生成记录流</em></p>
+<p align="center"><em>多模态创作工作台：居中一体化输入框、多模态参数集约控制与最近生成记录流（默认浅色，支持深浅主题自适应）</em></p>
 
 <br />
 
 <p align="center">
-  <img src="docs/screenshots/canvas.png" alt="Innate Studio Infinite Canvas" width="100%" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/canvas-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="docs/screenshots/canvas-light.png">
+    <img src="docs/screenshots/canvas-light.png" alt="Innate Studio Infinite Canvas" width="100%">
+  </picture>
 </p>
 <p align="center"><em>无限节点画布（React Flow）：文本、图像、视频、音频多节点自由拓扑与流转生成</em></p>
 
@@ -70,9 +80,10 @@
 - **预设工业级技能 (Skills)**：内置「多镜头成片（视频）」、「角色设定图」、「分镜首帧（图片）」等官方模板，写一句简短意图即可由大模型扩写为专业分镜提示词。
 - **模型自适应润色**：根据下游模型规则（Seedance 动态描述规范、Grok 语义理解、ElevenLabs 语音标签）智能重写提示词，支持模型故障自动切换与一键撤销。
 
-### 5. 🔒 本地优先与数据私有化 (Local-First)
-- 所有生成的视频、图片、音频及画布配置均**100% 存储于本机**。
-- API 凭证保存在本地或仅通过环境变量注入，服务严格监听环回接口（`127.0.0.1`），拒绝跨站请求，保障数据绝对安全。
+### 5. 🔒 本地优先与自适应体验 (Local-First & Design)
+- **双主题自适应与极简美学**：默认浅色工作台，原生支持浅色与深色双套视觉体系，根据系统偏好实时自适应平滑切换。
+- **本地存储与数据私有化**：所有生成的视频、图片、音频及画布配置均**100% 存储于本机**。
+- **安全隔离**：API 凭证保存在本地或仅通过环境变量注入，服务严格监听环回接口（`127.0.0.1`），拒绝跨站请求，保障数据绝对安全。
 
 ---
 
