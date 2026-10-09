@@ -1,7 +1,7 @@
 // 一张画布：可以无限平移缩放的桌面，上面摆节点、拉连线。打开时整个窗口都是它，改动之后自动保存。
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { Background, BackgroundVariant, MiniMap, Panel, ReactFlow, ReactFlowProvider, SelectionMode, ViewportPortal, useEdgesState, useNodesState, useReactFlow, useStoreApi, useViewport, type Connection, type Edge, type Node, type NodeChange, type OnConnectEnd, type Viewport } from '@xyflow/react';
+import { Background, BackgroundVariant, MiniMap, Panel, Position, ReactFlow, ReactFlowProvider, SelectionMode, ViewportPortal, getBezierPath, useEdgesState, useNodesState, useReactFlow, useStoreApi, useViewport, type Connection, type Edge, type Node, type NodeChange, type OnConnectEnd, type Viewport } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { api, canvasPath, state, useStore, KINDS as MEDIA } from '../store.ts';
 import { composer, imageRefLimit, traits } from '../composer/state.ts';
@@ -96,6 +96,8 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
   const [hand, setHand] = useState(false);
   const [finding, setFinding] = useState(false);
   const [guides, setGuides] = useState<Guide[]>([]);
+  // 拉线松在空白处之后留在原地的那条线（画布坐标）：菜单开着的时候它一直在，选了节点或者关掉菜单才收。
+  const [loose, setLoose] = useState<{ fromX: number; fromY: number; toX: number; toY: number; downstream: boolean } | null>(null);
   // 保存到哪一步了：saved 已保存，saving 有改动还没存上，failed 没存上（点一下重试）。
   const [saving, setSaving] = useState<'saved' | 'saving' | 'failed'>('saved');
   // 正被拖着、在吸附的那个节点。
@@ -110,6 +112,8 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
   const dropAt = useRef<{ x: number; y: number } | undefined>(undefined);
   const past = useRef<Snap[]>([]);
   const future = useRef<Snap[]>([]);
+  // 刚按住节点时画布的样子：真的拖动了才放进撤销里。
+  const grabbed = useRef<Snap | null>(null);
   const lastSaved = useRef('');
   const pending = useRef('');
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -302,16 +306,25 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
   );
 
   // 在鼠标的位置弹出「加什么节点」的菜单。菜单要贴着一个元素显示，这里用一个看不见的点。
+  // offer：菜单里列哪几种节点。off 是这一种现在接不了的原因，有它就显示成灰的。heading 是菜单最上面那行字。
   const menuAt = useCallback(
-    (x: number, y: number, kinds: NodeKind[], link?: { from?: Node; also?: Node[]; to?: Node }, place?: { x: number; y: number }) => {
+    (x: number, y: number, offer: { kind: NodeKind; off?: string }[], link?: { from?: Node; also?: Node[]; to?: Node }, place?: { x: number; y: number }, heading?: string, onClose?: () => void) => {
       const el = anchor.current!;
       el.style.left = `${x}px`;
       el.style.top = `${y}px`;
       // place 是新节点放哪；没给就放在菜单弹出的位置。
       const at = place || flow.screenToFlowPosition({ x, y });
-      // 接在左边的节点，右边缘要落在松手的位置附近。
-      if (link?.to && !place) at.x -= 320;
-      openMenu(el, { label: '添加节点', items: kinds.map((kind) => ({ value: kind, label: NODE_LABELS[kind] })), onSelect: (kind) => addNode(kind as NodeKind, at, link) });
+      // 从线头接出来的节点，框的中线要对着线头：线是连到框的中间的。
+      if (!place && link) at.y -= TITLE_ROOM + BOX_HEIGHT / 2;
+      // 接在左边的节点，右边缘要落在松手的位置。
+      if (link?.to && !place) at.x -= nodeWidth(offer[0]?.kind || 'image');
+      openMenu(el, {
+        label: '添加节点',
+        heading,
+        items: offer.map(({ kind, off }) => ({ value: kind, label: NODE_LABELS[kind], icon: NODE_ICONS[kind], disabled: Boolean(off), title: off || null })),
+        onSelect: (kind) => addNode(kind as NodeKind, link?.to && !place ? { x: at.x + nodeWidth(offer[0]?.kind || 'image') - nodeWidth(kind as NodeKind), y: at.y } : at, link),
+        onClose,
+      });
     },
     [addNode, flow],
   );
@@ -863,7 +876,7 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
 
   // 问要在一个节点的哪一侧接一个什么节点，建好并连上。右边的加号接的是下游，左边的加号接的是上游。
   const extend = useCallback(
-    (nodeId: string, downstream: boolean, x: number, y: number, beside = false) => {
+    (nodeId: string, downstream: boolean, x: number, y: number, beside = false, onClose?: () => void) => {
       const node = flow.getNode(nodeId);
       if (!node) return;
       // beside：新节点和这个节点顶边对齐，隔开一段摆在左边或右边；那里有节点了就往下错开。
@@ -876,10 +889,23 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
       const imageOk = downstream
         ? imageRefLimit(newNodeData('image', { form: composer.form, image: composer.studio.image, speech: composer.studio.speech }).model as string) > 0
         : flow.getEdges().filter((edge) => edge.target === node.id && (edge.data as unknown as LinkData)?.kind === 'image').length < imageRefLimit((node.data as { model?: string }).model);
-      const kinds = (downstream ? targetsOf(node.type as NodeKind) : sourcesOf(node.type as NodeKind)).filter((kind) => !(kind === 'image' && node.type === 'image' && !imageOk));
+      // 四种节点都列出来，接不了的是灰的，指上去说为什么。
+      const able = downstream ? targetsOf(node.type as NodeKind) : sourcesOf(node.type as NodeKind);
+      const offer = KINDS.map((kind) => ({
+        kind,
+        off: !able.includes(kind)
+          ? downstream
+            ? `${NODE_LABELS[node.type as NodeKind]}节点的内容给不了${NODE_LABELS[kind]}节点`
+            : `${NODE_LABELS[node.type as NodeKind]}节点用不了${NODE_LABELS[kind]}节点的内容`
+          : kind === 'image' && node.type === 'image' && !imageOk
+            ? downstream
+              ? '默认的图片模型不收参考图'
+              : '这个节点的模型不收参考图，或者已经连满了'
+            : undefined,
+      }));
       // 选中了好几个节点、从其中一个的右边接出去：新节点把选中的这些一起接上。
       const also = downstream && node.selected ? flow.getNodes().filter((n) => n.selected && n.id !== node.id) : [];
-      menuAt(x, y, kinds, downstream ? { from: node, also } : { to: node }, place);
+      menuAt(x, y, offer, downstream ? { from: node, also } : { to: node }, place, downstream ? '引用该节点生成' : '接一个节点进来', onClose);
     },
     [flow, menuAt],
   );
@@ -889,9 +915,14 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
     (event, link) => {
       if (link.isValid || link.toNode || !link.fromNode) return;
       const point = 'changedTouches' in event ? event.changedTouches[0] : event;
-      extend(link.fromNode.id, link.fromHandle?.type === 'source', point.clientX, point.clientY);
+      const downstream = link.fromHandle?.type === 'source';
+      // 线留在原地，菜单贴着线头出来；选了节点或者关掉菜单，这条线才收。
+      const from = link.fromNode;
+      const end = flow.screenToFlowPosition({ x: point.clientX, y: point.clientY });
+      setLoose({ fromX: from.internals.positionAbsolute.x + (downstream ? from.measured.width || 0 : 0), fromY: from.internals.positionAbsolute.y + TITLE_ROOM + BOX_HEIGHT / 2, toX: end.x, toY: end.y, downstream });
+      extend(from.id, downstream, point.clientX, point.clientY, false, () => setLoose(null));
     },
-    [extend],
+    [extend, flow],
   );
 
   // 点项目名旁边的箭头：列出别的画布，点一个就先存好当前的再换过去；最下面是新建。
@@ -933,6 +964,18 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
 
   const actions = useMemo(() => ({ snap, addInput, ungroup, saveWorkflow, unstack, addBeside, addNodeBeside, continueVideo }), [snap, addInput, ungroup, saveWorkflow, unstack, addBeside, addNodeBeside, continueVideo]);
   const shown = useMemo(() => framed(nodes), [nodes]);
+  // 参考线画满整个视野：横线从窗口最左到最右，竖线从最上到最下。同一条线只画一次。
+  const view = useViewport();
+  const spanned = useMemo(() => {
+    const box = wrap.current?.getBoundingClientRect();
+    if (!box || !guides.length) return [];
+    const left = -view.x / view.zoom;
+    const top = -view.y / view.zoom;
+    const seen = new Set<string>();
+    return guides
+      .map((line) => (line.y1 === line.y2 ? { x1: left, y1: line.y1, x2: left + box.width / view.zoom, y2: line.y1 } : { x1: line.x1, y1: top, x2: line.x1, y2: top + box.height / view.zoom }))
+      .filter((line) => !seen.has(`${line.x1},${line.y1},${line.x2},${line.y2}`) && seen.add(`${line.x1},${line.y1},${line.x2},${line.y2}`));
+  }, [guides, view.x, view.y, view.zoom]);
   // 每种颜色标了哪些节点。收在一叠里的不算。
   const pinned = useMemo(() => {
     const by = Object.fromEntries(PINS.map((pin) => [pin, [] as Node[]])) as Record<Pin, Node[]>;
@@ -950,7 +993,7 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
         // 50% 以下不再抵消：名字和加号跟着画布一起缩小，不然会比节点本身还大。
         // --ring、--ring-gap 是选中那圈线的粗细和间隔（画布坐标）：屏幕上 100% 时是 1.5 和 3，缩小时收到 1 和 1 为止。
         style={{ '--inv': inv, '--zoom': 1 / inv, '--ring': `${Math.min(1.5, Math.max(1, 1.5 * zoom)) / zoom}px`, '--ring-gap': `${Math.min(3, Math.max(1, 3 * zoom)) / zoom}px` } as CSSProperties}
-        onDoubleClick={(e) => (e.target as Element).classList.contains('react-flow__pane') && menuAt(e.clientX, e.clientY, KINDS)}
+        onDoubleClick={(e) => (e.target as Element).classList.contains('react-flow__pane') && menuAt(e.clientX, e.clientY, KINDS.map((kind) => ({ kind })))}
         onClick={(e) => {
           // 直接点一下加号（没有拖动）：菜单出在加号外侧。
           const port = (e.target as Element).closest<HTMLElement>('.cnode-port');
@@ -981,8 +1024,22 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
           onConnect={onConnect}
           onConnectEnd={onConnectEnd}
           isValidConnection={isValidConnection}
-          onNodeDragStart={snap}
-          onNodeDragStop={() => setGuides([])}
+          // 按下就算开始拖，节点从第一下就跟着鼠标走，不丢开头那一小段。
+          // 这样点一下也会被当成「开始拖」，所以撤销用的那一下先记着，真的挪动了才算数。
+          nodeDragThreshold={0}
+          onNodeDragStart={() => (grabbed.current = { nodes: flow.getNodes(), edges: flow.getEdges() })}
+          onNodeDrag={() => {
+            if (!grabbed.current) return;
+            past.current.push(grabbed.current);
+            if (past.current.length > MAX_UNDO) past.current.shift();
+            future.current = [];
+            grabbed.current = null;
+            setUndoDepth((n) => n + 1);
+          }}
+          onNodeDragStop={() => {
+            grabbed.current = null;
+            setGuides([]);
+          }}
           connectionLineComponent={DragLine}
           onBeforeDelete={async ({ nodes: gone, edges: cut }) => {
             snap();
@@ -1026,9 +1083,16 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
           {guides.length > 0 && (
             <ViewportPortal>
               <svg className="canvas-guides" aria-hidden="true">
-                {guides.map((line, index) => (
-                  <line key={index} {...line} />
+                {spanned.map((line) => (
+                  <line key={`${line.x1},${line.y1},${line.x2},${line.y2}`} {...line} />
                 ))}
+              </svg>
+            </ViewportPortal>
+          )}
+          {loose && (
+            <ViewportPortal>
+              <svg className="canvas-guides" aria-hidden="true">
+                <path className="canvas-loose" d={getBezierPath({ sourceX: loose.fromX, sourceY: loose.fromY, sourcePosition: loose.downstream ? Position.Right : Position.Left, targetX: loose.toX, targetY: loose.toY, targetPosition: loose.downstream ? Position.Left : Position.Right })[0]} />
               </svg>
             </ViewportPortal>
           )}

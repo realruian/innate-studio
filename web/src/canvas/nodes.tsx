@@ -54,10 +54,11 @@ function useAlone(selected?: boolean) {
   return Boolean(selected) && count === 1;
 }
 
-function Frame({ id, kind, no, pins = [], selected, width, tools, panel, children }: { id: string; kind: NodeKind; no?: number; pins?: Pin[]; selected?: boolean; width: number; tools?: ReactNode; panel: ReactNode; children: ReactNode }) {
+// dragging：正被拖着走。这时候不显示输入面板和名字行右端的操作，松手再出来，拖起来才轻。
+function Frame({ id, kind, no, pins = [], selected, dragging, width, tools, panel, children }: { id: string; kind: NodeKind; no?: number; pins?: Pin[]; selected?: boolean; dragging?: boolean; width: number; tools?: ReactNode; panel: ReactNode; children: ReactNode }) {
   const flow = useReactFlow();
-  const alone = useAlone(selected);
-  // 正从别的节点拉一条线过来：这个节点接得住，就把整个框变成落点，不用对准小加号；接不住就暗下去。
+  const alone = useAlone(selected) && !dragging;
+  // 正从别的节点拉一条线过来：这个节点接得住，就把整个框变成落点，不用对准小加号。
   // 从右边的加号拉出来的线要找下游，从左边的加号拉出来的要找上游。
   const link = useConnection();
   const other = link.inProgress && link.fromNode.id !== id ? (link.fromNode.type as NodeKind) : null;
@@ -67,7 +68,7 @@ function Frame({ id, kind, no, pins = [], selected, width, tools, panel, childre
   const remeasure = useUpdateNodeInternals();
   useEffect(() => remeasure(id), [fits, wants]);
   return (
-    <div className={`cnode cnode-${kind} ${selected ? 'selected' : ''} ${other && !fits ? 'is-dimmed' : ''}`} style={{ width }}>
+    <div className={`cnode cnode-${kind} ${selected ? 'selected' : ''}`} style={{ width }}>
       {/* 名字在左，只选中这一个节点时右端是它的几个操作（上传、看详情）。删除用键盘或右键菜单。 */}
       <div className="cnode-title">
         <span className="cnode-name">
@@ -87,12 +88,8 @@ function Frame({ id, kind, no, pins = [], selected, width, tools, panel, childre
         )}
       </div>
       <div className="cnode-box">{children}</div>
-      <Handle type="target" position={Position.Left} className="cnode-port">
-        <Icon name="plus" size={12} />
-      </Handle>
-      <Handle type="source" position={Position.Right} className="cnode-port">
-        <Icon name="plus" size={12} />
-      </Handle>
+      <Port side="target" />
+      <Port side="source" />
       {fits && <Handle id="body" type={wants} position={wants === 'target' ? Position.Left : Position.Right} className="cnode-drop" isConnectableStart={false} />}
       {/* 输入面板画在画布的缩放之外，所以大小不变；位置仍然贴着节点。 */}
       <NodeToolbar isVisible={alone} position={Position.Bottom} offset={20}>
@@ -120,6 +117,32 @@ function PinSheet({ value, onChange }: { value: Pin[]; onChange: (pins: Pin[]) =
         无
       </button>
     </div>
+  );
+}
+
+// 连接点：框的左右两边各有一块看不见的感应区（屏幕上 52 见方，贴着框边），里面一个小加号。
+// 鼠标进了感应区，加号就吸到鼠标的位置并放大一点；在感应区里任何地方按下都能拉线，点一下是在这一侧接一个新节点。
+// 加号平时藏着，鼠标移到节点上或选中节点时才出现；感应区一直在。
+const PORT_ZONE = 52;
+function Port({ side }: { side: 'target' | 'source' }) {
+  const dot = useRef<HTMLSpanElement>(null);
+  // 加号挪到鼠标的位置。感应区在屏幕上的大小不变（样式里把画布的缩放抵消了），所以按它量出来的大小换算成它自己的 52 像素。
+  const follow = (e: React.PointerEvent<HTMLDivElement>) => {
+    const zone = e.currentTarget.getBoundingClientRect();
+    const at = (client: number, start: number, size: number) => Math.min(PORT_ZONE - 9, Math.max(9, ((client - start) / size) * PORT_ZONE));
+    dot.current!.style.left = `${at(e.clientX, zone.left, zone.width)}px`;
+    dot.current!.style.top = `${at(e.clientY, zone.top, zone.height)}px`;
+  };
+  const rest = () => {
+    dot.current!.style.left = '';
+    dot.current!.style.top = '';
+  };
+  return (
+    <Handle type={side} position={side === 'target' ? Position.Left : Position.Right} className="cnode-port" onPointerMove={follow} onPointerLeave={rest}>
+      <span ref={dot} className="cnode-plus">
+        <Icon name="plus" size={10} />
+      </span>
+    </Handle>
   );
 }
 
@@ -340,9 +363,9 @@ function Result({ kind, data, onShape }: { kind: NodeKind; data: MediaData; onSh
   if (data.upload && kind === 'image') return <img className="cnode-pic" src={data.upload.url} alt={data.upload.name} draggable={false} onLoad={measure} />;
   if (data.upload && kind === 'audio') {
     return (
-      <div className={`cnode-sound ${INERT}`}>
+      <Grabbable className="cnode-sound">
         <AudioPlayer src={data.upload.url} kind="上传的音频" text={data.upload.name} />
-      </div>
+      </Grabbable>
     );
   }
   if (data.upload) return <Clip src={data.upload.url} label={data.upload.name} onShape={onShape} />;
@@ -361,13 +384,49 @@ function Result({ kind, data, onShape }: { kind: NodeKind; data: MediaData; onSh
   if (kind === 'image') return <img className="cnode-pic" src={record.mediaUrl} alt={record.prompt || '生成的图片'} draggable={false} onLoad={measure} />;
   if (kind === 'video') return <Clip src={record.mediaUrl} label={record.prompt || '生成的视频'} onShape={onShape} />;
   return (
-    <div className={`cnode-sound ${INERT}`}>
+    <Grabbable className="cnode-sound">
       <AudioPlayer src={record.mediaUrl} kind={record.tool === 'sfx' ? '音效' : `语音 · ${record.payload?.voice_name || ''}`} text={record.prompt} />
-    </div>
+    </Grabbable>
   );
 }
 
 // 视频读到尺寸之后报告它实际的宽高比。播放器是现成的组件，这里从它外面去听那个视频元素。
+// 视频、音频的播放器放在这里面。整块可以抓着拖动节点；只有进度条和按钮那一条不拖（在上面按住是调进度、点按钮）。
+// 拖完松手时浏览器还会补一个点击，会被播放器当成「点一下播放」；这里把拖动之后的那一下点击吃掉。
+function Grabbable({ className, children, boxRef }: { className: string; children: ReactNode; boxRef?: React.RefObject<HTMLDivElement | null> }) {
+  const own = useRef<HTMLDivElement>(null);
+  const box = boxRef || own;
+  const from = useRef<{ x: number; y: number } | null>(null);
+  const moved = useRef(false);
+  useEffect(() => {
+    for (const bar of box.current?.querySelectorAll('.player-bar, .audio-controls') || []) bar.classList.add('nodrag');
+  });
+  return (
+    <div
+      ref={box}
+      className={`${className} nowheel`}
+      onPointerDownCapture={(e) => {
+        from.current = { x: e.clientX, y: e.clientY };
+        moved.current = false;
+      }}
+      onPointerMoveCapture={(e) => {
+        if (from.current && Math.hypot(e.clientX - from.current.x, e.clientY - from.current.y) > 4) moved.current = true;
+      }}
+      onPointerUpCapture={() => {
+        from.current = null;
+      }}
+      onClickCapture={(e) => {
+        if (!moved.current) return;
+        moved.current = false;
+        e.stopPropagation();
+        e.preventDefault();
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
 function Clip({ src, label, onShape }: { src: string; label: string; onShape?: (aspect: number) => void }) {
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -379,9 +438,9 @@ function Clip({ src, label, onShape }: { src: string; label: string; onShape?: (
     return () => video.removeEventListener('loadedmetadata', measure);
   }, [src]);
   return (
-    <div ref={box} className={`cnode-clip ${INERT}`}>
+    <Grabbable boxRef={box} className="cnode-clip">
       <VideoPlayer src={src} label={label} />
-    </div>
+    </Grabbable>
   );
 }
 
@@ -545,7 +604,7 @@ const promptHint = (linked: boolean, own: string) => (linked ? '已连上文本�
 // ---------- 文本 ----------
 
 // 框里是内容，双击进去改。下面的面板是给文本模型提要求：写好的内容会放进框里，连进来的文本节点和框里已有的内容当参考。
-export function TextNode({ id, data: raw, selected }: NodeProps) {
+export function TextNode({ id, data: raw, selected, dragging }: NodeProps) {
   const data = raw as unknown as TextData;
   const flow = useReactFlow();
   const inputs = useInputs(id);
@@ -571,6 +630,7 @@ export function TextNode({ id, data: raw, selected }: NodeProps) {
     <Frame
       id={id}
       kind="text"
+      dragging={dragging}
       no={data.no}
       pins={(data as { pin?: Pin[] }).pin}
       selected={selected}
@@ -616,7 +676,7 @@ export function TextNode({ id, data: raw, selected }: NodeProps) {
 
 // ---------- 图片 ----------
 
-export function ImageNode({ id, data: raw, selected }: NodeProps) {
+export function ImageNode({ id, data: raw, selected, dragging }: NodeProps) {
   const data = raw as unknown as ImageData;
   const flow = useReactFlow();
   const file = useRef<HTMLInputElement>(null);
@@ -648,6 +708,7 @@ export function ImageNode({ id, data: raw, selected }: NodeProps) {
     <Frame
       id={id}
       kind="image"
+      dragging={dragging}
       no={data.no}
       pins={(data as { pin?: Pin[] }).pin}
       selected={selected}
@@ -813,7 +874,7 @@ function Refs({ id, kind, model = '', limit = 0 }: { id: string; kind: NodeKind;
   );
 }
 
-export function VideoNode({ id, data: raw, selected }: NodeProps) {
+export function VideoNode({ id, data: raw, selected, dragging }: NodeProps) {
   const data = raw as unknown as VideoData;
   const flow = useReactFlow();
   const inputs = useInputs(id);
@@ -829,6 +890,7 @@ export function VideoNode({ id, data: raw, selected }: NodeProps) {
     <Frame
       id={id}
       kind="video"
+      dragging={dragging}
       no={data.no}
       pins={(data as { pin?: Pin[] }).pin}
       selected={selected}
@@ -861,7 +923,7 @@ export function VideoNode({ id, data: raw, selected }: NodeProps) {
 
 // ---------- 音频 ----------
 
-export function AudioNode({ id, data: raw, selected }: NodeProps) {
+export function AudioNode({ id, data: raw, selected, dragging }: NodeProps) {
   const data = raw as unknown as AudioData;
   const flow = useReactFlow();
   const linked = useInputs(id).some((i) => i.link.kind === 'text');
@@ -895,6 +957,7 @@ export function AudioNode({ id, data: raw, selected }: NodeProps) {
     <Frame
       id={id}
       kind="audio"
+      dragging={dragging}
       no={data.no}
       pins={(data as { pin?: Pin[] }).pin}
       selected={selected}
@@ -1007,10 +1070,10 @@ function Mini({ node }: { node: Node }) {
 
 // 一叠：框里是最上面那个节点的画面，后面露出两层边，右上角写着一共几个。
 // 选中它，下面展开一个画廊：点其中一个把它取回画布；右上角可以整叠摊开。
-export function StackNode({ id, data: raw, selected }: NodeProps) {
+export function StackNode({ id, data: raw, selected, dragging }: NodeProps) {
   const data = raw as unknown as StackData;
   const flow = useReactFlow();
-  const alone = useAlone(selected);
+  const alone = useAlone(selected) && !dragging;
   const { unstack } = useContext(CanvasActions);
   // 成员是藏着的节点，它们变了这里也要跟着变。
   const all = useFlowStore((s) => s.nodes);
@@ -1104,8 +1167,10 @@ export function LinkEdge({ id, source, target, sourceX, sourceY, targetX, target
 
 // 正在拉的那条线：一直跟着鼠标走，拖到节点上也不提前吸过去，松手才连上。能不能连，看那个节点有没有浮起来。
 // 这条线画在画布坐标里，而 React Flow 给的 pointer 是屏幕上的位置，要按当前的平移和缩放换算过来，不然只有 100%、没平移过的时候才对得上。
-export function DragLine({ fromX, fromY, fromPosition, pointer }: ConnectionLineComponentProps) {
+export function DragLine({ fromX, fromY, fromNode, fromHandle, fromPosition, pointer }: ConnectionLineComponentProps) {
   const [x, y, zoom] = useFlowStore((s) => s.transform);
-  const [path] = getBezierPath({ sourceX: fromX, sourceY: fromY, sourcePosition: fromPosition, targetX: (pointer.x - x) / zoom, targetY: (pointer.y - y) / zoom, targetPosition: fromPosition === Position.Right ? Position.Left : Position.Right });
+  // 线从框的边上出发，不从感应区的外沿出发。
+  const startX = fromNode ? fromNode.internals.positionAbsolute.x + (fromHandle?.type === 'source' ? fromNode.measured.width || 0 : 0) : fromX;
+  const [path] = getBezierPath({ sourceX: startX, sourceY: fromY, sourcePosition: fromPosition, targetX: (pointer.x - x) / zoom, targetY: (pointer.y - y) / zoom, targetPosition: fromPosition === Position.Right ? Position.Left : Position.Right });
   return <path d={path} fill="none" className="react-flow__connection-path" />;
 }
