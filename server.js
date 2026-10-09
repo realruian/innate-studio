@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
 // Innate Studio 本地服务：托管页面、保管 API Key、转发请求给模型平台、轮询任务并保存历史。
-// 平台有三个，在设置里切换：Flatkey 能生成视频（Seedance、Grok）、图片、音频（语音、音效、配乐）；OpenRouter 能生成视频、图片和语音；
-// 火山方舟是字节官方的接口，能生成视频（Seedance）和图片（Seedream）。三边都能润色提示词。
+// 平台有两个，在设置里切换：Flatkey 能生成视频（Seedance、Grok）、图片、音频（语音、音效、配乐）；
+// 火山方舟是字节官方的接口，能生成视频（Seedance）和图片（Seedream）。两边都能润色提示词。
 // 服务本身不依赖第三方包。页面是 web/ 里的 React 源码，用 npm run build 构建到 web/dist 之后由这里托管。
 
 import http from 'node:http';
@@ -12,7 +12,7 @@ import crypto from 'node:crypto';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
-import { videoFamilyOf, polishGuide, POLISH_KINDS, PROVIDERS, isProvider, videoSpecOf, ARK_VIDEO_MODELS, ARK_IMAGE_MODELS, ARK_TEXT_MODELS, isBorrowedImageModel } from './shared/models.ts';
+import { videoFamilyOf, polishGuide, POLISH_KINDS, PROVIDERS, isProvider, ARK_VIDEO_MODELS, ARK_IMAGE_MODELS, ARK_TEXT_MODELS } from './shared/models.ts';
 import { OFFICIAL_SKILLS } from './shared/skills.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -23,7 +23,6 @@ const trimSlash = (url) => url.replace(/\/+$/, '');
 // 每个平台各自的接口地址、Key 的环境变量名、Key 存在 config.json 里的哪个字段。平台的名字和各自能用的功能登记在 shared/models.ts。
 const UPSTREAMS = {
   flatkey: { baseUrl: trimSlash(process.env.FLATKEY_BASE_URL || 'https://router.flatkey.ai'), envKey: 'FLATKEY_API_KEY', configKey: 'apiKey' },
-  openrouter: { baseUrl: trimSlash(process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api'), envKey: 'OPENROUTER_API_KEY', configKey: 'openrouterKey' },
   // 火山方舟的地址里已经带着版本号，所以它的接口路径前面没有 /v1。
   ark: { baseUrl: trimSlash(process.env.ARK_BASE_URL || 'https://ark.cn-beijing.volces.com/api/v3'), envKey: 'ARK_API_KEY', configKey: 'arkKey' },
 };
@@ -41,15 +40,13 @@ const POLL_INTERVAL_MS = 6000;
 const MAX_PENDING_MS = Number(process.env.SEEDANCE_PENDING_LIMIT_MS) || 6 * 60 * 60 * 1000;
 const DOWNLOAD_RETRY_MS = 30000;
 const MAX_DOWNLOAD_ATTEMPTS = 6;
-const DEFAULT_MODELS = { flatkey: ['seedance-2.0', 'seedance-2.0-fast'], openrouter: ['bytedance/seedance-2.5', 'bytedance/seedance-2.0'], ark: Object.keys(ARK_VIDEO_MODELS) };
-// 语音两边用的是同一个 ElevenLabs 模型，只是型号的写法不同。
-const SPEECH_MODEL = { flatkey: 'eleven_multilingual_v2', openrouter: 'elevenlabs/eleven-multilingual-v2' };
+const DEFAULT_MODELS = { flatkey: ['seedance-2.0', 'seedance-2.0-fast'], ark: Object.keys(ARK_VIDEO_MODELS) };
+const SPEECH_MODEL = 'eleven_multilingual_v2';
 const SFX_MODEL = 'eleven_sound_v1';
 const MUSIC_MODEL = 'sonilo-video-to-music';
 // 润色提示词只需要少数几个文本模型：按这个顺序，取账号里有的。
 const POLISH_MODELS = {
   flatkey: ['claude-haiku-5-5', 'claude-sonnet-5-5', 'claude-opus-5-5', 'glm-5.3', 'grok-4.7'],
-  openrouter: ['anthropic/claude-haiku-5.5', 'anthropic/claude-sonnet-5.5', 'anthropic/claude-opus-5.5', 'z-ai/glm-5.3', 'x-ai/grok-4.7'],
   ark: ARK_TEXT_MODELS,
 };
 const MAX_IMAGES = 4;
@@ -98,7 +95,7 @@ const badKeyMessage = (provider) => {
 
 // 当前用哪个平台。没选过就是 Flatkey。
 const currentProvider = () => (isProvider(config.provider) ? config.provider : 'flatkey');
-// 一条记录是在哪个平台提交的。加这个字段之前的记录都是 Flatkey 的。
+// 一条记录是在哪个平台提交的。加这个字段之前的记录都是 Flatkey 的；已经拿掉的平台（OpenRouter）的记录也落到这里，它们在启动时已经标成不再查询。
 const providerOf = (item) => (isProvider(item.provider) ? item.provider : 'flatkey');
 const labelOf = (provider) => PROVIDERS[provider].label;
 
@@ -263,11 +260,10 @@ function applyTaskState(item, data) {
   const status = STATUS_ALIASES[String(data.status || '').toLowerCase()];
   if (status) item.status = status;
   if (typeof data.progress === 'number') item.progress = data.progress;
-  // OpenRouter 的用量只有一个以美元计的 cost。
-  if (data.usage) item.usage = typeof data.usage.cost === 'number' ? { cost_usd: data.usage.cost } : data.usage;
+  if (data.usage) item.usage = data.usage;
   if (data.completed_at) item.completedAt = data.completed_at * 1000;
-  // 视频的下载地址在 metadata.url，配乐的在 audio[0].url；OpenRouter 的在 unsigned_urls[0]，火山方舟的在 content.video_url。
-  const resultUrl = data.metadata?.url || data.audio?.[0]?.url || data.unsigned_urls?.[0] || data.content?.video_url;
+  // 视频的下载地址在 metadata.url，配乐的在 audio[0].url；火山方舟的在 content.video_url。
+  const resultUrl = data.metadata?.url || data.audio?.[0]?.url || data.content?.video_url;
   if (resultUrl) item.remoteUrl = resultUrl;
   if (item.status === 'completed') {
     item.progress = 100;
@@ -287,7 +283,7 @@ function applyTaskState(item, data) {
 }
 
 // 每个平台提交和查询视频任务的接口路径。
-const VIDEO_TASKS_PATH = { flatkey: '/v1/videos', openrouter: '/v1/videos', ark: '/contents/generations/tasks' };
+const VIDEO_TASKS_PATH = { flatkey: '/v1/videos', ark: '/contents/generations/tasks' };
 
 const polling = new Set();
 const downloading = new Set();
@@ -337,7 +333,7 @@ async function downloadResult(item) {
     const { baseUrl } = UPSTREAMS[provider];
     const url = new URL(item.remoteUrl, baseUrl);
     const headers = {};
-    // 只在提交这条任务的平台自己的域名下才带上 Key，避免把 Key 发给别的主机。OpenRouter 的结果地址必须带 Key 才能下载。
+    // 只在提交这条任务的平台自己的域名下才带上 Key，避免把 Key 发给别的主机。
     if (url.origin === new URL(baseUrl).origin && apiKey(provider)) headers.Authorization = `Bearer ${apiKey(provider)}`;
     const res = await fetch(url, { headers, signal: AbortSignal.timeout(10 * 60 * 1000) });
     if (!res.ok || !res.body) throw new Error(`下载返回 ${res.status}`);
@@ -423,6 +419,16 @@ function runDirect(items, work) {
     .finally(saveHistory);
 }
 
+// OpenRouter 这个平台已经从应用里拿掉了。以前在它上面提交的记录留着，但没跑完的没法再查，结果没存到本机的也下不回来，这里一次标清楚。
+for (const item of history) {
+  if (item.provider !== 'openrouter' || item.direct) continue;
+  if (isPending(item)) {
+    item.status = 'failed';
+    item.error = { message: 'OpenRouter 已经从应用里移除，这条任务没法再查询。', code: 'provider_removed' };
+  }
+  if (!item.localFile) item.downloadAttempts = MAX_DOWNLOAD_ATTEMPTS;
+}
+
 // 这类请求跟着进程走。服务重启后没法接着等，上次没跑完的直接标为中断。
 for (const item of history) {
   if (!item.direct || !isPending(item)) continue;
@@ -447,7 +453,7 @@ function localMediaFile(url) {
   return file;
 }
 
-// 只存在本机的图片要直接放进请求：Flatkey 上 Grok 的首帧（image），OpenRouter 的首尾帧（frame_images）和参考图（input_references）。
+// 只存在本机的图片要直接放进请求：Flatkey 上 Grok 的首帧（image），火山方舟的首尾帧（frame_images）和参考图（input_references）。
 // 页面传来的是本机地址，发给上游前换成 data URL；记录里存的仍是原来的短地址。
 function withLocalImages(payload) {
   const inline = (holder) => {
@@ -462,7 +468,7 @@ function withLocalImages(payload) {
   for (const field of ['frame_images', 'input_references']) {
     if (!Array.isArray(payload[field])) continue;
     next[field] = payload[field].map((entry) => {
-      // OpenRouter 的参考视频和音频只收公网的 https 链接（2026-10-09 实测：内嵌数据会被拒绝）。
+      // 参考视频和音频只收公网的 https 链接：火山方舟的参考视频不能内嵌，这里音频也按同样的规矩办。
       if (entry?.video_url || entry?.audio_url) {
         const url = (entry.video_url || entry.audio_url).url;
         if (!/^https:\/\//i.test(url || '')) throw new HttpError(400, 'invalid_request', '参考视频和音频需要是公网能直接访问的 https 链接');
@@ -693,50 +699,6 @@ route('PUT', /^\/api\/provider$/, async ({ req }) => {
   return keyState();
 });
 
-// OpenRouter 每个图片模型收哪些画面比例。提交生图时，模型不收的比例不发。读到模型列表之后才有。
-let openrouterImageRatios = {};
-// OpenRouter 每个图片模型最多收几张参考图（图生图）。0 是不收。
-let openrouterImageRefs = {};
-
-// OpenRouter 的视频、图片模型各有专门的列表接口，里面写着每个模型支持什么：视频的整理成 videoSpecs，图片的比例整理成 imageRatios，一起交给页面。
-// 视频里 Seedance 排在前面，新的型号在前；图片里 Grok 排在前面（和 Flatkey 上默认用的是同一个）；其余按名字排。
-async function openrouterModels() {
-  const none = { imageModels: [], audio: { speech: false, sfx: false, music: false } };
-  try {
-    const get = (pathname) => callUpstream('GET', pathname, { timeoutMs: 20000 });
-    const [videos, texts, images, speech] = await Promise.all([get('/v1/videos/models'), get('/v1/models'), get('/v1/images/models'), get('/v1/models?output_modalities=speech')]);
-    const imageRatios = {};
-    const imageRefs = {};
-    for (const model of listOf(images.data)) {
-      if (!model?.id) continue;
-      imageRatios[model.id] = (model.supported_parameters?.aspect_ratio?.values || []).map(String);
-      imageRefs[model.id] = Number(model.supported_parameters?.input_references?.max) || 0;
-    }
-    openrouterImageRatios = imageRatios;
-    openrouterImageRefs = imageRefs;
-    const isGrokImage = (id) => /\/grok-imagine-image/i.test(id);
-    const rest = {
-      imageModels: Object.keys(imageRatios).sort((a, b) => isGrokImage(b) - isGrokImage(a) || a.localeCompare(b)),
-      imageRatios,
-      imageRefs,
-      audio: { speech: listOf(speech.data).some((m) => m?.id === SPEECH_MODEL.openrouter), sfx: false, music: false },
-    };
-    const videoSpecs = {};
-    for (const model of listOf(videos.data)) {
-      const spec = model?.id && videoSpecOf(model);
-      if (spec) videoSpecs[model.id] = spec;
-    }
-    const ids = new Set(listOf(texts.data).map((m) => m?.id));
-    polishAvailable = POLISH_MODELS.openrouter.filter((id) => ids.has(id));
-    const isSeedance = (id) => videoFamilyOf(id) === 'seedance';
-    const models = Object.keys(videoSpecs).sort((a, b) => isSeedance(b) - isSeedance(a) || (isSeedance(a) ? b.localeCompare(a) : a.localeCompare(b)));
-    if (models.length) return { models, videoSpecs, polishModels: polishAvailable, ...rest, source: 'remote' };
-    return { models: DEFAULT_MODELS.openrouter, polishModels: polishAvailable, ...rest, source: 'default', note: 'OpenRouter 的模型列表里没有可用的视频模型，下面显示的是默认型号。' };
-  } catch (err) {
-    return { models: DEFAULT_MODELS.openrouter, polishModels: [], ...none, source: 'default', error: err.message, errorCode: err.code };
-  }
-}
-
 // 火山方舟没有能用 API Key 读的模型列表，型号登记在 shared/models.ts。
 // 这里只查一次最近的任务列表，用来确认 Key 能用；列表里有哪些任务不关心。账号有没有开通某个模型，要到提交时才知道。
 async function arkModels() {
@@ -747,20 +709,6 @@ async function arkModels() {
     imageRefs[id] = refs;
   }
   const rest = { imageModels: Object.keys(ARK_IMAGE_MODELS), imageRatios, imageRefs, audio: { speech: false, sfx: false, music: false } };
-  // 存了 OpenRouter 的 Key 时，把方舟上没有的 GPT Image 2 和 Nano Banana 也列进图片模型，排在 Seedream 后面。
-  // 这一步读不到不影响方舟自己的模型，只是这几个不出现，原因放在 borrowedError 里。
-  if (apiKey('openrouter')) {
-    try {
-      const { data } = await callUpstream('GET', '/v1/images/models', { timeoutMs: 20000, provider: 'openrouter' });
-      for (const model of listOf(data).filter((m) => m?.id && isBorrowedImageModel(m)).sort((a, b) => a.id.localeCompare(b.id))) {
-        openrouterImageRatios[model.id] = imageRatios[model.id] = (model.supported_parameters?.aspect_ratio?.values || []).map(String);
-        openrouterImageRefs[model.id] = imageRefs[model.id] = Number(model.supported_parameters?.input_references?.max) || 0;
-        rest.imageModels.push(model.id);
-      }
-    } catch (err) {
-      rest.borrowedError = err.message;
-    }
-  }
   try {
     await callUpstream('GET', `${VIDEO_TASKS_PATH.ark}?page_num=1&page_size=1`, { timeoutMs: 20000, provider: 'ark' });
     polishAvailable = POLISH_MODELS.ark;
@@ -773,7 +721,6 @@ async function arkModels() {
 // 两类视频模型的请求格式不同：Seedance 用 content 数组，Grok 用 prompt 字符串。其他视频模型还没有接。
 // 账号能用的模型，按用途分好。models 是视频模型（Seedance 排在前面），其余是图片、润色用的文本模型和三种音频能力。
 route('GET', /^\/api\/models$/, async () => {
-  if (currentProvider() === 'openrouter') return openrouterModels();
   if (currentProvider() === 'ark') return arkModels();
   const none = { imageModels: [], polishModels: [], audio: { speech: false, sfx: false, music: false } };
   try {
@@ -790,7 +737,7 @@ route('GET', /^\/api\/models$/, async () => {
       // 列表里有些图片模型其实没有可用的通道，只有标了 image-generation 的才能走生图接口。
       imageModels: list.filter((m) => m.type === 'image' && (m.supported_endpoint_types || []).includes('image-generation')).map((m) => m.id).sort(),
       polishModels: (polishAvailable = POLISH_MODELS.flatkey.filter((id) => ids.has(id))),
-      audio: { speech: ids.has(SPEECH_MODEL.flatkey), sfx: ids.has(SFX_MODEL), music: ids.has(MUSIC_MODEL) },
+      audio: { speech: ids.has(SPEECH_MODEL), sfx: ids.has(SFX_MODEL), music: ids.has(MUSIC_MODEL) },
     };
     if (video.length) return { models: video, ...rest, source: 'remote' };
     return { models: DEFAULT_MODELS.flatkey, ...rest, source: 'default', note: '账号的模型列表里没有 Seedance 模型，下面显示的是文档里的默认型号。' };
@@ -803,19 +750,14 @@ route('GET', /^\/api\/credits$/, async () => {
   // 火山方舟没有能用 API Key 查余额的接口，余额要到火山引擎控制台的费用中心看。
   if (currentProvider() === 'ark') return { unavailable: true };
   const { data } = await callUpstream('GET', '/v1/credits', { timeoutMs: 20000 });
-  // OpenRouter 给的是充值总额和已用金额，单位是美元。
-  if (currentProvider() === 'openrouter') {
-    const used = Number(data?.data?.total_usage) || 0;
-    return { remaining: (Number(data?.data?.total_credits) || 0) - used, used, unit: 'usd' };
-  }
   return { remaining: Number(data?.remaining) || 0, used: Number(data?.used) || 0 };
 });
 
 route('POST', /^\/api\/videos$/, async ({ req }) => {
   const { payload, form } = await readJsonBody(req);
   // Flatkey 上 Seedance 的提示词和素材在 content 数组里，Grok 的提示词是 prompt 字符串。
-  // OpenRouter 上所有模型都是 prompt 字符串，素材在 frame_images 和 input_references 里，可以只给素材不写提示词。
-  // 火山方舟这边页面发来的也是 OpenRouter 那种格式，发出去之前在这里换成它自己的 content 数组。
+  // 火山方舟这边页面发来的是 prompt 字符串，素材在 frame_images 和 input_references 里，可以只给素材不写提示词；
+  // 发出去之前在这里换成方舟自己的 content 数组。
   const hasContent = Array.isArray(payload?.content) && payload.content.length > 0;
   const hasPrompt = typeof payload?.prompt === 'string' && payload.prompt.trim() !== '';
   const hasMedia = ['frame_images', 'input_references'].some((field) => Array.isArray(payload?.[field]) && payload[field].length > 0);
@@ -905,12 +847,11 @@ route('POST', /^\/api\/images$/, async ({ req }) => {
   const count = Math.min(MAX_IMAGES, Math.max(1, Math.round(Number(payload.n)) || 1));
   const request = { model, prompt, n: count, response_format: 'b64_json' };
   if (payload.aspect_ratio) request.aspect_ratio = String(payload.aspect_ratio);
-  // 参考图（图生图）。OpenRouter 的生图接口收（2026-10-09 用 Grok 实测：本机图片内嵌进请求可以用），每个模型收几张看它的模型列表；
-  // 火山方舟的 Seedream 也收，张数登记在 shared/models.ts。Flatkey 的不收。
+  // 参考图（图生图）。火山方舟的 Seedream 收，每个型号收几张登记在 shared/models.ts；Flatkey 的不收。
   const refs = Array.isArray(payload.input_references) ? payload.input_references.filter((entry) => typeof entry?.image_url?.url === 'string') : [];
   if (refs.length) {
-    if (currentProvider() === 'flatkey') throw new HttpError(400, 'not_on_provider', '参考图生图在 Flatkey 上用不了，OpenRouter 和火山方舟可以');
-    const limit = imageProviderOf(model) === 'ark' ? ARK_IMAGE_MODELS[model]?.refs : openrouterImageRefs[model];
+    if (currentProvider() !== 'ark') throw new HttpError(400, 'not_on_provider', '参考图生图只在火山方舟上可用');
+    const limit = ARK_IMAGE_MODELS[model]?.refs;
     if (limit === 0) throw new HttpError(400, 'invalid_request', `${model} 不收参考图`);
     if (limit && refs.length > limit) throw new HttpError(400, 'invalid_request', `${model} 最多收 ${limit} 张参考图`);
     request.input_references = withLocalImages({ input_references: refs }).input_references;
@@ -920,9 +861,9 @@ route('POST', /^\/api\/images$/, async ({ req }) => {
   const items = Array.from({ length: count }, () =>
     newItem({ id: newId('img'), kind: 'image', model, prompt, payload: { model, prompt, aspect_ratio: request.aspect_ratio, ...(refs.length ? { input_references: refs } : {}) }, form: form || null }),
   );
-  const provider = imageProviderOf(model);
+  const provider = currentProvider();
   runDirect(items, async () => {
-    const { images, cost } = await { flatkey: flatkeyImages, openrouter: openrouterImages, ark: arkImages }[provider](request);
+    const { images, cost } = await { flatkey: flatkeyImages, ark: arkImages }[provider](request);
     if (!images.length) throw new HttpError(502, 'bad_upstream_response', `${labelOf(provider)} 没有返回图片`);
     // 费用按张平摊。
     const usage = cost ? { cost_usd: cost / images.length } : null;
@@ -949,36 +890,13 @@ route('POST', /^\/api\/images$/, async ({ req }) => {
 
 const IMAGE_EXT = { 'image/png': 'png', 'image/webp': 'webp', 'image/jpeg': 'jpg' };
 
-// 这张图交给哪个平台生成。一般就是当前平台；用火山方舟时，方舟没有的型号（带厂商前缀的，像 openai/gpt-image-2）走 OpenRouter，前提是存了它的 Key。
-function imageProviderOf(model) {
-  const provider = currentProvider();
-  if (provider === 'ark' && !Object.hasOwn(ARK_IMAGE_MODELS, model) && model.includes('/') && apiKey('openrouter')) return 'openrouter';
-  return provider;
-}
-
 // 上游给的费用单位是 tick，一美元是 1e10 个 tick。
 async function flatkeyImages(request) {
   const { data } = await callUpstream('POST', '/v1/images/generations', { json: request, timeoutMs: 3 * 60 * 1000, provider: 'flatkey' });
   return { images: listOf(data).filter((image) => image?.b64_json), cost: (Number(data?.usage?.cost_in_usd_ticks) || 0) / 1e10 };
 }
 
-// OpenRouter 的生图接口。很多模型一次只出一张，所以要几张就发几次、同时进行，各出一张；有一次失败了，其余成功的照样留下。
-// 模型不收的画面比例不发，由它用自己的默认比例。
-async function openrouterImages({ model, prompt, n, aspect_ratio, input_references }) {
-  const request = { model, prompt };
-  if (input_references) request.input_references = input_references;
-  const ratios = openrouterImageRatios[model];
-  if (aspect_ratio && (!ratios || ratios.includes(aspect_ratio))) request.aspect_ratio = aspect_ratio;
-  const results = await Promise.allSettled(Array.from({ length: n }, () => callUpstream('POST', '/v1/images', { json: request, timeoutMs: 5 * 60 * 1000, provider: 'openrouter' })));
-  const done = results.filter((r) => r.status === 'fulfilled').map((r) => r.value.data);
-  if (!done.length) throw results[0].reason;
-  return {
-    images: done.flatMap((data) => listOf(data).filter((image) => image?.b64_json)),
-    cost: done.reduce((sum, data) => sum + (Number(data?.usage?.cost) || 0), 0),
-  };
-}
-
-// 火山方舟的生图接口（Seedream）。5.0 pro 和 5.0 flash 一次只出一张，所以和 OpenRouter 一样，要几张就发几次、同时进行。
+// 火山方舟的生图接口（Seedream）。5.0 pro 和 5.0 flash 一次只出一张，所以要几张就发几次、同时进行，各出一张；有一次失败了，其余成功的照样留下。
 // 图片大小写成「宽x高」，按画面比例查登记好的像素值；参考图放在 image 数组里，本机的图已经换成内嵌数据。
 // 返回的用量只有张数和 token，没有金额，所以不记费用。
 async function arkImages({ model, prompt, n, aspect_ratio, input_references }) {
@@ -999,12 +917,6 @@ let voices = null;
 route('GET', /^\/api\/voices$/, async () => {
   // 火山方舟这条线还没有接语音。
   if (currentProvider() === 'ark') return { items: [] };
-  // OpenRouter 上音色只有一串名字，写在模型列表里，没有试听，也没有性别和语言。
-  if (!voices && currentProvider() === 'openrouter') {
-    const { data } = await callUpstream('GET', '/v1/models?output_modalities=speech', { timeoutMs: 20000 });
-    const names = listOf(data).find((m) => m?.id === SPEECH_MODEL.openrouter)?.supported_voices || [];
-    voices = names.map((name) => ({ id: String(name), name: String(name).replace(/^./, (c) => c.toUpperCase()), gender: '', language: '', accent: '', previewUrl: '' }));
-  }
   if (!voices) {
     const { data } = await callUpstream('GET', '/v1/voices', { timeoutMs: 20000 });
     voices = (Array.isArray(data?.voices) ? data.voices : listOf(data))
@@ -1033,17 +945,13 @@ route('POST', /^\/api\/audio\/speech$/, async ({ req }) => {
     id: newId('aud'),
     kind: 'audio',
     tool: 'speech',
-    model: SPEECH_MODEL[provider],
+    model: SPEECH_MODEL,
     prompt: script,
     payload: { voice_id: voiceId, voice_name: String(voiceName || '') },
     form: form || null,
   });
   runDirect([item], async () => {
-    // OpenRouter 的语音接口是 OpenAI 的那种格式，不指定格式的话返回的是没有文件头的 PCM。
-    const { data } =
-      provider === 'openrouter'
-        ? await callUpstream('POST', '/v1/audio/speech', { json: { model: SPEECH_MODEL.openrouter, input: script, voice: voiceId, response_format: 'mp3' }, binary: true, timeoutMs: 3 * 60 * 1000, provider })
-        : await callUpstream('POST', `/v1/text-to-speech/${voiceId}`, { json: { text: script, model_id: SPEECH_MODEL.flatkey }, binary: true, timeoutMs: 3 * 60 * 1000, provider });
+    const { data } = await callUpstream('POST', `/v1/text-to-speech/${voiceId}`, { json: { text: script, model_id: SPEECH_MODEL }, binary: true, timeoutMs: 3 * 60 * 1000, provider });
     finishItem(item, data, 'mp3');
   });
   return historyView(item);

@@ -4,7 +4,7 @@
 import type { Edge, Node, ReactFlowInstance } from '@xyflow/react';
 import { api, state, KINDS, findAsset, refreshAsset, assetReadiness, startHistoryLoop, loadHistory, polishModel } from '../store.ts';
 import { capabilities, defaults, imageRefLimit, platformLabel, specDriven, specOf, traits } from '../composer/state.ts';
-import { buildRequest as buildVideoRequest, buildOpenRouterRequest, buildImageRequest, buildSpeechRequest, buildSfxRequest } from '../request.ts';
+import { buildRequest as buildVideoRequest, buildSpecRequest, buildImageRequest, buildSpeechRequest, buildSfxRequest } from '../request.ts';
 import { recordName, refFromAsset, uploadVirtualAsset } from '../media.ts';
 import { toast } from '../ui/layers.tsx';
 import type { HistoryItem, Kind, Ref } from '../types.ts';
@@ -79,7 +79,7 @@ async function submitVideo(flow: Flow, node: Node, sources: { link: LinkData; no
   }
   const { form, problems } = videoFormFrom(defaults(), data, prompt, inputs);
   const request = specDriven()
-    ? buildOpenRouterRequest(form, specOf(data.model), platformLabel())
+    ? buildSpecRequest(form, specOf(data.model), platformLabel())
     : buildVideoRequest(form, (ref) => (ref.source === 'asset' ? assetReadiness(findAsset(ref.assetId), data.model) : { ready: true, tone: 'ok' }));
   const problem = problems[0] || request.problems[0];
   if (problem) throw new Error(problem);

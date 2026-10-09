@@ -56,7 +56,7 @@ export interface ImageForm {
   model: string;
   ratio: string;
   count: number;
-  // 参考图（图生图）。只有 OpenRouter 上收参考图的模型才用得上。
+  // 参考图（图生图）。只有火山方舟的图片模型收。
   refs?: Ref[];
   skill?: SkillRef | null;
 }

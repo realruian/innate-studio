@@ -65,12 +65,12 @@ export const state = {
   recordsType: 'all' as CreateType | 'all',
   app: { hasKey: false, keyHint: '', keySource: '', baseUrl: '', provider: 'flatkey', features: PROVIDERS.flatkey.features, providers: [] } as AppInfo,
   models: ['seedance-2.0', 'seedance-2.0-fast'] as string[],
-  // OpenRouter 的模型各自支持什么（分辨率、比例、时长、首尾帧）。Flatkey 的模型登记在 shared/models.ts，这里是空的。
+  // 火山方舟的模型各自支持什么（分辨率、比例、时长、首尾帧）。Flatkey 的模型登记在 shared/models.ts，这里是空的。
   videoSpecs: {} as Record<string, VideoSpec>,
   modelsInfo: { source: 'default', error: '', note: '' },
   // 视频之外账号还能用什么。known 为 false 表示还没读到模型列表，这时不拦任何一种创作。
-  // imageRatios 是 OpenRouter 每个图片模型收哪些画面比例；Flatkey 上没有这一项，比例不受限。
-  // imageRefs 是 OpenRouter 每个图片模型最多收几张参考图；Flatkey 上没有，生图不能带参考图。
+  // imageRatios 是火山方舟每个图片模型收哪些画面比例；Flatkey 上没有这一项，比例不受限。
+  // imageRefs 是火山方舟每个图片模型最多收几张参考图；Flatkey 上没有，生图不能带参考图。
   catalog: { known: false, image: [] as string[], imageRatios: {} as Record<string, string[]>, imageRefs: {} as Record<string, number>, polish: [] as string[], audio: { speech: false, sfx: false, music: false } },
   voices: null as Voice[] | null,
   history: [] as HistoryItem[],

@@ -121,7 +121,7 @@ async function animate(item: HistoryItem) {
   }
 }
 
-// 延长或编辑一条视频。只有 Flatkey 上的 Seedance 能做（要把视频传进素材库当参考），用的是 OpenRouter 或者账号里没有 Seedance 型号时不出现这两个入口。
+// 延长或编辑一条视频。只有 Flatkey 上的 Seedance 能做（要把视频传进素材库当参考），用的是火山方舟或者账号里没有 Seedance 型号时不出现这两个入口。
 const canRework = (item: HistoryItem) => done(item) && item.kind === 'video' && state.app.provider === 'flatkey' && state.models.some((id) => videoFamilyOf(id) === 'seedance');
 async function rework(item: HistoryItem, task: VideoTask) {
   if (!item.savedLocally) return toast('这条视频还没保存到本机，稍后再试', 'info');
@@ -329,7 +329,7 @@ type Entry = [name: string, value: ReactNode, wide?: boolean];
 const present = ([, value]: Entry) => value != null && value !== '' && value !== false;
 
 // 详情右边「生成参数」那一组：一格一项，名称在上、取值在下。第三个值为 true 的独占一行。
-// 型号名长（OpenRouter 的还带厂商前缀），挤在一格里会从中间断行，所以「模型」独占一行。
+// 型号名长，挤在一格里会从中间断行，所以「模型」独占一行。
 function paramsOf(item: HistoryItem): Entry[] {
   const p = item.payload || {};
   // 用了技能的记录：提示词是扩写出来的，这里标出用的是哪个技能、用户原来写的是什么。

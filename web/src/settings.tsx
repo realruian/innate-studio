@@ -30,11 +30,10 @@ function Settings() {
     if (!state.app.hasKey) return setCredits('—');
     setCredits('读取中…');
     try {
-      const { remaining, used, unit, unavailable } = await api('GET', '/api/credits');
+      const { remaining, used, unavailable } = await api('GET', '/api/credits');
       // 火山方舟没有查余额的接口。
       if (unavailable) return setCredits('这里读不到，请到火山引擎控制台的费用中心查看');
-      const sign = unit === 'usd' ? '$' : '';
-      setCredits(`剩余 ${sign}${amount(remaining)} · 已用 ${sign}${amount(used)}`);
+      setCredits(`剩余 ${amount(remaining)} · 已用 ${amount(used)}`);
     } catch {
       setCredits('没有读到');
     }
@@ -164,15 +163,7 @@ function Settings() {
           </div>
         </FormRow>
       </div>
-      {provider === 'openrouter' && <p className="small muted">OpenRouter 上能生成视频、图片和语音，也能润色提示词。音效、配乐、素材库、真人档案只有 Flatkey 有，切换回去就能用；延长和编辑视频也只在 Flatkey 上。</p>}
       {provider === 'ark' && <p className="small muted">火山方舟是字节官方的接口，能生成 Seedance 视频和 Seedream 图片，也能用豆包的文本模型润色提示词。Seedance 2.0、2.5 要账户余额大于 200 元才能开通。语音、音效、配乐、素材库、真人档案这里没有，延长和编辑视频只在 Flatkey 上。</p>}
-      {provider === 'ark' && (
-        <p className="small muted">
-          {state.app.providers.find((p) => p.id === 'openrouter')?.hasKey
-            ? 'OpenRouter 的 Key 已经存好：图片模型里会多出 GPT Image 2 和 Nano Banana，用它们生图时走 OpenRouter，费用也记在 OpenRouter 上。'
-            : '想同时用 GPT Image 2 和 Nano Banana：先切到 OpenRouter 存好它的 Key，再切回火山方舟，图片模型里就会多出它们。'}
-        </p>
-      )}
       <div className="section-title">{platform} API Key</div>
       <div className="form-section">
         <FormRow label="当前 Key">

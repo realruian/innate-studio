@@ -1,5 +1,5 @@
 // 把创作表单转成发给本地服务的请求。纯函数，不碰页面和网络，可以单独测试。
-// Flatkey 上视频有两种请求格式：Seedance 用 content 数组，Grok 用 prompt 字符串。OpenRouter 上所有模型是同一种格式。图片、语音、音效、配乐各有一个小函数。
+// Flatkey 上视频有两种请求格式：Seedance 用 content 数组，Grok 用 prompt 字符串。火山方舟上是另一种，由本地服务换成方舟自己的格式。图片、语音、音效、配乐各有一个小函数。
 
 import { videoFamilyOf, type VideoSpec } from '../../shared/models.ts';
 import type { VideoForm, ImageForm, SpeechForm, SfxForm, MusicForm, Ref, RefStatus, BuiltRequest } from './types.ts';
@@ -117,11 +117,10 @@ export function buildRequest(form: VideoForm, refStatus: (ref: Ref) => RefStatus
   return { payload, problems };
 }
 
-// OpenRouter 的视频：提示词是 prompt 字符串，首尾帧在 frame_images，参考素材在 input_references。spec 是这个模型支持什么。
+// 火山方舟的视频：提示词是 prompt 字符串，首尾帧在 frame_images，参考素材在 input_references，本地服务把它换成方舟自己的 content 数组再发出去。spec 是这个模型支持什么。
 // 图片可以用本机的文件（本地服务会把它内嵌进请求）；参考视频和音频只能用公网链接；Flatkey 素材库里的素材这边读不到。
-// 这些都在 2026-10-09 用 Seedance 2.5 实测过：文生视频、首帧、首尾帧、参考图能用，内嵌的视频会被拒绝。
-// 火山方舟用的也是这一种：本地服务把它换成方舟自己的格式再发出去。platform 是平台的名字，只用在提示里。
-export function buildOpenRouterRequest(form: VideoForm, spec: VideoSpec, platform = 'OpenRouter'): BuiltRequest {
+// 2026-10-09 用真实接口跑过：文生视频、首帧、首尾帧、参考图、图加视频加音频的参考生成都能用。platform 是平台的名字，只用在提示里。
+export function buildSpecRequest(form: VideoForm, spec: VideoSpec, platform = '火山方舟'): BuiltRequest {
   const problems: string[] = [];
   const text = form.prompt.trim();
   const payload: Record<string, unknown> = { model: form.model, duration: Number(form.duration), resolution: form.resolution };

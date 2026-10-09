@@ -147,7 +147,7 @@ function MediaBlock() {
     const kinds = (Object.keys(KINDS) as Kind[]).filter((kind) => allowed.includes(kind) || form.refs[kind].length > 0);
     const setList = (kind: Kind, next: Ref[]) => update({ refs: { ...composer.form.refs, [kind]: next } });
     // 三种素材共用一个「+」，不用先选类型：上传的、选中的是什么就放进哪一类。
-    // OpenRouter 上只有图片能加：它的参考视频和音频只收公网链接，本机的文件发不过去，而这里不提供填链接。
+    // 火山方舟上只有图片能加：它的参考视频只收公网链接，本机的文件发不过去，而这里不提供填链接。
     const addable = specDriven() ? allowed.filter((kind) => kind === 'image') : allowed;
     const addRef = () =>
       openAssetPicker({
@@ -336,7 +336,7 @@ function FramePanel() {
   useStore('composer');
   const { form } = composer;
   const { resolutions: allowed, ratios } = capabilities();
-  // Flatkey 的模型固定列三档，不支持的那档变灰；OpenRouter 各模型的档位差别大（768p、2K、4K），直接列它支持的。
+  // Flatkey 的模型固定列三档，不支持的那档变灰；火山方舟各模型的档位不一样（有的到 4k），直接列它支持的。
   const resolutions = specDriven() ? allowed : RESOLUTIONS;
   return (
     <>

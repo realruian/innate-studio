@@ -2,7 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { modelNote, videoFamilyOf, referenceModeLabel, videoCapabilities, videoSpecOf, polishGuide } from '../shared/models.ts';
+import { modelNote, videoFamilyOf, referenceModeLabel, videoCapabilities, polishGuide, isProvider } from '../shared/models.ts';
 
 test('型号附注：同一档的型号附注相同，没有分档的不加', () => {
   assert.equal(modelNote('seedance-2.0-fast'), '快速版');
@@ -21,23 +21,19 @@ test('视频模型分两族，认不出来的不算视频模型', () => {
   assert.equal(videoFamilyOf('grok-imagine-video-1.5'), 'grok');
   assert.equal(videoFamilyOf('MiniMax-H3'), null);
   assert.equal(videoFamilyOf(undefined), null);
-  // OpenRouter 的型号前面带厂商，一样认得出；它上面别的模型不属于这两族。
-  assert.equal(videoFamilyOf('bytedance/seedance-2.5'), 'seedance');
-  assert.equal(videoFamilyOf('x-ai/grok-imagine-video-1.5'), 'grok');
-  assert.equal(videoFamilyOf('google/veo-3.1'), null);
+  // 火山方舟的型号前面带 doubao-、后面带日期，一样认得出，附注也照常标。
+  assert.equal(videoFamilyOf('doubao-seedance-2-5-260628'), 'seedance');
+  assert.equal(modelNote('doubao-seedance-2-0-fast-260128'), '快速版');
+  assert.equal(modelNote('doubao-seedance-2-0-mini-260615'), '轻量版');
+  assert.equal(modelNote('doubao-seedance-2-0-260128'), '');
 });
 
-test('OpenRouter 的模型：整理出支持什么，分辨率和时长从小到大；不是生成模型的不要', () => {
-  const spec = videoSpecOf({ supported_resolutions: ['4K', '720p', '1080p'], supported_aspect_ratios: ['16:9'], supported_durations: [8, 4, 6], supported_frame_images: ['first_frame', 'last_frame'], generate_audio: true, seed: null });
-  assert.deepEqual(spec, { resolutions: ['720p', '1080p', '4K'], ratios: ['16:9'], durations: [4, 6, 8], autoDuration: false, frames: ['first_frame', 'last_frame'], audio: true, seed: false });
-  assert.equal(videoSpecOf({ supported_resolutions: null, supported_durations: null }), null);
-});
-
-test('润色规则：OpenRouter 上不是 Seedance 和 Grok 的视频模型用通用写法', () => {
-  assert.match(polishGuide({ kind: 'video', model: 'google/veo-3.1', mode: 'text' }), /AI 视频生成模型/);
-  assert.match(polishGuide({ kind: 'video', model: 'bytedance/seedance-2.5', mode: 'text' }), /Seedance 视频模型/);
-  assert.match(polishGuide({ kind: 'video', model: 'x-ai/grok-imagine-video', mode: 'text' }), /Grok Imagine 视频模型/);
-  // 不带厂商前缀又认不出来的，仍按 Seedance 处理。
+test('平台只有 Flatkey 和火山方舟；润色规则按型号选，认不出来的按 Seedance 处理', () => {
+  assert.equal(isProvider('flatkey'), true);
+  assert.equal(isProvider('ark'), true);
+  assert.equal(isProvider('openrouter'), false);
+  assert.match(polishGuide({ kind: 'video', model: 'doubao-seedance-2-0-260128', mode: 'text' }), /Seedance 视频模型/);
+  assert.match(polishGuide({ kind: 'video', model: 'grok-imagine-video', mode: 'text' }), /Grok Imagine 视频模型/);
   assert.match(polishGuide({ kind: 'video', model: 'some-new-model', mode: 'text' }), /Seedance 视频模型/);
 });
 
