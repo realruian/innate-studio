@@ -30,17 +30,13 @@ export interface TextData {
   busy?: string;
   error?: string;
 }
-// 节点里的内容有三种来历，只会有一种：recordId 是在这个节点上生成的那条生成记录；upload 是从本机上传的文件；asset 是从素材库里选的素材。
-// assetId 是生成的结果或上传的文件传进素材库之后的素材，assetOf 记着传的是哪个文件。
+// 节点里的内容有两种来历，只会有一种：recordId 是在这个节点上生成的那条生成记录；upload 是从本机上传的文件。
 // busy、error 只在页面打开期间有，不存进画布。
 export interface Generated {
   // 名字后面的编号。
   no?: number;
   recordId?: string;
   upload?: { url: string; name: string };
-  asset?: Ref;
-  assetId?: string;
-  assetOf?: string;
   busy?: string;
   error?: string;
 }
@@ -50,6 +46,8 @@ export interface ImageData extends Generated {
   ratio: string;
   // 分辨率档位（1K、2K 这样）。不写就用模型默认的那一档。
   resolution?: string;
+  // 画质。只有分画质的模型才有，不写就用模型默认的那一档。
+  quality?: string;
   // 一次生成几张。不写就是一张。
   count?: number;
   // 节点里那张图实际的宽高比，图片读出来之后记下，节点的框按它定宽度。
@@ -208,7 +206,7 @@ export function stripNodeData<T extends object>(data: T): T {
 // ---------- 节点的大小 ----------
 
 // 所有节点的框一样高。空着的时候形状是固定的：文本和图片是方的，视频是 16:9，音频宽 320，不跟着参数里选的比例变。
-// 图片、视频有了内容（上传的、素材库里的、生成出来的），框才按它实际的宽高比定宽，太窄太宽的收在一个范围里。
+// 图片、视频有了内容（上传的、生成出来的），框才按它实际的宽高比定宽，太窄太宽的收在一个范围里。
 export const BOX_HEIGHT = 240;
 // 节点的名字那一行加上它和框之间的空隙，一共占多高。
 export const TITLE_ROOM = 24;

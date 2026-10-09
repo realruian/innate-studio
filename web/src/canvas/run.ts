@@ -2,10 +2,10 @@
 // 结果是一条普通的生成记录，节点只记它的 id，进度跟着「创作记录」的轮询走。
 
 import type { Edge, Node, ReactFlowInstance } from '@xyflow/react';
-import { api, state, KINDS, findAsset, refreshAsset, assetReadiness, startHistoryLoop, loadHistory, polishModel } from '../store.ts';
-import { capabilities, defaults, fitImageSize, imageRefLimit, platformLabel, specDriven, specOf, traits } from '../composer/state.ts';
-import { buildRequest as buildVideoRequest, buildSpecRequest, buildImageRequest, buildSpeechRequest, buildSfxRequest } from '../request.ts';
-import { recordName, refFromAsset, uploadVirtualAsset } from '../media.ts';
+import { api, state, KINDS, startHistoryLoop, loadHistory, polishModel } from '../store.ts';
+import { defaults, fitImageQuality, fitImageSize, hasLastFrame, imageRefLimit, specOf } from '../composer/state.ts';
+import { buildVideoRequest, buildImageRequest, buildSpeechRequest, buildSfxRequest } from '../request.ts';
+import { recordName } from '../media.ts';
 import { toast } from '../ui/layers.tsx';
 import type { HistoryItem, Kind, Ref } from '../types.ts';
 import { NODE_LABELS, joinPrompt, nodeWidth, numbered, placeResults, resolveMentions, runOrder, stripNodeData, videoFormFrom, type AudioData, type ImageData, type LinkData, type MediaInput, type NodeKind, type TextData, type VideoData } from './model.ts';
@@ -15,10 +15,9 @@ type AnyData = Partial<ImageData & VideoData & AudioData & TextData>;
 
 export const recordOf = (data: { recordId?: string }): HistoryItem | undefined => (data.recordId ? state.history.find((h) => h.id === data.recordId) : undefined);
 
-// 一个节点现在能交给下游的东西：本机的一个文件，或者素材库里的一份素材（这时带着 asset）。还没生成完、或者文件不在本机，就是 null。
-export function outputOf(node: Node): { url: string; kind: Kind; name: string; asset?: Ref } | null {
+// 一个节点现在能交给下游的东西：本机的一个文件。还没生成完、或者文件不在本机，就是 null。
+export function outputOf(node: Node): { url: string; kind: Kind; name: string } | null {
   const data = node.data as AnyData;
-  if (data.asset) return { url: data.asset.url, kind: data.asset.kind, name: data.asset.name, asset: data.asset };
   if (data.upload) return { url: data.upload.url, kind: node.type as Kind, name: data.upload.name };
   const record = recordOf(data);
   if (!record || record.status !== 'completed' || !record.mediaUrl || !record.savedLocally) return null;
@@ -26,37 +25,8 @@ export function outputOf(node: Node): { url: string; kind: Kind; name: string; a
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-// 素材传进素材库之后要等平台处理完才能用。等这么久还没好就不等了。
-const ASSET_WAIT_MS = 5 * 60 * 1000;
-
-// Seedance 只认素材库里的素材：把上游节点的文件传进去，等它能用于这个模型。传过一次的记在上游节点上，下次直接用。
-async function libraryRef(flow: Flow, source: Node, output: NonNullable<ReturnType<typeof outputOf>>, model: string, say: (text: string) => void): Promise<Ref> {
-  const data = source.data as AnyData;
-  let asset = data.assetOf === output.url ? findAsset(data.assetId) : null;
-  if (!asset && data.assetOf === output.url && data.assetId) asset = await refreshAsset(data.assetId).catch(() => null);
-  if (!asset) {
-    say('正在上传素材');
-    const res = await fetch(output.url);
-    if (!res.ok) throw new Error('上游节点的文件已不存在');
-    const blob = await res.blob();
-    asset = await uploadVirtualAsset(new File([blob], `${output.name}.${output.url.split('.').pop()}`, { type: blob.type }), output.kind);
-    flow.updateNodeData(source.id, { assetId: asset.id, assetOf: output.url });
-  }
-  const deadline = Date.now() + ASSET_WAIT_MS;
-  for (;;) {
-    const status = assetReadiness(asset, model);
-    if (status.ready) return refFromAsset(asset, output.kind);
-    if (status.tone === 'error') throw new Error(`素材${status.label}，无法使用`);
-    if (Date.now() > deadline) throw new Error('素材处理中，请稍后重试');
-    say('素材处理中');
-    await sleep(3000);
-    asset = await refreshAsset(asset.id);
-  }
-}
-
-async function submitVideo(flow: Flow, node: Node, sources: { link: LinkData; node: Node }[], prompt: string, say: (text: string) => void) {
+async function submitVideo(node: Node, sources: { link: LinkData; node: Node }[], prompt: string, say: (text: string) => void) {
   const data = node.data as unknown as VideoData;
-  const able = traits(data.model);
   const media = sources.filter((s) => s.link.kind !== 'text');
   const counts: Record<Kind, number> = { image: 0, video: 0, audio: 0 };
   const inputs: MediaInput[] = [];
@@ -64,23 +34,13 @@ async function submitVideo(flow: Flow, node: Node, sources: { link: LinkData; no
     const kind = link.kind as Kind;
     const output = outputOf(source);
     if (!output) throw new Error(`上游${NODE_LABELS[kind]}节点尚未生成`);
-    if (!able.refKinds.includes(kind) || (kind !== 'image' && !able.reference)) throw new Error(`${data.model} 不支持参考${NODE_LABELS[kind]}`);
     if (++counts[kind] > KINDS[kind].max) throw new Error(`参考${NODE_LABELS[kind]}最多 ${KINDS[kind].max} 个`);
     const role = kind === 'image' ? link.role || 'reference' : 'reference';
-    if (role === 'last' && !able.lastFrame) throw new Error(`${data.model} 不支持尾帧`);
-    // 素材库里的素材直接用；本机的文件看模型：能直接收的就直接给，Seedance 要先传进素材库。
-    if (output.asset && able.localFiles) throw new Error(`${data.model} 不支持素材库素材，请改用上传的文件或生成结果`);
-    const ref: Ref = output.asset
-      ? { ...output.asset, uid: crypto.randomUUID() }
-      : able.localFiles
-        ? { uid: crypto.randomUUID(), kind, source: 'local', url: output.url, name: output.name, thumb: null }
-        : await libraryRef(flow, source, output, data.model, say);
-    inputs.push({ kind, role, ref });
+    if (role === 'last' && !hasLastFrame(data.model)) throw new Error(`${data.model} 不支持尾帧`);
+    inputs.push({ kind, role, ref: { uid: crypto.randomUUID(), kind, source: 'local', url: output.url, name: output.name, thumb: null } });
   }
   const { form, problems } = videoFormFrom(defaults(), data, prompt, inputs);
-  const request = specDriven()
-    ? buildSpecRequest(form, specOf(data.model), platformLabel())
-    : buildVideoRequest(form, (ref) => (ref.source === 'asset' ? assetReadiness(findAsset(ref.assetId), data.model) : { ready: true, tone: 'ok' }));
+  const request = buildVideoRequest(form, specOf(data.model));
   const problem = problems[0] || request.problems[0];
   if (problem) throw new Error(problem);
   say('正在提交');
@@ -100,9 +60,9 @@ async function submitImage(node: Node, sources: { link: LinkData; node: Node }[]
     .map((s) => {
       const output = outputOf(s.node);
       if (!output) throw new Error('上游图片节点尚未生成');
-      return output.asset ? { ...output.asset, uid: crypto.randomUUID() } : { uid: crypto.randomUUID(), kind: 'image' as const, source: 'local' as const, url: output.url, name: output.name, thumb: null };
+      return { uid: crypto.randomUUID(), kind: 'image' as const, source: 'local' as const, url: output.url, name: output.name, thumb: null };
     });
-  const form = { prompt, model: data.model, ratio: data.ratio, resolution: fitImageSize(data.model, data.resolution), count: data.count || 1, refs };
+  const form = { prompt, model: data.model, ratio: data.ratio, resolution: fitImageSize(data.model, data.resolution), quality: fitImageQuality(data.model, data.quality), count: data.count || 1, refs };
   const request = buildImageRequest(form, imageRefLimit(data.model));
   if (request.problems.length) throw new Error(request.problems[0]);
   return (await api<{ items: HistoryItem[] }>('POST', '/api/images', { payload: request.payload, form: { type: 'image', ...form, ...FROM_CANVAS } })).items.map((item) => item.id);
@@ -111,7 +71,7 @@ async function submitImage(node: Node, sources: { link: LinkData; node: Node }[]
 async function submitAudio(node: Node, prompt: string) {
   const data = node.data as unknown as AudioData;
   if (data.tool === 'sfx') {
-    const form = { prompt, duration: 'auto', influence: '0.3' };
+    const form = { prompt, duration: 'auto' };
     const request = buildSfxRequest(form);
     if (request.problems.length) throw new Error(request.problems[0]);
     return (await api<HistoryItem>('POST', '/api/audio/sfx', { ...request.body, form: { type: 'sfx', ...form, ...FROM_CANVAS } })).id;
@@ -132,10 +92,10 @@ function promptOf(sources: { link: LinkData; node: Node }[], own: string) {
   return joinPrompt(upstream, prompt);
 }
 
-// 节点里是不是已经有内容了：上传的、素材库里的、生成出来的（生成失败的、记录已经删掉的不算）。
+// 节点里是不是已经有内容了：上传的、生成出来的（生成失败的、记录已经删掉的不算）。
 export function isFilled(data: AnyData) {
   const record = recordOf(data);
-  return Boolean(data.upload || data.asset || (record && record.status !== 'failed') || (data.text || '').trim());
+  return Boolean(data.upload || (record && record.status !== 'failed') || (data.text || '').trim());
 }
 
 // 把一批结果放上画布。节点还空着，第一份放进它自己；已经有内容，原来的留着不动。其余每份一个新节点：
@@ -150,7 +110,7 @@ export function deliver(flow: Flow, id: string, results: Record<string, unknown>
   if (!rest.length) return;
   snap();
   // 新节点不带原节点的那份内容，也不带「一次几张」：再点它生成，默认只出一份。
-  const base = { ...stripNodeData(node.data), recordId: undefined, upload: undefined, asset: undefined, assetId: undefined, assetOf: undefined, aspect: undefined, count: undefined, no: undefined };
+  const base = { ...stripNodeData(node.data), recordId: undefined, upload: undefined, aspect: undefined, count: undefined, no: undefined };
   const fresh = numbered(rest.map((result, index) => ({ id: crypto.randomUUID(), type: node.type, position: spots[index], data: { ...base, ...result } }) as Node), flow.getNodes());
   const incoming = flow.getEdges().filter((edge) => edge.target === id);
   flow.addNodes(fresh);
@@ -186,7 +146,7 @@ export async function generate(flow: Flow, id: string, snap: () => void = () => 
       ids = [];
       for (let n = 0; n < count; n++) {
         try {
-          ids.push(await submitVideo(flow, node, sources, prompt, (text) => say(count > 1 ? `${text}（${n + 1}/${count}）` : text)));
+          ids.push(await submitVideo(node, sources, prompt, (text) => say(count > 1 ? `${text}（${n + 1}/${count}）` : text)));
         } catch (err) {
           if (!ids.length) throw err;
           toast(`第 ${n + 1} 段提交失败：${(err as Error).message}`, 'error', 6000);
@@ -195,8 +155,8 @@ export async function generate(flow: Flow, id: string, snap: () => void = () => 
       }
     } else ids = [await submitAudio(node, prompt)];
     // 音频还是在原节点上换成新的；图片、视频已经有内容时不覆盖，新结果放进新节点。
-    if (kind === 'audio') flow.updateNodeData(id, { recordId: ids[0], upload: undefined, asset: undefined, assetId: undefined, assetOf: undefined });
-    else deliver(flow, id, ids.map((recordId) => ({ recordId, upload: undefined, asset: undefined, assetId: undefined, assetOf: undefined })), snap);
+    if (kind === 'audio') flow.updateNodeData(id, { recordId: ids[0], upload: undefined });
+    else deliver(flow, id, ids.map((recordId) => ({ recordId, upload: undefined })), snap);
     await loadHistory().catch(() => {});
     startHistoryLoop();
   } catch (err) {
@@ -271,12 +231,12 @@ export async function runAll(flow: Flow, ids: string[], snap: () => void) {
 
 // 视频节点的分辨率、比例、时长要落在所选模型支持的范围里；换模型之后不在范围里的换成它支持的第一个。
 export function fitVideo(data: VideoData): VideoData {
-  const able = capabilities(data.model);
+  const able = specOf(data.model);
   const pick = <T,>(list: T[], value: T) => (list.includes(value) || !list.length ? value : list[0]);
   return { ...data, resolution: pick(able.resolutions, data.resolution), ratio: pick(able.ratios, data.ratio), duration: pick(able.durations, data.duration) };
 }
 
-// 新建节点时的参数跟创作页当前选的一致，换平台之后选的模型不在了就用列表里的第一个。
+// 新建节点时的参数跟创作页当前选的一致，选的模型不在了就用列表里的第一个。
 export function newNodeData(kind: NodeKind, seed: { form: { model: string; resolution: string; ratio: string; duration: number }; image: { model: string; ratio: string; resolution?: string }; speech: { voiceId: string; voiceName: string } }): Record<string, unknown> {
   if (kind === 'text') return { text: '', prompt: '' };
   if (kind === 'image') {
@@ -291,7 +251,7 @@ export function newNodeData(kind: NodeKind, seed: { form: { model: string; resol
   return { tool: 'speech', prompt: '', voiceId: seed.speech.voiceId, voiceName: seed.speech.voiceName };
 }
 
-// 画布的封面：里面最近生成的一张图或一段视频；没有生成过就用上传的、素材库里选的。
+// 画布的封面：里面最近生成的一张图或一段视频；没有生成过就用上传的。
 export function coverOf(nodes: Node[]): { url: string; kind: 'image' | 'video' } | null {
   let best: { url: string; kind: 'image' | 'video'; at: number } | null = null;
   for (const node of nodes) {
@@ -304,9 +264,7 @@ export function coverOf(nodes: Node[]): { url: string; kind: 'image' | 'video' }
         ? { url: record.mediaUrl, kind, at: record.completedAt || record.createdAt || 1 }
         : data.upload
           ? { url: data.upload.url, kind, at: 0 }
-          : data.asset?.thumb
-            ? { url: data.asset.thumb, kind: 'image' as const, at: 0 }
-            : null;
+          : null;
     if (found && (!best || found.at > best.at)) best = found;
   }
   return best && { url: best.url, kind: best.kind };

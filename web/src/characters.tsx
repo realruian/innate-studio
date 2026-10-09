@@ -57,7 +57,7 @@ function Editor({ character, done }: { character: Partial<Character>; done: () =
         {images.length < MAX_IMAGES && (
           <AddTile
             label="添加参考图"
-            onClick={() => openAssetPicker({ title: '添加参考图', kind: 'image', local: true, sources: ['upload', 'records'], usedUrls: images, remaining: MAX_IMAGES - images.length, onPick: (ref) => setImages((list) => (list.includes(ref.url) ? list : [...list, ref.url].slice(0, MAX_IMAGES))) })}
+            onClick={() => openAssetPicker({ title: '添加参考图', kind: 'image', sources: ['upload', 'records'], usedUrls: images, remaining: MAX_IMAGES - images.length, onPick: (ref) => setImages((list) => (list.includes(ref.url) ? list : [...list, ref.url].slice(0, MAX_IMAGES))) })}
           />
         )}
       </div>

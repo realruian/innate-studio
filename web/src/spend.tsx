@@ -1,13 +1,14 @@
-// 右上角的余额和消费：按钮上是账户余额，点开是余额、今日、本月三个数和每次生成的费用。
-// 余额是用账号的 Access Key 到火山引擎费用中心查的；没配 Access Key 时按钮上改成本月花了多少，三个数换成今日、本月、累计。
-// 每次生成的费用火山引擎不返回，是按用量和按量单价估算的（shared/models.ts 的 estimateCost）。
+// 右上角的余额和消费：按钮上是各个账户的余额，点开是余额、今日、本月几个数和每次生成的费用。
+// 账户有三个，配了哪个显示哪个：火山引擎的是用账号的 Access Key 到费用中心查的；AiHubMix 的是用 Manage Key 查的，单位是美元；
+// MiniMax 没有查询接口，是用户手动填的余额（元或积分）减去之后估算的花费。一个都没配时按钮上改成本月花了多少，几个数换成今日、本月、累计。
+// 每次生成的费用平台不返回，是按用量和按量单价估算的（shared/models.ts 的 estimateCost）。
 
 import { useEffect } from 'react';
 import { state, useStore, loadBalance } from './store.ts';
 import { openSettings } from './settings.tsx';
 import { openPopover } from './ui/layers.tsx';
 import { openDetail } from './history.tsx';
-import { fmtTime, fmtYuan } from './format.ts';
+import { fmtCredits, fmtTime, fmtUsd, fmtYuan } from './format.ts';
 import { estimateCost, modelLabel } from '../../shared/models.ts';
 import type { HistoryItem } from './types.ts';
 
@@ -26,22 +27,32 @@ const sumSince = (list: ReturnType<typeof charges>, from: number) => list.reduce
 const startOfMonth = () => new Date(new Date().getFullYear(), new Date().getMonth(), 1).getTime();
 const startOfDay = () => new Date().setHours(0, 0, 0, 0);
 
+// 配好了的账户和各自的余额，写成能直接显示的字。
+function balances(): [string, string][] {
+  const list: [string, string][] = [];
+  if (state.balance != null) list.push(['火山引擎', fmtYuan(state.balance)]);
+  if (state.minimaxBalance) list.push(['MiniMax', (state.minimaxBalance.unit === 'credits' ? fmtCredits : fmtYuan)(state.minimaxBalance.remaining)]);
+  if (state.aihubmixBalance) list.push(['AiHubMix', state.aihubmixBalance.remaining != null ? fmtUsd(state.aihubmixBalance.remaining) : '获取失败']);
+  return list;
+}
+
 function SpendPanel({ close }: { close: () => void }) {
   useStore('history', 'balance', 'app');
   const list = charges();
-  const totals = [
-    state.balance != null ? (['余额', state.balance] as const) : null,
-    ['今日', sumSince(list, startOfDay())] as const,
-    ['本月', sumSince(list, startOfMonth())] as const,
-    state.balance == null ? (['累计', sumSince(list, 0)] as const) : null,
-  ].filter((t) => t != null);
+  const accounts = balances();
+  const totals: (readonly [string, string])[] = [
+    ...accounts,
+    ['今日', fmtYuan(sumSince(list, startOfDay()))] as const,
+    ['本月', fmtYuan(sumSince(list, startOfMonth()))] as const,
+    ...(accounts.length ? [] : [['累计', fmtYuan(sumSince(list, 0))] as const]),
+  ];
   return (
     <div className="spend">
       <dl className="spend-totals">
         {totals.map(([label, value]) => (
           <div key={label}>
             <dt>{label}</dt>
-            <dd>{fmtYuan(value)}</dd>
+            <dd>{value}</dd>
           </div>
         ))}
       </dl>
@@ -71,8 +82,8 @@ function SpendPanel({ close }: { close: () => void }) {
       ) : (
         <p className="spend-empty">暂无消费记录</p>
       )}
-      <p className="spend-note">每次费用按火山引擎按量单价估算，以账单为准</p>
-      {!state.app.billing.hasKey && (
+      <p className="spend-note">{`每次费用按官方按量单价估算，以账单为准${state.minimaxBalance ? '；MiniMax 余额为手动填写后按估算扣减' : ''}`}</p>
+      {accounts.length < 3 && (
         <button
           className="btn btn-sm spend-setup"
           type="button"
@@ -81,7 +92,7 @@ function SpendPanel({ close }: { close: () => void }) {
             openSettings();
           }}
         >
-          配置 Access Key 以显示余额
+          {accounts.length ? '配置其他账户余额' : '配置账户余额'}
         </button>
       )}
     </div>
@@ -90,14 +101,13 @@ function SpendPanel({ close }: { close: () => void }) {
 
 export function SpendButton() {
   useStore('history', 'app', 'balance');
-  const ark = state.app.provider === 'ark';
   const list = charges();
   // 打开页面、换了 Access Key、又生成完一条，都重新查一次余额。
   useEffect(() => {
     loadBalance();
-  }, [ark, state.app.billing.hasKey, state.app.billing.keyHint, list.length]);
-  if (!ark) return null;
-  const [label, value] = state.balance != null ? ['余额', state.balance] : ['本月', sumSince(list, startOfMonth())];
+  }, [state.app.billing.hasKey, state.app.billing.keyHint, state.app.aihubmixManage.keyHint, list.length]);
+  const accounts = balances();
+  const shown: [string, string][] = accounts.length ? accounts : [['本月', fmtYuan(sumSince(list, startOfMonth()))]];
   return (
     <button
       className="spend-btn"
@@ -108,8 +118,12 @@ export function SpendButton() {
         const layer = openPopover(e.currentTarget, <SpendPanel close={() => layer?.close()} />, { className: 'spend-popover', label: '余额和消费明细', align: 'end' });
       }}
     >
-      <span className="spend-btn-label">{label}</span>
-      {fmtYuan(value)}
+      {shown.map(([label, value]) => (
+        <span key={label} className="spend-btn-item">
+          <span className="spend-btn-label">{label}</span>
+          {value}
+        </span>
+      ))}
     </button>
   );
 }

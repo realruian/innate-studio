@@ -2,38 +2,17 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { modelLabel, modelNote, videoFamilyOf, referenceModeLabel, videoCapabilities, polishGuide, isProvider, estimateCost } from '../shared/models.ts';
+import { modelLabel, modelNote, polishGuide, estimateCost } from '../shared/models.ts';
 
 test('型号附注：同一档的型号附注相同，没有分档的不加', () => {
-  assert.equal(modelNote('seedance-2.0-fast'), '快速版');
-  assert.equal(modelNote('seedance-2.0-mini'), '轻量版');
-  // 官方只有 Fast 和 Mini 两档有名字，不带后缀的和带 -pro 的不标。
-  for (const id of ['seedance-2.0', 'seedance-2.0-pro', 'seedance-2.5-pro', 'seedance-2.5', 'grok-imagine-video', 'grok-imagine-video-1.5', 'grok-imagine-image-2.0']) assert.equal(modelNote(id), '', id);
-});
-
-test('带参考素材的生成方式：Seedance 叫全能参考，别的模型叫参考生成', () => {
-  for (const id of ['seedance-2.0', 'seedance-2.5', 'bytedance/seedance-2.0-fast']) assert.equal(referenceModeLabel(id), '全能参考', id);
-  for (const id of ['google/veo-3.1', 'kwaivgi/kling-v2.5', 'x-ai/grok-imagine-video', undefined]) assert.equal(referenceModeLabel(id), '参考生成', String(id));
-});
-
-test('视频模型分两族，认不出来的不算视频模型', () => {
-  assert.equal(videoFamilyOf('seedance-2.0-fast'), 'seedance');
-  assert.equal(videoFamilyOf('grok-imagine-video-1.5'), 'grok');
-  assert.equal(videoFamilyOf('MiniMax-H3'), null);
-  assert.equal(videoFamilyOf(undefined), null);
-  // 火山方舟的型号前面带 doubao-、后面带日期，一样认得出，附注也照常标。
-  assert.equal(videoFamilyOf('doubao-seedance-2-5-260628'), 'seedance');
   assert.equal(modelNote('doubao-seedance-2-0-fast-260128'), '快速版');
   assert.equal(modelNote('doubao-seedance-2-0-mini-260615'), '轻量版');
-  assert.equal(modelNote('doubao-seedance-2-0-260128'), '');
+  // 官方只有 Fast 和 Mini 两档有名字，不带后缀的不标；不是 Seedance 的也不标。
+  for (const id of ['doubao-seedance-2-0-260128', 'doubao-seedance-2-5-260628', 'doubao-seedream-5-0-pro-260628']) assert.equal(modelNote(id), '', id);
 });
 
-test('平台只有 Flatkey 和火山方舟；润色规则按型号选，认不出来的按 Seedance 处理', () => {
-  assert.equal(isProvider('flatkey'), true);
-  assert.equal(isProvider('ark'), true);
-  assert.equal(isProvider('openrouter'), false);
+test('润色规则按型号选，认不出来的视频型号按 Seedance 2.0 处理', () => {
   assert.match(polishGuide({ kind: 'video', model: 'doubao-seedance-2-0-260128', mode: 'text' }), /Seedance 视频模型/);
-  assert.match(polishGuide({ kind: 'video', model: 'grok-imagine-video', mode: 'text' }), /Grok Imagine 视频模型/);
   assert.match(polishGuide({ kind: 'video', model: 'some-new-model', mode: 'text' }), /Seedance 视频模型/);
   // 2.5 有自己的写法：知道时长就用时间戳分段，不知道就用镜头序号
   const v25 = 'doubao-seedance-2-5-260628';
@@ -49,30 +28,15 @@ test('平台只有 Flatkey 和火山方舟；润色规则按型号选，认不�
   assert.match(polishGuide({ kind: 'image', model: 'some-image-model' }), /AI 图片生成模型/);
 });
 
-test('参数范围：Grok 没有 1080p、21:9 和自动时长，seedance-2.5 没有 1080p', () => {
-  const seedance = videoCapabilities('seedance-2.0');
-  assert.deepEqual(seedance.resolutions, ['480p', '720p', '1080p']);
-  assert.equal(seedance.durations[0], 4);
-  assert.equal(seedance.autoDuration, true);
-  assert.ok(seedance.ratios.includes('adaptive'));
-
-  const grok = videoCapabilities('grok-imagine-video');
-  assert.deepEqual(grok.resolutions, ['480p', '720p']);
-  assert.deepEqual(grok.ratios, ['16:9', '4:3', '1:1', '3:4', '9:16']);
-  assert.equal(grok.durations[0], 1);
-  assert.equal(grok.durations.at(-1), 15);
-  assert.equal(grok.autoDuration, false);
-
-  assert.deepEqual(videoCapabilities('seedance-2.5').resolutions, ['480p', '720p']);
-});
-
-test('型号在界面上的名字：火山方舟的写成官方叫法，别的原样显示', () => {
+test('型号在界面上的名字：写成官方叫法，认不出来的原样显示', () => {
   assert.equal(modelLabel('doubao-seedance-2-5-260628'), 'Seedance 2.5');
   assert.equal(modelLabel('doubao-seedance-2-0-260128'), 'Seedance 2.0');
   assert.equal(modelLabel('doubao-seedance-2-0-fast-260128'), 'Seedance 2.0 Fast');
   assert.equal(modelLabel('doubao-seedance-2-0-mini-260615'), 'Seedance 2.0 Mini');
   assert.equal(modelLabel('doubao-seedream-5-0-pro-260628'), 'Seedream 5.0 Pro');
-  for (const id of ['seedance-2.0-fast', 'grok-imagine-video', 'doubao-seed-2-0-pro-260215', '']) assert.equal(modelLabel(id), id);
+  assert.equal(modelLabel('seed-tts-2.0'), 'Seed-TTS 2.0');
+  assert.equal(modelLabel('seed-audio-1.0'), 'Seed-Audio 1.0');
+  for (const id of ['seedance-2.0-fast', 'doubao-seed-2-0-pro-260215', '']) assert.equal(modelLabel(id), id);
 });
 
 test('火山引擎的费用按用量和单价估算', () => {
@@ -88,10 +52,46 @@ test('火山引擎的费用按用量和单价估算', () => {
   near(estimateCost({ ...image, usage: { size: '2816x1584' }, payload: { input_references: [{}, {}, {}] } }), 0.64);
   near(estimateCost({ ...image, model: 'doubao-seedream-5-0-flash-260915' }), 0.12);
   near(estimateCost({ ...image, model: 'doubao-seedream-5-0-260128' }), 0.22);
+  // 音效、配乐：按生成的秒数。
+  near(estimateCost({ kind: 'audio', tool: 'sfx', model: 'seed-audio-1.0', usage: { audio_seconds: 30 } }), 0.5);
   // 语音：按计费字符数。
   near(estimateCost({ kind: 'audio', tool: 'speech', model: 'seed-tts-2.0', usage: { text_words: 200 } }), 0.06);
   // 别的平台、没有用量、价目表里没有的档位：不估。
   assert.equal(estimateCost({ kind: 'video', model: 'seedance-2.0', usage: { completion_tokens: 100 }, payload: { resolution: '720p' } }), null);
   assert.equal(estimateCost({ ...video, usage: null }), null);
   assert.equal(estimateCost({ ...video, payload: { resolution: '4k' } }), null);
+});
+
+test('MiniMax H3：名字、附注、润色规则和按秒算的费用', () => {
+  assert.equal(modelLabel('MiniMax-H3'), 'MiniMax H3');
+  assert.equal(modelLabel('MiniMax-H3-Max'), 'MiniMax H3 Max');
+  assert.equal(modelNote('MiniMax-H3'), '');
+  assert.equal(modelNote('MiniMax-H3-Max'), '快速版');
+  // 没核对过官方写法，用通用的一份，不能把 Seedance 的规则套上去。
+  const guide = polishGuide({ kind: 'video', model: 'MiniMax-H3', mode: 'frames' });
+  assert.doesNotMatch(guide, /Seedance/);
+  assert.match(guide, /首尾帧生成/);
+  // 2K 0.80 元/秒；参考视频按输入秒数同价另收；参考图 5 张以内免费，之后每张 0.20。
+  const cost = (model, resolution, usage) => estimateCost({ model, kind: 'video', payload: { resolution }, usage });
+  assert.equal(cost('MiniMax-H3', '2K', { output_seconds: 5 }), 4);
+  assert.equal(cost('MiniMax-H3', '768P', { output_seconds: 10, input_seconds: 4, input_image_count: 7 }).toFixed(2), '7.40');
+  assert.equal(cost('MiniMax-H3-Max', '480P', { output_seconds: 10, input_image_count: 3 }).toFixed(2), '3.80');
+  assert.equal(cost('MiniMax-H3', '1080p', { output_seconds: 5 }), null);
+});
+
+test('AiHubMix 的图片模型：名字；GPT Image 2.5 各档大小都在它收的范围里', async () => {
+  const { AIHUBMIX_IMAGE_MODELS } = await import('../shared/models.ts');
+  assert.equal(modelLabel('gpt-image-2.5-sunburst'), 'GPT Image 2.5 Sunburst');
+  assert.equal(modelLabel('gpt-image-2.5-flare'), 'GPT Image 2.5 Flare');
+  assert.equal(modelLabel('gemini-nano-banana-2.1'), 'Nano Banana 2.1');
+  // 宽高都是 16 的倍数，长边不超过 3840，总像素 655,360 到 8,294,400，长宽比 1:3 到 3:1，并且和标着的比例对得上。
+  for (const [tier, sizes] of Object.entries(AIHUBMIX_IMAGE_MODELS['gpt-image-2.5-flare'].sizes)) {
+    for (const [ratio, size] of Object.entries(sizes)) {
+      const [w, h] = size.split('x').map(Number);
+      const [rw, rh] = ratio.split(':').map(Number);
+      assert.equal(w % 16 === 0 && h % 16 === 0 && Math.max(w, h) <= 3840, true, `${tier} ${ratio} ${size}`);
+      assert.equal(w * h >= 655360 && w * h <= 8294400, true, `${tier} ${ratio} ${size} 像素数`);
+      assert.equal(Math.abs(w / h - rw / rh) < 0.02, true, `${tier} ${ratio} ${size} 比例`);
+    }
+  }
 });

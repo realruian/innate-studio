@@ -3,14 +3,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { canLink, targetsOf, sourcesOf, linkLabel, joinPrompt, videoFormFrom, stripNodeData, nodeWidth, clipOf, pasteClip, snapTo, tidy, placeResults, groupFrame, runOrder, resolveMentions } from '../web/src/canvas/model.ts';
-import { buildRequest } from '../web/src/request.ts';
+import { buildVideoRequest } from '../web/src/request.ts';
 
 const base = {
-  mode: 'text', prompt: '', model: 'seedance-2.0', resolution: '720p', ratio: '16:9', duration: 5, durationAuto: true, generateAudio: true, watermark: false, seed: '', webSearch: false, inputType: 'auto',
-  sr: { enabled: false, by: 'resolution', resolution: '1080p', limit: 1440, scene: '', tool: 'standard', fps: '' },
+  mode: 'text', prompt: '', model: 'seedance-2.0', resolution: '720p', ratio: '16:9', duration: 5, durationAuto: true, generateAudio: true, seed: '',
   frames: { first: null, last: null },
   refs: { image: [], video: [], audio: [] },
 };
+const spec = { resolutions: ['480p', '720p'], ratios: ['16:9', '9:16'], durations: [4, 5, 8], autoDuration: false, frames: ['first_frame', 'last_frame'], audio: true, seed: true };
 const node = { prompt: '', model: 'seedance-2.0-fast', resolution: '480p', ratio: '9:16', duration: 8 };
 const ref = (kind, n) => ({ uid: `${kind}${n}`, kind, source: 'asset', assetId: `a${n}`, url: `asset://a${n}`, name: `${kind}${n}`, thumb: null });
 const input = (kind, role, n) => ({ kind, role, ref: ref(kind, n) });
@@ -43,7 +43,7 @@ test('没有素材连进来是文生视频，参数用节点自己的', () => {
   assert.deepEqual(problems, []);
   assert.equal(form.mode, 'text');
   assert.deepEqual([form.model, form.resolution, form.ratio, form.duration, form.durationAuto], ['seedance-2.0-fast', '480p', '9:16', 8, false]);
-  assert.deepEqual(buildRequest(form).problems, []);
+  assert.deepEqual(buildVideoRequest(form, spec).problems, []);
 });
 
 test('素材都是参考用途时是参考生成，按种类分开', () => {
@@ -52,8 +52,8 @@ test('素材都是参考用途时是参考生成，按种类分开', () => {
   assert.equal(form.mode, 'reference');
   assert.deepEqual(form.refs.image.map((r) => r.uid), ['image1', 'image3']);
   assert.deepEqual(form.refs.video.map((r) => r.uid), ['video2']);
-  const roles = buildRequest(form).payload.content.map((c) => c.role);
-  assert.deepEqual(roles, ['reference_image', 'reference_image', 'reference_video']);
+  const kinds = buildVideoRequest(form, spec).payload.input_references.map((c) => c.type);
+  assert.deepEqual(kinds, ['image_url', 'image_url', 'video_url']);
 });
 
 test('有连线标了首帧或尾帧就按首尾帧生成', () => {

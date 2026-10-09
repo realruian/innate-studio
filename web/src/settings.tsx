@@ -1,8 +1,10 @@
-// 设置弹窗：外观和润色用的模型、用哪个平台和它的 API Key、余额。三组，每组一个灰色小标题加几行。
+// 设置弹窗：外观和润色用的模型、火山引擎的几个 Key、余额。三组，每组一个灰色小标题加几行。
 
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { api, state, useStore, loadApp, loadModels, loadBalance, switchProvider, polishModel, setPolishModel } from './store.ts';
-import { PROVIDERS, DOUBAO_SPEECH, VOLC_BILLING, type ProviderId } from '../../shared/models.ts';
+import { api, state, useStore, loadApp, loadModels, loadBalance, polishModel, setPolishModel, canManage, isAdmin } from './store.ts';
+import { AccountSection, MembersSection } from './account.tsx';
+import { AIHUBMIX, ARK, DOUBAO_SPEECH, MINIMAX, VOLC_BILLING } from '../../shared/models.ts';
+import { fmtCredits } from './format.ts';
 import { themeChoice, setTheme } from './theme.ts';
 import { Segmented, FormRow, Dropdown } from './ui/controls.tsx';
 import { toast, openModal, confirmDialog } from './ui/layers.tsx';
@@ -14,53 +16,14 @@ function Settings() {
   useStore('app', 'models');
   const [theme, setThemeState] = useState(themeChoice());
   const [polish, setPolish] = useState(polishModel());
-  const [credits, setCredits] = useState('—');
-  const [switching, setSwitching] = useState(false);
-  const { hasKey, keyHint, keySource, provider } = state.app;
-  const { label: platform, keyPrefix, keysUrl } = PROVIDERS[provider];
+  const { hasKey, keyHint, keySource } = state.app;
+  const { label: platform } = ARK;
   const models = state.catalog.polish;
 
-  async function readCredits() {
-    if (!state.app.hasKey) return setCredits('—');
-    setCredits('加载中…');
-    try {
-      const { remaining, used, unavailable, currency } = await api('GET', '/api/credits');
-      // 火山方舟的余额在下面「账户余额」那一组里，要另配 Access Key。
-      if (unavailable || currency) return setCredits('');
-      setCredits(`剩余 ${amount(remaining)} · 已用 ${amount(used)}`);
-    } catch {
-      setCredits('获取失败');
-    }
-  }
-  useEffect(() => {
-    readCredits();
-  }, []);
-
-  // 换平台：之后新提交的生成都走新平台，两个平台的 Key 各存各的。
-  async function changeProvider(next: ProviderId) {
-    if (next === provider || switching) return;
-    setSwitching(true);
-    try {
-      await switchProvider(next);
-      setPolish(polishModel());
-      toast(`已切换到 ${PROVIDERS[next].label}`, 'success');
-    } catch (err) {
-      toast(message(err), 'error', 6000);
-    } finally {
-      setSwitching(false);
-      readCredits();
-    }
-  }
-
   async function save(value: string) {
-    if (!value.startsWith(keyPrefix)) {
-      const ok = await confirmDialog({ title: 'Key 格式异常', message: `${platform} 的 Key 通常以 ${keyPrefix} 开头，是否仍然保存？`, okText: '仍然保存' });
-      if (!ok) return false;
-    }
     try {
-      state.app = await api('PUT', '/api/key', { apiKey: value, provider });
+      state.app = await api('PUT', '/api/key', { apiKey: value });
       await loadApp();
-      readCredits();
       toast('API Key 已保存', 'success');
       // 换了 Key，可用的模型要重新读一遍。
       loadModels();
@@ -72,12 +35,11 @@ function Settings() {
   }
 
   async function remove() {
-    const ok = await confirmDialog({ title: `清除已保存的 ${platform} API Key？`, message: '清除后，进行中的任务将暂停查询。', okText: '清除', danger: true });
+    const ok = await confirmDialog({ title: `清除已保存的${platform} API Key？`, message: '清除后，进行中的任务将暂停查询。', okText: '清除', danger: true });
     if (!ok) return;
     try {
-      await api('DELETE', `/api/key?provider=${provider}`);
+      await api('DELETE', '/api/key');
       await loadApp();
-      readCredits();
       toast('已清除', 'success');
     } catch (err) {
       toast(message(err), 'error');
@@ -122,44 +84,37 @@ function Settings() {
         </div>
       </section>
 
+      {state.app.user && <AccountSection />}
+      {isAdmin() && <MembersSection />}
+
+      {/* Key 和余额：多人模式下只有管理员看得到、改得了。 */}
+      {canManage() && (
+        <>
       <section className="settings-group">
         <h3>模型平台</h3>
         <div className="settings-card">
-          <FormRow label="生成平台">
-            <Segmented options={(Object.keys(PROVIDERS) as ProviderId[]).map((id) => ({ value: id, label: PROVIDERS[id].label, disabled: switching }))} value={provider} onChange={changeProvider} />
-          </FormRow>
           <KeyRow
-            key={provider}
-            name={`${platform} `}
+            name={platform}
             label={`${platform} API Key`}
-            desc={
-              <>
-                在{' '}
-                <a href={keysUrl} target="_blank" rel="noopener">
-                  {platform} 控制台
-                </a>{' '}
-                创建
-              </>
-            }
-            placeholder={keyPrefix ? `${keyPrefix}…` : `粘贴 ${platform} 的 API Key`}
-            copyHint={`请从 ${platform} 控制台复制${keyPrefix ? `以 ${keyPrefix} 开头的` : ''} Key。`}
+            desc="Seedance、Seedream、提示词润色"
+            placeholder={`粘贴${platform}的 API Key`}
+            copyHint={`请从${platform}控制台重新复制。`}
             hasKey={hasKey}
             keyHint={keyHint}
             keySource={keySource}
             onSave={save}
             onRemove={remove}
           />
-          {credits && (
-            <FormRow label="账户余额">
-              <span className="muted amount">{credits}</span>
-            </FormRow>
-          )}
-          {provider === 'ark' && <SpeechKey />}
+          <MinimaxKey />
+          <AihubmixKey />
+          <SpeechKey />
         </div>
       </section>
 
-      {provider === 'ark' && <BillingKey />}
-      <p className="settings-hint">密钥仅保存在本地。</p>
+      <BillingKey />
+      <p className="settings-hint">{state.app.hosted ? '密钥仅保存在服务器，成员不可见。' : '密钥仅保存在本地。'}</p>
+        </>
+      )}
     </div>
   );
 }
@@ -236,11 +191,99 @@ function KeyRow({ name, label = 'API Key', desc, placeholder, copyHint = '', has
   );
 }
 
-// 豆包语音的 Key：火山方舟这条线上的语音用它。它和方舟不是一个产品，Key 要另外创建、另外填。排在「模型平台」那组里，方舟的 Key 下面。
+// MiniMax 的 Key：视频模型 MiniMax H3 用它，要国内站的。订阅 Key 扣的是积分，按量付费的 Key 扣的是账户余额；视频资源包不支持 H3。
+function MinimaxKey() {
+  useStore('app');
+  const { hasKey, keyHint, keySource } = state.app.minimax;
+  const { label } = MINIMAX;
+  async function save(value: string) {
+    try {
+      state.app = await api('PUT', '/api/key', { apiKey: value, service: 'minimax' });
+      await loadApp();
+      toast(`${label} 的 API Key 已保存`, 'success');
+      return true;
+    } catch (err) {
+      toast(message(err), 'error', 6000);
+      return false;
+    }
+  }
+
+  async function remove() {
+    const ok = await confirmDialog({ title: `清除已保存的 ${label} API Key？`, message: '清除后将无法使用 MiniMax H3。', okText: '清除', danger: true });
+    if (!ok) return;
+    try {
+      await api('DELETE', '/api/key?service=minimax');
+      await loadApp();
+      toast('已清除', 'success');
+    } catch (err) {
+      toast(message(err), 'error');
+    }
+  }
+
+  return (
+    <KeyRow
+      name={label}
+      label={`${label} API Key`}
+      desc="MiniMax H3"
+      placeholder={`粘贴 ${label} 的 API Key`}
+      hasKey={hasKey}
+      keyHint={keyHint}
+      keySource={keySource}
+      onSave={save}
+      onRemove={remove}
+    />
+  );
+}
+
+// AiHubMix 的 Key：图片模型 GPT Image 2.5、Nano Banana 2.1 用它。账号要先在它的控制台开启「异步任务」。
+function AihubmixKey() {
+  useStore('app');
+  const { hasKey, keyHint, keySource } = state.app.aihubmix;
+  const { label } = AIHUBMIX;
+  async function save(value: string) {
+    try {
+      state.app = await api('PUT', '/api/key', { apiKey: value, service: 'aihubmix' });
+      await loadApp();
+      toast(`${label} 的 API Key 已保存`, 'success');
+      return true;
+    } catch (err) {
+      toast(message(err), 'error', 6000);
+      return false;
+    }
+  }
+
+  async function remove() {
+    const ok = await confirmDialog({ title: `清除已保存的 ${label} API Key？`, message: '清除后将无法使用 GPT Image 2.5 和 Nano Banana 2.1。', okText: '清除', danger: true });
+    if (!ok) return;
+    try {
+      await api('DELETE', '/api/key?service=aihubmix');
+      await loadApp();
+      toast('已清除', 'success');
+    } catch (err) {
+      toast(message(err), 'error');
+    }
+  }
+
+  return (
+    <KeyRow
+      name={label}
+      label={`${label} API Key`}
+      desc="GPT Image 2.5、Nano Banana 2.1"
+      placeholder={`粘贴 ${label} 的 API Key`}
+      hasKey={hasKey}
+      keyHint={keyHint}
+      keySource={keySource}
+      onSave={save}
+      onRemove={remove}
+    />
+  );
+}
+
+// 豆包语音的 Key：语音用它。它和方舟不是一个产品，Key 要另外创建、另外填。排在「模型平台」那组里，方舟的 Key 下面。
 function SpeechKey() {
   useStore('app');
   const { hasKey, keyHint, keySource } = state.app.speech;
-  const { label, keysUrl } = DOUBAO_SPEECH;
+  const { label } = DOUBAO_SPEECH;
   async function save(value: string) {
     try {
       state.app = await api('PUT', '/api/key', { apiKey: value, service: 'speech' });
@@ -269,15 +312,7 @@ function SpeechKey() {
     <KeyRow
       name={label}
       label={`${label} API Key`}
-      desc={
-        <>
-          需开通「语音合成大模型」，在{' '}
-          <a href={keysUrl} target="_blank" rel="noopener">
-            {label}控制台
-          </a>{' '}
-          创建
-        </>
-      }
+      desc="语音、音效、配乐"
       placeholder={`粘贴${label}的 API Key`}
       hasKey={hasKey}
       keyHint={keyHint}
@@ -293,7 +328,7 @@ function SpeechKey() {
 function BillingKey() {
   useStore('app', 'balance');
   const { hasKey, keyHint, keySource } = state.app.billing;
-  const { label, keysUrl } = VOLC_BILLING;
+  const { label } = VOLC_BILLING;
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const id = useRef<HTMLInputElement>(null);
@@ -338,15 +373,7 @@ function BillingKey() {
           <>
             <FormRow
               label="Access Key"
-              desc={
-                <>
-                  在{' '}
-                  <a href={keysUrl} target="_blank" rel="noopener">
-                    火山引擎控制台
-                  </a>{' '}
-                  创建，建议使用费用中心只读子账号
-                </>
-              }
+              desc="查询火山引擎余额"
             >
               <span className="mono">{keyHint}</span>
               {keySource === 'env' ? (
@@ -387,17 +414,129 @@ function BillingKey() {
             </div>
           </>
         )}
+        <OtherBalances />
       </div>
-      {(!hasKey || editing) && (
-        <p className="settings-hint">
-          在{' '}
-          <a href={keysUrl} target="_blank" rel="noopener">
-            火山引擎控制台
-          </a>{' '}
-          创建，建议使用费用中心只读子账号。
-        </p>
-      )}
     </section>
+  );
+}
+
+// 另外两个账户的余额。MiniMax 的余额没有查询接口，手动填控制台上看到的数，之后按估算的费用扣；充值后要重新填。
+// MiniMax 的余额有两种：订阅 Key 用的是积分，按量付费的 Key 用的是账户余额（元），填的时候选单位。
+// AiHubMix 的要另填一个 Manage Key（不是生图用的 API Key），保存时服务端会先查一次，查不到就不存。
+function OtherBalances() {
+  useStore('app', 'balance');
+  const { hasKey, keyHint, keySource } = state.app.aihubmixManage;
+  const minimax = state.minimaxBalance;
+  const [saving, setSaving] = useState(false);
+  const [unit, setUnit] = useState<'credits' | 'cny'>(minimax?.unit || 'credits');
+  const [editing, setEditing] = useState(false);
+  const input = useRef<HTMLInputElement>(null);
+
+  async function saveMinimax() {
+    const value = input.current!.value.trim();
+    if (!/^\d+(\.\d{1,2})?$/.test(value)) return toast(unit === 'credits' ? '请输入积分数，例如 4489' : '请输入余额，例如 30 或 26.50', 'error');
+    setSaving(true);
+    try {
+      await api('PUT', '/api/balance/minimax', { amount: Number(value), unit });
+      await loadBalance();
+      setEditing(false);
+      toast('MiniMax 余额已更新', 'success');
+    } catch (err) {
+      toast(message(err), 'error');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function clearMinimax() {
+    try {
+      await api('DELETE', '/api/balance/minimax');
+      await loadBalance();
+      toast('已清除', 'success');
+    } catch (err) {
+      toast(message(err), 'error');
+    }
+  }
+
+  async function saveManage(value: string) {
+    try {
+      state.app = await api('PUT', '/api/key', { apiKey: value, service: 'aihubmix-manage' });
+      await loadApp();
+      await loadBalance();
+      toast('Manage Key 已保存', 'success');
+      return true;
+    } catch (err) {
+      toast(message(err), 'error', 8000);
+      return false;
+    }
+  }
+
+  async function removeManage() {
+    const ok = await confirmDialog({ title: '清除已保存的 Manage Key？', message: '清除后不再显示 AiHubMix 余额。', okText: '清除', danger: true });
+    if (!ok) return;
+    try {
+      await api('DELETE', '/api/key?service=aihubmix-manage');
+      await loadApp();
+      await loadBalance();
+      toast('已清除', 'success');
+    } catch (err) {
+      toast(message(err), 'error');
+    }
+  }
+
+  return (
+    <>
+        {minimax && !editing ? (
+          <FormRow label="MiniMax 余额" desc="手动填写，按估算扣减">
+            <span className="muted amount">{minimax.unit === 'credits' ? fmtCredits(minimax.remaining) : `¥${amount(minimax.remaining)}`}</span>
+            <button className="btn btn-sm" type="button" onClick={() => setEditing(true)}>
+              更新
+            </button>
+            <button className="btn btn-sm" type="button" onClick={clearMinimax}>
+              清除
+            </button>
+          </FormRow>
+        ) : (
+          <div className="form-row">
+            <div className="form-label">MiniMax 余额</div>
+            <div className="form-control key-edit">
+              <Segmented
+                options={[
+                  { value: 'credits', label: '积分' },
+                  { value: 'cny', label: '元' },
+                ]}
+                value={unit}
+                onChange={setUnit}
+              />
+              <input ref={input} className="input" type="text" inputMode="decimal" placeholder={unit === 'credits' ? '当前积分' : '当前余额'} aria-label="MiniMax 余额" onKeyDown={(e) => e.key === 'Enter' && saveMinimax()} />
+              <button className="btn btn-primary" type="button" disabled={saving} onClick={saveMinimax}>
+                保存
+              </button>
+              {minimax && (
+                <button className="btn" type="button" onClick={() => setEditing(false)}>
+                  取消
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+        <KeyRow
+          name="AiHubMix Manage "
+          label="AiHubMix Manage Key"
+          desc="查询 AiHubMix 余额"
+          placeholder="粘贴 AiHubMix 的 Manage Key"
+          hasKey={hasKey}
+          keyHint={keyHint}
+          keySource={keySource}
+          onSave={saveManage}
+          onRemove={removeManage}
+        />
+        {hasKey && (
+          <FormRow label="AiHubMix 余额">
+            <span className="muted amount">{state.aihubmixBalance?.remaining != null ? `$${amount(state.aihubmixBalance.remaining)}` : '获取失败'}</span>
+          </FormRow>
+        )}
+    </>
   );
 }
 

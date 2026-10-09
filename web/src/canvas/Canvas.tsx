@@ -3,15 +3,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { Background, BackgroundVariant, MiniMap, Panel, Position, ReactFlow, ReactFlowProvider, SelectionMode, ViewportPortal, getBezierPath, useEdgesState, useNodesState, useReactFlow, useStoreApi, useViewport, type Connection, type Edge, type Node, type NodeChange, type OnConnectEnd, type Viewport } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { api, canvasPath, state, useStore, KINDS as MEDIA } from '../store.ts';
-import { composer, imageRefLimit, traits } from '../composer/state.ts';
+import { api, canvasPath, useStore, KINDS as MEDIA } from '../store.ts';
+import { composer, imageRefLimit } from '../composer/state.ts';
 import { kindOfFile, uploadLocalFile } from '../media.ts';
-import { openAssetPicker } from '../assets.tsx';
 import { Icon } from '../ui/Icon.tsx';
 import { tip } from '../ui/controls.tsx';
 import { openMenu, openPopover, toast } from '../ui/layers.tsx';
 import { reducedMotion } from '../ui/motion.ts';
-import type { HistoryItem, Kind } from '../types.ts';
+import type { HistoryItem } from '../types.ts';
 import { BOX_HEIGHT, NODE_LABELS, TITLE_ROOM, canLink, MAX_STACK, PINS, PIN_LABELS, clipOf, groupFrame, isGroup, isStack, nodeWidth, numbered, pasteClip, snapTo, sourcesOf, stripNodeData, targetsOf, tidy, type Clip, type GroupData, type Guide, type LinkData, type NodeKind, type Pin, type Rect } from './model.ts';
 import { coverOf, newNodeData } from './run.ts';
 import { AudioNode, CanvasActions, DragLine, GroupNode, ImageNode, LinkEdge, NODE_ICONS, StackNode, TextNode, VideoNode } from './nodes.tsx';
@@ -75,8 +74,8 @@ const savedEdges = (edges: Edge[]) => edges.map(({ id, source, target, data }) =
 
 function makeEdge(source: Node, target: Node): Edge {
   const data: LinkData = { kind: source.type as NodeKind };
-  // 图片连到视频默认当参考图；目标模型不支持参考生成（Grok）时当首帧。连到图片的都是参考图，不分用途。
-  if (data.kind === 'image' && target.type === 'video') data.role = traits((target.data as { model?: string }).model).reference ? 'reference' : 'first';
+  // 图片连到视频默认当参考图。连到图片的都是参考图，不分用途。
+  if (data.kind === 'image' && target.type === 'video') data.role = 'reference';
   return { id: crypto.randomUUID(), source: source.id, target: target.id, type: 'link', data: data as unknown as Record<string, unknown> };
 }
 
@@ -254,7 +253,7 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
     [flow],
   );
 
-  // link 是新节点要和哪个节点连上：from 是它的上游，to 是它的下游。extra 是节点一出来就带着的内容：上传的文件，或者从素材库选的素材。
+  // link 是新节点要和哪个节点连上：from 是它的上游，to 是它的下游。extra 是节点一出来就带着的内容：上传的文件、一条生成记录。
   const addNode = useCallback(
     (kind: NodeKind, at?: { x: number; y: number }, link?: { from?: Node; also?: Node[]; to?: Node }, extra?: Record<string, unknown>) => {
       snap();
@@ -345,16 +344,6 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
     },
     [addNode],
   );
-
-  // 素材库：先问要哪一类，再从素材库或真人素材里挑一份，变成一个节点。
-  function pickFromLibrary(button: HTMLElement) {
-    const sources = [...(state.app.features.library ? (['library'] as const) : []), ...(state.app.features.persons ? (['person'] as const) : [])];
-    openMenu(button, {
-      label: '从素材库添加',
-      items: (Object.keys(MEDIA) as Kind[]).map((kind) => ({ value: kind, label: MEDIA[kind].label })),
-      onSelect: (kind) => openAssetPicker({ kind: kind as Kind, remaining: 1, sources: [...sources], onPick: (asset) => addNode(kind as NodeKind, undefined, undefined, { asset }) }),
-    });
-  }
 
   // ---------- 搜索、生成历史 ----------
 
@@ -982,7 +971,6 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
     for (const node of nodes) if (!node.hidden) for (const pin of (node.data.pin as Pin[] | undefined) || []) by[pin]?.push(node);
     return by;
   }, [nodes]);
-  const hasLibrary = state.app.features.library || state.app.features.persons;
 
   return (
     <CanvasActions.Provider value={actions}>
@@ -1143,12 +1131,6 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
               </button>
             ))}
             <span className="canvas-tools-split" />
-            {hasLibrary && (
-              <button className="icon-btn" type="button" aria-label="从素材库添加" aria-haspopup="menu" aria-expanded="false" onClick={(e) => pickFromLibrary(e.currentTarget)}>
-                <Icon name="folder" size={18} />
-                <span className="canvas-tool-name">素材库</span>
-              </button>
-            )}
             <button className="icon-btn" type="button" aria-label="上传图片、视频或音频" onClick={() => file.current!.click()}>
               <Icon name="upload" size={18} />
               <span className="canvas-tool-name">上传</span>

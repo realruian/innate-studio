@@ -2,8 +2,8 @@
 // 状态是一个普通对象，改完后用 emit() 说一声是哪一块变了；组件用 useStore() 订阅自己关心的那几块。
 
 import { useSyncExternalStore } from 'react';
-import { PROVIDERS, type VideoSpec } from '../../shared/models.ts';
-import type { AppInfo, Asset, Character, CreateType, HistoryItem, Kind, Person, RefStatus, Skill, ViewId, Voice } from './types.ts';
+import type { VideoSpec } from '../../shared/models.ts';
+import type { AppInfo, Character, CreateType, HistoryItem, Kind, Skill, ViewId, Voice } from './types.ts';
 
 export class ApiError extends Error {
   status: number;
@@ -36,17 +36,17 @@ export async function api<T = any>(method: string, url: string, body?: unknown, 
   } catch {
     /* 非 JSON 响应按空处理 */
   }
+  // 登录过期了（或者在别处改了密码）：回到登录页。
+  if (res.status === 401 && data?.error?.code === 'login_required' && state.app.user) location.reload();
   if (!res.ok) throw new ApiError(res.status, data?.error?.code || '', data?.error?.message || `请求失败（${res.status}）`);
   return data;
 }
 
-export const KINDS: Record<Kind, { label: string; type: string; accept: string; max: number; maxBytes: number }> = {
-  image: { label: '图片', type: 'Image', accept: 'image/*', max: 9, maxBytes: 30 * 1024 * 1024 },
-  video: { label: '视频', type: 'Video', accept: 'video/*', max: 3, maxBytes: 50 * 1024 * 1024 },
-  audio: { label: '音频', type: 'Audio', accept: 'audio/*', max: 3, maxBytes: 15 * 1024 * 1024 },
+export const KINDS: Record<Kind, { label: string; accept: string; max: number; maxBytes: number }> = {
+  image: { label: '图片', accept: 'image/*', max: 9, maxBytes: 30 * 1024 * 1024 },
+  video: { label: '视频', accept: 'video/*', max: 3, maxBytes: 50 * 1024 * 1024 },
+  audio: { label: '音频', accept: 'audio/*', max: 3, maxBytes: 15 * 1024 * 1024 },
 };
-
-export const kindOfType = (type?: string): Kind => (({ image: 'image', video: 'video', audio: 'audio' }) as Record<string, Kind>)[String(type || '').toLowerCase()] || 'image';
 
 // 画布有自己的地址：#/canvas 是项目列表，#/canvas/<id> 是一张画布。刷新之后还在原来那张画布里，也可以在新标签页里打开。
 export const canvasPath = (id = '') => `#/canvas${id ? `/${id}` : ''}`;
@@ -65,33 +65,28 @@ export const state = {
   recordsType: 'all' as CreateType | 'all',
   // 记录页看的是创作页生成的，还是画布里生成的。
   recordsSource: 'create' as 'create' | 'canvas',
-  app: { hasKey: false, keyHint: '', keySource: '', baseUrl: '', provider: 'flatkey', features: PROVIDERS.flatkey.features, providers: [], speech: { hasKey: false, keyHint: '', keySource: '', baseUrl: '' }, billing: { hasKey: false, keyHint: '', keySource: '', baseUrl: '' } } as AppInfo,
-  models: ['seedance-2.0', 'seedance-2.0-fast'] as string[],
-  // 火山方舟的模型各自支持什么（分辨率、比例、时长、首尾帧）。Flatkey 的模型登记在 shared/models.ts，这里是空的。
+  app: { hosted: false, user: null, hasKey: false, keyHint: '', keySource: '', baseUrl: '', minimax: { hasKey: false, keyHint: '', keySource: '', baseUrl: '' }, aihubmix: { hasKey: false, keyHint: '', keySource: '', baseUrl: '' }, aihubmixManage: { hasKey: false, keyHint: '', keySource: '', baseUrl: '' }, speech: { hasKey: false, keyHint: '', keySource: '', baseUrl: '' }, billing: { hasKey: false, keyHint: '', keySource: '', baseUrl: '' } } as AppInfo,
+  models: [] as string[],
+  // 每个视频模型各自支持什么（分辨率、比例、时长、首尾帧），由本地服务随模型列表一起给。
   videoSpecs: {} as Record<string, VideoSpec>,
   modelsInfo: { source: 'default', error: '', note: '' },
   // 视频之外账号还能用什么。known 为 false 表示还没读到模型列表，这时不拦任何一种创作。
-  // imageRatios 是火山方舟每个图片模型收哪些画面比例；Flatkey 上没有这一项，比例不受限。
-  // imageRefs 是火山方舟每个图片模型最多收几张参考图；Flatkey 上没有，生图不能带参考图。
-  // imageSizes 是火山方舟每个图片模型能选的几档分辨率和默认的那一档；Flatkey 上没有，不能选。
-  catalog: { known: false, image: [] as string[], imageRatios: {} as Record<string, string[]>, imageRefs: {} as Record<string, number>, imageSizes: {} as Record<string, { options: string[]; default: string }>, polish: [] as string[], audio: { speech: false, sfx: false, music: false } },
+  // imageRatios 是每个图片模型收哪些画面比例，imageRefs 是最多收几张参考图，imageSizes 是能选的几档分辨率和默认的那一档，imageQualities 是分画质的模型能选的几档画质和默认的那一档。
+  catalog: { known: false, image: [] as string[], imageRatios: {} as Record<string, string[]>, imageRefs: {} as Record<string, number>, imageSizes: {} as Record<string, { options: string[]; default: string }>, imageQualities: {} as Record<string, { options: string[]; default: string }>, polish: [] as string[] },
   voices: null as Voice[] | null,
   history: [] as HistoryItem[],
   historyLoaded: false,
-  assets: [] as Asset[],
-  // 角色和技能存在本机，和平台无关。null 是还没读过。
+  // 角色和技能。null 是还没读过。
   characters: null as Character[] | null,
   skills: null as Skill[] | null,
-  persons: null as Person[] | null,
-  personsError: '',
-  personAssets: {} as Record<string, Asset[]>,
-  watchedPersons: new Set<string>(),
-  watchedPersonView: '',
   // 账户余额（元），查不到是 null。
   balance: null as number | null,
+  // 另外两个账户的余额，没配就是 null。MiniMax 的是手动填的数减去之后估算的花费，amount 是填的那个数，unit 是它的单位（cny 是元，credits 是积分）；AiHubMix 的（美元）是用 Manage Key 查的，查不到时 remaining 是 null。
+  minimaxBalance: null as { remaining: number; amount: number; at: number; unit: 'cny' | 'credits' } | null,
+  aihubmixBalance: null as { remaining: number | null; error?: string } | null,
 };
 
-export type StoreEvent = 'boot' | 'view' | 'app' | 'models' | 'history' | 'assets' | 'persons' | 'createType' | 'recordsType' | 'recordsSource' | 'composer' | 'immersive' | 'characters' | 'skills' | 'balance';
+export type StoreEvent = 'boot' | 'view' | 'app' | 'models' | 'history' | 'createType' | 'recordsType' | 'recordsSource' | 'composer' | 'immersive' | 'characters' | 'skills' | 'balance';
 
 const listeners: Partial<Record<StoreEvent, Set<() => void>>> = {};
 const versions: Partial<Record<StoreEvent, number>> = {};
@@ -134,25 +129,35 @@ export function setImmersive(on: boolean) {
   emit('immersive');
 }
 
+// 多人模式下还没登录：这时只显示登录页。
+export const needsLogin = () => state.app.hosted && !state.app.user;
+export const isAdmin = () => state.app.user?.role === 'admin';
+// 能不能管 Key：本机模式谁都能，多人模式只有管理员能。
+export const canManage = () => !state.app.hosted || isAdmin();
+
 export async function loadApp() {
-  // 本地服务还是改之前的版本时，返回里没有平台那几项，这时保留默认的（Flatkey）。
   state.app = { ...state.app, ...(await api('GET', '/api/state')) };
   emit('app');
 }
 
-// 账户余额（元）。只有火山引擎配了 Access Key 才查得到，查不到是 null。每生成完一条就该再查一次。
+// 三个账户的余额。火山的（元）配了 Access Key 才查得到，查不到是 null；MiniMax、AiHubMix 的见上面 state 里的说明。每生成完一条就该再查一次。
 export async function loadBalance() {
-  let balance: number | null = null;
-  if (state.app.provider === 'ark' && state.app.billing.hasKey) {
-    try {
-      const { remaining, unavailable } = await api('GET', '/api/credits');
-      balance = unavailable ? null : remaining;
-    } catch {
-      balance = state.balance;
-    }
+  if (!canManage()) return;
+  let balance = state.balance;
+  let minimax = state.minimaxBalance;
+  let aihubmix = state.aihubmixBalance;
+  try {
+    const data = await api('GET', '/api/credits');
+    balance = data.unavailable ? null : data.remaining;
+    minimax = data.minimax || null;
+    aihubmix = data.aihubmix ? { remaining: data.aihubmix.error ? null : data.aihubmix.remaining, error: data.aihubmix.error } : null;
+  } catch {
+    // 火山的没查到：保留上次的数，另外两个也不动。
   }
-  if (balance === state.balance) return;
+  if (balance === state.balance && JSON.stringify([minimax, aihubmix]) === JSON.stringify([state.minimaxBalance, state.aihubmixBalance])) return;
   state.balance = balance;
+  state.minimaxBalance = minimax;
+  state.aihubmixBalance = aihubmix;
   emit('balance');
 }
 
@@ -161,18 +166,8 @@ export async function loadModels() {
   state.models = data.models;
   state.videoSpecs = data.videoSpecs || {};
   state.modelsInfo = { source: data.source, error: data.error || '', note: data.note || '' };
-  state.catalog = { known: !data.error, image: data.imageModels || [], imageRatios: data.imageRatios || {}, imageRefs: data.imageRefs || {}, imageSizes: data.imageSizes || {}, polish: data.polishModels || [], audio: data.audio || {} };
+  state.catalog = { known: !data.error, image: data.imageModels || [], imageRatios: data.imageRatios || {}, imageRefs: data.imageRefs || {}, imageSizes: data.imageSizes || {}, imageQualities: data.imageQualities || {}, polish: data.polishModels || [] };
   emit('models');
-}
-
-// 换平台。模型、音色都是跟着平台走的，换完重新读。
-export async function switchProvider(provider: AppInfo['provider']) {
-  state.app = await api('PUT', '/api/provider', { provider });
-  state.voices = null;
-  // 新平台的模型列表读到之前，先不按旧平台的列表拦着。
-  state.catalog = { ...state.catalog, known: false, polish: [], imageRatios: {}, imageRefs: {}, imageSizes: {} };
-  emit('app');
-  if (state.app.hasKey) await loadModels();
 }
 
 export async function loadVoices() {
@@ -205,7 +200,7 @@ let historySignature = '';
 
 export async function loadHistory() {
   const data = await api<{ items: HistoryItem[] }>('GET', '/api/history');
-  const signature = JSON.stringify(data.items.map((i) => [i.id, i.status, i.progress, i.mediaUrl, i.pollError, i.downloadError, i.error?.message]));
+  const signature = JSON.stringify(data.items.map((i) => [i.id, i.status, i.progress, i.mediaUrl, i.thumbUrl, i.pollError, i.downloadError, i.error?.message]));
   state.history = data.items;
   if (signature !== historySignature || !state.historyLoaded) {
     historySignature = signature;
@@ -234,11 +229,6 @@ export function startHistoryLoop() {
   run();
 }
 
-export async function loadAssets() {
-  state.assets = (await api('GET', '/api/assets')).items;
-  emit('assets');
-}
-
 export async function loadCharacters() {
   state.characters = (await api<{ items: Character[] }>('GET', '/api/characters')).items;
   emit('characters');
@@ -249,85 +239,4 @@ export async function loadSkills() {
   state.skills = (await api<{ items: Skill[] }>('GET', '/api/skills')).items;
   emit('skills');
   return state.skills;
-}
-
-function putAsset(asset: Asset) {
-  const index = state.assets.findIndex((a) => a.id === asset.id);
-  if (asset.kind !== 'virtual') return;
-  if (index === -1) state.assets.unshift(asset);
-  else state.assets[index] = asset;
-}
-
-export function rememberAsset(asset: Asset) {
-  putAsset(asset);
-  emit('assets');
-}
-
-export async function refreshAsset(id: string) {
-  const asset = await api<Asset>('GET', `/api/assets/${id}`);
-  putAsset(asset);
-  emit('assets');
-  return asset;
-}
-
-export async function loadPersons() {
-  try {
-    state.persons = (await api('GET', '/api/real-persons')).items;
-    state.personsError = '';
-  } catch (err) {
-    state.persons = [];
-    state.personsError = (err as Error).message;
-  }
-  emit('persons');
-}
-
-export async function loadPersonAssets(personId: string) {
-  state.personAssets[personId] = (await api('GET', `/api/real-persons/${personId}/assets?limit=50`)).items;
-  emit('assets');
-  return state.personAssets[personId];
-}
-
-export function findAsset(id?: string) {
-  const virtual = state.assets.find((a) => a.id === id);
-  if (virtual) return virtual;
-  for (const list of Object.values(state.personAssets)) {
-    const hit = list.find((a) => a.id === id);
-    if (hit) return hit;
-  }
-  return null;
-}
-
-// 素材能不能用于某个模型。虚拟素材看 available_models，真人素材只看 status。
-// status 是这个 Key 下所有相关模型的汇总：只要有一个模型没准备好，它就是 Processing 甚至 Failed，
-// 但已经列在 available_models 里的模型照样能用（Flatkey 文档的说法，2026-10-09 用一段视频素材实测过：
-// 汇总状态是 Failed，Seedance 2.0 的几个型号都在列表里，提交能成功）。所以先看目标模型在不在列表里。
-export function assetReadiness(asset: Asset | null, model?: string): Required<RefStatus> {
-  if (!asset) return { ready: false, tone: 'pending', label: '查询中' };
-  const status = asset.status || '';
-  const usable = asset.available_models || [];
-  if (status === 'Expired') return { ready: false, tone: 'error', label: '已过期' };
-  if (status === 'Deleting' || status === 'Deleted') return { ready: false, tone: 'error', label: '已删除' };
-  if (status === 'Active') return { ready: true, tone: 'ok', label: '可用' };
-  if (model && usable.includes(model)) return { ready: true, tone: 'ok', label: '可用' };
-  // 没指定模型时（素材库页面）：有模型能用就不算失败，具体哪些能用看下面列出的「可用模型」。
-  if (status === 'Failed') return !model && usable.length ? { ready: true, tone: 'ok', label: '部分模型可用' } : { ready: false, tone: 'error', label: '处理失败' };
-  if (status === 'Creating') return { ready: false, tone: 'pending', label: '上传中' };
-  return { ready: false, tone: 'pending', label: '处理中' };
-}
-
-const SETTLED = new Set(['Active', 'Failed', 'Expired', 'Deleted']);
-
-export function startAssetLoop() {
-  const run = async () => {
-    const jobs: Promise<unknown>[] = state.assets.filter((a) => !SETTLED.has(a.status || '')).map((a) => refreshAsset(a.id).catch(() => {}));
-    const persons = new Set(state.watchedPersons);
-    if (state.watchedPersonView) persons.add(state.watchedPersonView);
-    for (const personId of persons) {
-      const list = state.personAssets[personId];
-      if (!list || list.some((a) => !SETTLED.has(a.status || ''))) jobs.push(loadPersonAssets(personId).catch(() => {}));
-    }
-    await Promise.all(jobs);
-    setTimeout(run, 4000);
-  };
-  setTimeout(run, 4000);
 }

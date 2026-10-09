@@ -6,9 +6,9 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { BaseEdge, Handle, NodeToolbar, Position, getBezierPath, useConnection, useEdges, useInternalNode, useReactFlow, useStore as useFlowStore, useUpdateNodeInternals, type ConnectionLineComponentProps, type EdgeProps, type Node, type NodeProps } from '@xyflow/react';
 import { state, useStore, loadVoices, isPendingTask, polishModel, KINDS as MEDIA } from '../store.ts';
-import { RATIOS, capabilities, fitImageSize, imageRatios, imageRefLimit, imageSizes, traits, voiceName } from '../composer/state.ts';
-import { modelLabel, modelNote } from '../../../shared/models.ts';
-import { recordName, uploadLocalFile, uploadVirtualAsset } from '../media.ts';
+import { RATIOS, fitImageQuality, fitImageSize, hasLastFrame, imageQualities, imageRatios, imageRefLimit, imageSizes, specOf, voiceName } from '../composer/state.ts';
+import { IMAGE_QUALITY_LABELS, modelLabel, modelNote } from '../../../shared/models.ts';
+import { recordName, uploadLocalFile } from '../media.ts';
 import { openAssetPicker } from '../assets.tsx';
 import { Icon, type IconName } from '../ui/Icon.tsx';
 import { Dropdown, tip } from '../ui/controls.tsx';
@@ -22,7 +22,7 @@ import { fitVideo, generate, nameOf, outputOf, recordOf, runAll } from './run.ts
 import { Cropper, cropImage, grabFrame, padImage, splitGrid, type Made } from './edit.tsx';
 
 // 画布页交给节点用的几件事。snap：会改动画布结构的操作，动手之前调一下，撤销时回到这一刻。
-// addInput：在某个节点左边加一个节点并连进它，extra 是新节点一出来就带着的内容（上传的文件、素材库里的素材）。
+// addInput：在某个节点左边加一个节点并连进它，extra 是新节点一出来就带着的内容（上传的文件）。
 // ungroup：解散一个分组（只去掉框，里面的节点留着）。saveWorkflow：把一个分组存成工作流。
 // unstack：把一叠摊开；只给一个成员就只取回它。
 // addBeside：把几张做好的图（裁剪、切分、截帧的结果）各变成一个图片节点，摆在某个节点右边；columns 是一行摆几个。
@@ -349,16 +349,6 @@ function Result({ kind, data, onShape }: { kind: NodeKind; data: MediaData; onSh
     </div>
   );
   if (data.busy) return waiting(data.busy);
-  if (data.asset) {
-    return data.asset.thumb ? (
-      <div className="cnode-library">
-        <img className="cnode-pic" src={data.asset.thumb} alt={data.asset.name} draggable={false} onLoad={measure} />
-        <span className="cnode-badge">素材库</span>
-      </div>
-    ) : (
-      blank(`素材库 · ${data.asset.name}`)
-    );
-  }
   if (data.upload && kind === 'image') return <img className="cnode-pic" src={data.upload.url} alt={data.upload.name} draggable={false} onLoad={measure} />;
   if (data.upload && kind === 'audio') {
     return (
@@ -443,23 +433,22 @@ function Clip({ src, label, onShape }: { src: string; label: string; onShape?: (
   );
 }
 
-// 名字行右端的操作：有内容时一个「全屏查看」，再加一个「更多」（下载、存到素材库、替换图片）。
+// 名字行右端的操作：有内容时一个「全屏查看」，再加一个「更多」（下载、替换图片）。
 // onUpload：图片节点可以上传一张图放进来；节点还空着的时候只有这一个按钮。
 function NodeTools({ id, kind, data, onUpload }: { id: string; kind: Kind; data: MediaData; onUpload?: () => void }) {
   const flow = useReactFlow();
   const { addBeside, addNodeBeside, continueVideo, snap } = useContext(CanvasActions);
   useStore('history', 'app');
   const record = recordOf(data);
-  // 这个节点里现在放着的东西：生成的结果、上传的文件，或者素材库里的素材。
+  // 这个节点里现在放着的东西：生成的结果，或者上传的文件。
   const done = record?.status === 'completed' && record.mediaUrl ? record : null;
-  const file = data.asset ? null : done ? { url: done.mediaUrl!, name: recordName(done), local: Boolean(done.savedLocally) } : data.upload ? { ...data.upload, local: true } : null;
-  const canSave = Boolean(file?.local) && state.app.features.library;
+  const file = done ? { url: done.mediaUrl!, name: recordName(done), local: Boolean(done.savedLocally) } : data.upload ? { ...data.upload, local: true } : null;
 
   function view() {
     if (done) return openDetail(done.id);
-    const url = data.upload?.url || data.asset?.url;
+    const url = data.upload?.url;
     if (!url) return;
-    openModal({ title: data.upload?.name || data.asset?.name || MEDIA[kind].label, size: 'detail', content: <div className="cnode-view">{kind === 'image' ? <img src={url} alt="" /> : kind === 'video' ? <VideoPlayer src={url} label={MEDIA[kind].label} /> : <AudioPlayer src={url} />}</div> });
+    openModal({ title: data.upload?.name || MEDIA[kind].label, size: 'detail', content: <div className="cnode-view">{kind === 'image' ? <img src={url} alt="" /> : kind === 'video' ? <VideoPlayer src={url} label={MEDIA[kind].label} /> : <AudioPlayer src={url} />}</div> });
   }
 
   function download() {
@@ -471,22 +460,6 @@ function NodeTools({ id, kind, data, onUpload }: { id: string; kind: Kind; data:
     else link.target = '_blank';
     link.rel = 'noopener';
     link.click();
-  }
-
-  async function save() {
-    if (!file) return;
-    toast('正在保存到素材库…', 'info', 1800);
-    try {
-      const res = await fetch(file.url);
-      if (!res.ok) throw new Error('文件已不存在');
-      const blob = await res.blob();
-      const asset = await uploadVirtualAsset(new File([blob], `${file.name}.${file.url.split('.').pop()}`, { type: blob.type }), kind);
-      // 记在节点上：之后拿它去给 Seedance 当参考，不用再传一遍。
-      flow.updateNodeData(id, { assetId: asset.id, assetOf: file.url });
-      toast('已保存到素材库', 'success');
-    } catch (err) {
-      toast((err as Error).message, 'error', 6000);
-    }
   }
 
   // 裁剪、切分、截帧都在浏览器里做，要读得到文件本身，所以只对存在本机的内容开放。结果是新的图片节点，摆在这个节点右边。
@@ -535,7 +508,7 @@ function NodeTools({ id, kind, data, onUpload }: { id: string; kind: Kind; data:
     }
   }
   async function extend() {
-    if (!traits((data as VideoData).model).frames) return toast(`${modelLabel((data as VideoData).model)} 不支持首帧，请更换模型`, 'info');
+    if (!specOf((data as VideoData).model).frames.includes('first_frame')) return toast(`${modelLabel((data as VideoData).model)} 不支持首帧，请更换模型`, 'info');
     toast('正在截取最后一帧…', 'info', 1800);
     try {
       continueVideo(id, await grabFrame(file!.url, 'last', `${file!.name}-尾帧`));
@@ -551,8 +524,7 @@ function NodeTools({ id, kind, data, onUpload }: { id: string; kind: Kind; data:
     ...(local && kind === 'image' ? [{ value: 'crop', label: '裁剪' }, { value: 'grid', label: '切成宫格…' }, ...(ratios.length ? [{ value: 'outpaint', label: '扩图…' }] : [])] : []),
     ...(local && kind === 'video' ? [{ value: 'extend', label: '延长' }, { value: 'frame', label: '截取当前帧' }, { value: 'first', label: '截取首帧' }, { value: 'last', label: '截取尾帧' }] : []),
     ...(file ? [{ value: 'download', label: '下载' }] : []),
-    ...(canSave ? [{ value: 'save', label: '保存到素材库' }] : []),
-    ...(onUpload ? [{ value: 'upload', label: file || data.asset ? '替换图片' : '上传图片' }] : []),
+    ...(onUpload ? [{ value: 'upload', label: file ? '替换图片' : '上传图片' }] : []),
   ];
   const acts: Record<string, () => void> = {
     crop,
@@ -563,12 +535,11 @@ function NodeTools({ id, kind, data, onUpload }: { id: string; kind: Kind; data:
     first: () => make('截帧', async () => [await grabFrame(file!.url, 0, `${file!.name}-首帧`)]),
     last: () => make('截帧', async () => [await grabFrame(file!.url, 'last', `${file!.name}-尾帧`)]),
     download,
-    save,
     upload: () => onUpload?.(),
   };
   const act = (value: string) => acts[value]?.();
 
-  const hasContent = Boolean(done || data.upload || data.asset);
+  const hasContent = Boolean(done || data.upload);
   if (!hasContent && !onUpload) return null;
   return (
     <>
@@ -693,7 +664,7 @@ export function ImageNode({ id, data: raw, selected, dragging }: NodeProps) {
     flow.updateNodeData(id, { busy: '正在上传', error: '' });
     try {
       const ref = await uploadLocalFile(picked, 'image');
-      flow.updateNodeData(id, { upload: { url: ref.url, name: ref.name }, recordId: undefined, asset: undefined, assetId: undefined, assetOf: undefined });
+      flow.updateNodeData(id, { upload: { url: ref.url, name: ref.name }, recordId: undefined });
     } catch (err) {
       toast((err as Error).message, 'error', 6000);
     } finally {
@@ -717,12 +688,13 @@ export function ImageNode({ id, data: raw, selected, dragging }: NodeProps) {
           <Prompt id={id} value={data.prompt} placeholder={promptHint(linked, hasRefs ? '描述修改要求，例如：把背景改成雪夜' : '描述主体、环境、构图、光线与风格')} presets={{ refs: inputs.filter((i) => i.link.kind === 'image').length, limit: refLimit, run: (prompt) => generate(flow, id, snap, { prompt }) }} />
           {data.error && !data.busy && <p className="cnode-error">{data.error}</p>}
           <Bar working={working} ready={Boolean(data.prompt.trim()) || linked} action="生成图片" onSend={() => generate(flow, id, snap)}>
-            <Dropdown variant="tool" chevron label="模型" value={data.model} options={models.map((m) => ({ value: m, label: modelLabel(m) }))} onChange={(model) => flow.updateNodeData(id, { model, ratio: imageRatios(model).includes(data.ratio) ? data.ratio : imageRatios(model)[0] || data.ratio, resolution: fitImageSize(model, data.resolution) })} />
+            <Dropdown variant="tool" chevron label="模型" value={data.model} options={models.map((m) => ({ value: m, label: modelLabel(m) }))} onChange={(model) => flow.updateNodeData(id, { model, ratio: imageRatios(model).includes(data.ratio) ? data.ratio : imageRatios(model)[0] || data.ratio, resolution: fitImageSize(model, data.resolution), quality: fitImageQuality(model, data.quality) })} />
             <Params
               label="参数"
               groups={[
                 { label: '比例', value: data.ratio, options: ratios.map((r) => ({ value: r, label: r })), onChange: (ratio) => flow.updateNodeData(id, { ratio }) },
                 { label: '分辨率', value: fitImageSize(data.model, data.resolution) || '', options: imageSizes(data.model).map((r) => ({ value: r, label: r })), onChange: (resolution) => flow.updateNodeData(id, { resolution }) },
+                ...(imageQualities(data.model).length ? [{ label: '画质', value: fitImageQuality(data.model, data.quality) || '', options: imageQualities(data.model).map((q) => ({ value: q, label: IMAGE_QUALITY_LABELS[q] || q })), onChange: (quality: string) => flow.updateNodeData(id, { quality }) }] : []),
                 { label: '张数', value: String(data.count || 1), options: IMAGE_COUNTS.map((n) => ({ value: String(n), label: `${n} 张` })), onChange: (count) => flow.updateNodeData(id, { count: Number(count) }) },
               ]}
             />
@@ -755,8 +727,8 @@ const VIDEO_COUNTS = [1, 2, 3, 4];
 
 // 改一条图片连线的用途。连线上的标签和输入面板里的小图都能点开它。
 function pickRole(anchor: HTMLElement, model: string | undefined, current: FrameRole, onPick: (role: FrameRole) => void) {
-  const able = traits(model);
-  const usable: Record<FrameRole, boolean> = { reference: able.reference, first: able.frames, last: able.lastFrame };
+  const { frames } = specOf(model);
+  const usable: Record<FrameRole, boolean> = { reference: true, first: frames.includes('first_frame'), last: hasLastFrame(model) };
   openMenu(anchor, {
     label: '图片用途',
     items: ROLES.map((role) => ({ value: role, label: ROLE_LABELS[role], selected: role === current, disabled: !usable[role], title: usable[role] ? null : '当前模型不支持' })),
@@ -777,8 +749,7 @@ function Refs({ id, kind, model = '', limit = 0 }: { id: string; kind: NodeKind;
   const media = [...inputs.filter((i) => i.link.kind === 'text'), ...inputs.filter((i) => i.link.kind !== 'text')];
   const used = inputs.filter((i) => i.link.kind === 'image').length;
   const canUpload = kind === 'video' || (forImage && used < limit);
-  const hasLibrary = kind === 'video' && (state.app.features.library || state.app.features.persons);
-  const only = !canUpload && !hasLibrary;
+  const only = !canUpload;
   // 移除一份素材就是断开那条线，上游的节点留在画布上。
   const unlink = (edgeId: string) => {
     snap();
@@ -788,21 +759,16 @@ function Refs({ id, kind, model = '', limit = 0 }: { id: string; kind: NodeKind;
   // 加号：这个节点还能接什么就列什么。文本哪种节点都能接；图片节点还能接参考图，视频节点还能接图片、视频、音频。只有一样时不弹菜单。
   // 本机的文件走创作页的同一个选素材弹窗：上传、生成记录、角色都能选，选中的变成一个连进来的节点。
   function add(button: HTMLElement) {
-    const sources = [...(state.app.features.library ? (['library'] as const) : []), ...(state.app.features.persons ? (['person'] as const) : [])];
     const kinds = Object.keys(MEDIA) as Kind[];
     const items = [
       ...(canUpload ? [{ value: 'local', label: forImage ? '参考图' : '图片、视频或音频' }] : []),
-      ...(hasLibrary ? kinds.map((item) => ({ value: item, label: `从素材库选择${MEDIA[item].label}` })) : []),
       { value: 'text', label: '文本节点' },
     ];
     const pick = (value: string) => {
       if (value === 'text') return addInput(id, 'text');
-      if (value === 'local') {
-        const onPick = (ref: Ref) => addInput(id, ref.kind, { upload: { url: ref.url, name: ref.name } });
-        if (forImage) return openAssetPicker({ title: '添加参考图', kind: 'image', remaining: limit - used, local: true, onPick });
-        return openAssetPicker({ title: '添加参考素材', limits: Object.fromEntries(kinds.map((item) => [item, MEDIA[item].max])), local: true, onPick });
-      }
-      openAssetPicker({ kind: value as Kind, remaining: 1, sources: [...sources], onPick: (asset) => addInput(id, value as NodeKind, { asset }) });
+      const onPick = (ref: Ref) => addInput(id, ref.kind, { upload: { url: ref.url, name: ref.name } });
+      if (forImage) return openAssetPicker({ title: '添加参考图', kind: 'image', remaining: limit - used, onPick });
+      openAssetPicker({ title: '添加参考素材', limits: Object.fromEntries(kinds.map((item) => [item, MEDIA[item].max])), onPick });
     };
     if (items.length === 1) return pick(items[0].value);
     openMenu(button, { label: '连接上游节点', items, onSelect: pick });
@@ -820,7 +786,7 @@ function Refs({ id, kind, model = '', limit = 0 }: { id: string; kind: NodeKind;
           );
         }
         const output = outputOf(node);
-        const thumb = output?.asset ? output.asset.thumb : link.kind === 'image' ? output?.url : null;
+        const thumb = link.kind === 'image' ? output?.url : null;
         const label = linkLabel(link);
         // 连到视频节点的图片可以点开改用途（参考图、首帧、尾帧）。
         const face =
@@ -855,7 +821,7 @@ export function VideoNode({ id, data: raw, selected, dragging }: NodeProps) {
   const working = useWorking(data);
   useStore('models', 'app');
   const models = state.models.includes(data.model) ? state.models : [data.model, ...state.models];
-  const able = capabilities(data.model);
+  const able = specOf(data.model);
   const ratioLabel = (value: string) => RATIOS.find((r) => r.value === value)?.label || value;
   const set = (patch: Partial<VideoData>) => flow.updateNodeData(id, patch);
   const { snap } = useContext(CanvasActions);
@@ -925,7 +891,7 @@ export function AudioNode({ id, data: raw, selected, dragging }: NodeProps) {
     };
   }, [speech, state.app.hasKey]);
 
-  const tools = [{ value: 'speech', label: '语音' }, ...(state.app.features.sfx ? [{ value: 'sfx', label: '音效' }] : [])];
+  const tools = [{ value: 'speech', label: '语音' }, { value: 'sfx', label: '音效' }];
   return (
     <Frame
       id={id}
@@ -1035,7 +1001,7 @@ function Mini({ node }: { node: Node }) {
   const kind = node.type as NodeKind;
   if (kind === 'text') return <span className="cstack-words">{((node.data as unknown as TextData).text || '').slice(0, 40) || '空文本'}</span>;
   const output = outputOf(node);
-  const thumb = output?.asset ? output.asset.thumb : output?.url;
+  const thumb = output?.url;
   if (thumb && kind === 'image') return <img src={thumb} alt="" draggable={false} />;
   if (thumb && kind === 'video') return <video src={`${thumb}#t=0.1`} preload="metadata" muted playsInline tabIndex={-1} />;
   return <Icon name={NODE_ICONS[kind]} size={20} />;

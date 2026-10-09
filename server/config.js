@@ -1,0 +1,41 @@
+// 服务的固定设置：地址、目录、各种上限。能用环境变量改的都在这里读。
+
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { SPEECH_MODEL, AUDIO_MODEL } from '../shared/models.ts';
+
+export const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+export const PORT = Number(process.env.PORT) || 5178;
+// 默认只听本机。部署到服务器上时一般前面有反向代理，仍然听本机就行；要直接对外就设 HOST=0.0.0.0。
+export const HOST = process.env.HOST || '127.0.0.1';
+
+const trimSlash = (url) => url.replace(/\/+$/, '');
+// 火山方舟：视频（Seedance）、图片（Seedream）、文本（豆包）都走它。地址里已经带着版本号，所以接口路径前面没有 /v1。
+export const ARK = { label: '火山方舟', baseUrl: trimSlash(process.env.ARK_BASE_URL || 'https://ark.cn-beijing.volces.com/api/v3'), envKey: 'ARK_API_KEY', configKey: 'arkKey' };
+// MiniMax 开放平台（国内站）：视频模型 MiniMax H3 走它。地址里不带版本号，接口路径自己带 /v2。
+// 环境变量不叫 MINIMAX_API_KEY：那个名字常被国际站（api.minimax.io）的 Key 占着，国内站不认。
+export const MINIMAX = { label: 'MiniMax', baseUrl: trimSlash(process.env.MINIMAX_BASE_URL || 'https://api.minimax.cn'), envKey: 'MINIMAX_CN_API_KEY', configKey: 'minimaxKey' };
+// AiHubMix：聚合平台，图片模型 GPT Image 2.5 和 Nano Banana 2.1 走它（这两家的官方接口国内用不了）。接口路径自己带 /ai/v1。
+export const AIHUBMIX = { label: 'AiHubMix', baseUrl: trimSlash(process.env.AIHUBMIX_BASE_URL || 'https://aihubmix.com'), envKey: 'AIHUBMIX_API_KEY', configKey: 'aihubmixKey' };
+// AiHubMix 的 Manage Key：查它的账户余额用。普通的 API Key 查不了余额，要在它的控制台另外生成这个管理密钥。
+export const AIHUBMIX_MANAGE = { label: 'AiHubMix Manage Key', baseUrl: AIHUBMIX.baseUrl, envKey: 'AIHUBMIX_MANAGE_KEY', configKey: 'aihubmixManageKey' };
+// 火山引擎费用中心：查余额用，认的是账号的 Access Key（一对：ID 和 Secret）。
+export const VOLC_BILLING = { baseUrl: trimSlash(process.env.VOLC_BILLING_BASE_URL || 'https://billing.volcengineapi.com'), envId: 'VOLC_ACCESS_KEY_ID', envSecret: 'VOLC_SECRET_ACCESS_KEY', configId: 'volcAccessKeyId', configSecret: 'volcSecretAccessKey' };
+// 豆包语音：语音合成、音效、配乐用它。它是另一个产品，地址和 Key 都和方舟不是一套。
+// seed-tts-2.0 是「豆包语音合成模型 2.0」，seed-audio-1.0 是「豆包音频生成模型 1.0」。
+export const DOUBAO_SPEECH = { label: '豆包语音', baseUrl: trimSlash(process.env.DOUBAO_SPEECH_BASE_URL || 'https://openspeech.bytedance.com'), envKey: 'DOUBAO_SPEECH_API_KEY', configKey: 'doubaoSpeechKey', model: SPEECH_MODEL, audioModel: AUDIO_MODEL };
+
+// 环境变量原来叫 SEEDANCE_*（项目改名前），旧名字还认。
+export const DATA_DIR = path.resolve(process.env.INNATE_DATA_DIR || process.env.SEEDANCE_DATA_DIR || path.join(ROOT, 'data'));
+export const PUBLIC_DIR = path.join(ROOT, 'web', 'dist');
+// 生成结果按类型分目录存；uploads 放的是从本机选来当输入的文件。
+export const MEDIA_DIRS = { video: 'videos', image: 'images', audio: 'audio' };
+
+export const MAX_UPLOAD_BYTES = 64 * 1024 * 1024;
+export const MAX_JSON_BYTES = 6 * 1024 * 1024;
+export const POLL_INTERVAL_MS = 6000;
+// 任务提交后超过这么久还没有结果，就停止自动查询。可以用环境变量 INNATE_PENDING_LIMIT_MS 改。
+export const MAX_PENDING_MS = Number(process.env.INNATE_PENDING_LIMIT_MS || process.env.SEEDANCE_PENDING_LIMIT_MS) || 6 * 60 * 60 * 1000;
+export const DOWNLOAD_RETRY_MS = 30000;
+export const MAX_DOWNLOAD_ATTEMPTS = 6;
+export const MAX_IMAGES = 4;

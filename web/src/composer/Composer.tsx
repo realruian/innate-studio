@@ -2,9 +2,9 @@
 // 状态和动作在 state.ts。
 
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { state, useStore, KINDS, goTo, loadCharacters } from '../store.ts';
-import { RES_RANK } from '../request.ts';
-import { modelLabel, modelNote, referenceModeLabel } from '../../../shared/models.ts';
+import { state, useStore, KINDS, goTo, loadCharacters, canManage } from '../store.ts';
+import { IMAGE_QUALITY_LABELS, modelLabel, modelNote, REFERENCE_MODE_LABEL, SPEECH_MODEL, AUDIO_MODEL } from '../../../shared/models.ts';
+import { musicSeconds } from '../request.ts';
 import { Icon, type IconName } from '../ui/Icon.tsx';
 import { Segmented, Slider, Toggle, Dropdown, FormRow, tip, clipTip } from '../ui/controls.tsx';
 import { openPopover, openMenu, toast } from '../ui/layers.tsx';
@@ -15,56 +15,36 @@ import { openSettings } from '../settings.tsx';
 import { SkillPanel } from '../skills.tsx';
 import type { Kind, Ref, VideoForm } from '../types.ts';
 import {
-  composer, RESOLUTIONS, RATIOS, SR_RESOLUTIONS,
-  typeOf, draftPrompt, isGrok, specDriven, traits, availableTypes, capabilities, imageRatios, imageSizes, imageRefLimit, usedAssetIds, refStatus, currentRequest,
-  update, setMode, swapFrames, updateSr, updateStudio, setType, typePrompt, polish, undoPolish, submit, registerPrompt,
+  composer, RATIOS,
+  TYPES, typeOf, draftPrompt, specOf, hasLastFrame, imageRatios, imageSizes, imageQualities, imageRefLimit, currentRequest,
+  update, setMode, swapFrames, updateStudio, setType, typePrompt, polish, undoPolish, submit, registerPrompt,
   voiceName, voiceNote, togglePreview, setVoiceFilter, pickVoice, stopPreview, useCharacter, activeSkill, setSkill,
   addableKinds, mediaRoom, usedMediaUrls, addMedia, addFiles,
 } from './state.ts';
 
-const SR_SCENES = [
-  { value: '', label: '不指定' },
-  { value: 'aigc', label: 'AIGC 内容' },
-  { value: 'short_series', label: '短剧' },
-  { value: 'ugc', label: 'UGC' },
-  { value: 'old_film', label: '老片' },
-];
-const MODES: { value: VideoForm['mode']; label: string; icon: IconName; note: string }[] = [
-  { value: 'text', label: '文生视频', icon: 'type', note: '只用文字' },
-  { value: 'frames', label: '首尾帧', icon: 'frames', note: '尾帧可选' },
-  { value: 'reference', label: '参考生成', icon: 'layers', note: '参考素材可选' },
-];
+type Mode = { value: VideoForm['mode']; label: string; icon: IconName; note: string };
+const REFERENCE_MODE: Mode = { value: 'reference', label: REFERENCE_MODE_LABEL, icon: 'layers', note: '参考素材可选' };
+const FRAMES_MODE: Mode = { value: 'frames', label: '首尾帧', icon: 'frames', note: '尾帧可选' };
 // 只能给首帧、不能给尾帧的模型，第二种方式叫「图生视频」。
-const FIRST_FRAME_MODE: (typeof MODES)[number] = { value: 'frames', label: '图生视频', icon: 'frames', note: '以图片为首帧' };
-// 当前模型能用的生成方式。默认是带参考素材的那种，名字跟着模型走：Seedance 叫「全能参考」，别的模型叫「参考生成」。
-// 它不加素材就是文生视频，所以不再单列「文生视频」；只有不支持参考素材的模型才有这一种。
+const FIRST_FRAME_MODE: Mode = { value: 'frames', label: '图生视频', icon: 'frames', note: '以图片为首帧' };
+// 当前模型能用的生成方式。默认是全能参考，它不加素材就是文生视频，所以不单列「文生视频」。
 function modesFor() {
-  const can = traits();
-  return [can.reference ? { ...MODES[2], label: referenceModeLabel(composer.form.model) } : MODES[0], ...(can.frames ? [can.lastFrame ? MODES[1] : FIRST_FRAME_MODE] : [])];
+  const { frames } = specOf();
+  return [REFERENCE_MODE, ...(frames.includes('first_frame') ? [frames.includes('last_frame') ? FRAMES_MODE : FIRST_FRAME_MODE] : [])];
 }
-const INPUT_TYPES = [
-  { value: 'auto', label: '自动判断', note: '推荐' },
-  { value: 'reference', label: 'reference', note: '参考' },
-  { value: 'first_last_frame', label: 'first_last_frame', note: '首尾帧' },
-];
 // 和官方提示词里指代素材的叫法一致：图片1、视频1、音频1。缩略图上不写，鼠标停上去的提示里有。
 const REF_PREFIX: Record<Kind, string> = { image: '图片', video: '视频', audio: '音频' };
 
 const IMAGE_COUNTS = [1, 2, 3, 4];
 const SFX_DURATIONS = [1, 2, 3, 5, 8, 10, 15, 20];
-const SFX_INFLUENCES = [
-  { value: '0.3', label: '自由发挥', note: '默认' },
-  { value: '0.6', label: '贴近描述' },
-  { value: '0.9', label: '严格按描述' },
-];
+const MUSIC_DURATIONS = [15, 30, 60, 90, 120];
 
 // ---------- 参考素材 ----------
 
 // 输入框里的一份素材。name 是它在提示词里的叫法（图片1）或者它的位置（首帧），悬停时和文件名一起显示；tag 是写在底边的那行小字。
 function RefTile({ item, name, tag, onRemove, depth, style }: { item: Ref; name?: string; tag?: string; onRemove: () => void; depth?: number; style?: CSSProperties }) {
-  const s = refStatus(item);
   return (
-    <MediaTile tag={tag} state={s.ready ? undefined : s.label} error={s.tone === 'error'} tipText={name ? `${name}：${item.name}` : item.name} onRemove={onRemove} style={style} data={{ 'data-ref': name, 'data-depth': depth }}>
+    <MediaTile tag={tag} tipText={name ? `${name}：${item.name}` : item.name} onRemove={onRemove} style={style} data={{ 'data-ref': name, 'data-depth': depth }}>
       <Thumb thumb={item.thumb} kind={item.kind} />
     </MediaTile>
   );
@@ -153,10 +133,10 @@ function MediaBlock() {
   if (hidden) {
     content = null;
   } else if (type === 'image') {
-    // 图生图：这个模型收几张参考图，就能加几张。用的是本机的图片，不经过素材库。
+    // 图生图：这个模型收几张参考图，就能加几张。
     const refs = studio.image.refs || [];
     const setRefs = (next: Ref[]) => updateStudio('image', { refs: next });
-    const addImage = () => openAssetPicker({ title: '添加参考图', kind: 'image', local: true, remaining: imageRefs - refs.length, usedUrls: usedMediaUrls(), onPick: pick });
+    const addImage = () => openAssetPicker({ title: '添加参考图', kind: 'image', remaining: imageRefs - refs.length, usedUrls: usedMediaUrls(), onPick: pick });
     content = (
       <RefStack
         items={refs.map((ref, i) => ({ ref, label: `图片${i + 1}`, onRemove: () => setRefs(refs.filter((r) => r.uid !== ref.uid)) }))}
@@ -165,14 +145,15 @@ function MediaBlock() {
     );
   } else if (type === 'music') {
     const video = studio.music.video;
-    // 配乐要把视频文件传给模型，所以只能选本机有的：生成记录里的，或者从电脑里选一个。
+    // 要配的视频可以不给。给了，音乐就和它一样长，生成完在详情里和画面一起放。
     content = (
       <div className="frames-row">
         <Slot
           item={video}
           name="待配乐视频"
+          addLabel="添加待配乐视频（可选）"
           tag={video?.duration ? `${Math.round(video.duration)} 秒` : '视频'}
-          onAdd={() => openAssetPicker({ title: '添加待配乐视频', kind: 'video', local: true, sources: ['records', 'upload'], onPick: pick })}
+          onAdd={() => openAssetPicker({ title: '添加待配乐视频', kind: 'video', sources: ['records', 'upload'], onPick: pick })}
           onRemove={() => updateStudio('music', { video: null })}
         />
       </div>
@@ -183,7 +164,7 @@ function MediaBlock() {
         item={form.frames[key]}
         name={name}
         addLabel={addLabel}
-        onAdd={() => openAssetPicker({ title: `添加${name}`, kind: 'image', remaining: 1, usedIds: usedAssetIds(), usedUrls: usedMediaUrls(), local: traits().localFiles, onPick: (ref) => pick(ref, key) })}
+        onAdd={() => openAssetPicker({ title: `添加${name}`, kind: 'image', remaining: 1, usedUrls: usedMediaUrls(), onPick: (ref) => pick(ref, key) })}
         onRemove={() => update({ frames: { ...composer.form.frames, [key]: null } })}
       />
     );
@@ -191,7 +172,7 @@ function MediaBlock() {
     content = (
       <div className="frames-row">
         {frame('first', '首帧', '添加首帧')}
-        {traits().lastFrame && (
+        {hasLastFrame() && (
           <>
             <button className="icon-btn icon-btn-sm frames-swap" type="button" aria-label="互换首帧和尾帧" disabled={!form.frames.first && !form.frames.last} onClick={swapFrames} {...tip('互换首帧和尾帧')}>
               <Icon name="swap" />
@@ -202,13 +183,11 @@ function MediaBlock() {
       </div>
     );
   } else {
-    // 这个模型不收的素材类型不让添加；已经加进来的仍然显示，方便移除。
-    const allowed = traits().refKinds;
-    const kinds = (Object.keys(KINDS) as Kind[]).filter((kind) => allowed.includes(kind) || form.refs[kind].length > 0);
+    const kinds = Object.keys(KINDS) as Kind[];
     const setList = (kind: Kind, next: Ref[]) => update({ refs: { ...composer.form.refs, [kind]: next } });
     // 三种素材共用一个「+」，不用先选类型：上传的、选中的是什么就放进哪一类。
     const addable = addableKinds();
-    const addRef = () => openAssetPicker({ title: '添加参考素材', limits: mediaRoom(), usedIds: usedAssetIds(), usedUrls: usedMediaUrls(), local: specDriven(), onPick: pick });
+    const addRef = () => openAssetPicker({ title: '添加参考素材', limits: mediaRoom(), usedUrls: usedMediaUrls(), onPick: pick });
     const full = addable.every((kind) => form.refs[kind].length >= KINDS[kind].max);
     content = (
       <RefStack
@@ -261,7 +240,7 @@ function PanelButton({ name, label, ariaLabel, className, panel, onClose, childr
 function VideoToolbar() {
   const { form } = composer;
   const modes = modesFor();
-  const can = traits();
+  const can = specOf();
   const mode = modes.find((m) => m.value === form.mode) || modes[0];
   const ratio = RATIOS.find((r) => r.value === form.ratio) || RATIOS[0];
   const models = state.models.includes(form.model) ? state.models : [form.model, ...state.models];
@@ -290,7 +269,7 @@ function VideoToolbar() {
         <span>{duration}</span>
       </PanelButton>
       {/* 「更多」里的设置这个模型一项也用不上时，不显示入口。 */}
-      {(can.audio || can.seed || can.seedanceExtras) && (
+      {(can.audio || can.seed) && (
         <PanelButton key="more" name="more" label="更多设置" className="more-popover" panel={() => <MorePanel />}>
           <Icon name="sliders" />
           <span>更多</span>
@@ -300,7 +279,7 @@ function VideoToolbar() {
   );
 }
 
-// 图片的画面：模型分几档分辨率时（火山方舟的 Seedream），点开是一块面板，比例和分辨率放在一起；不分档时只是一个比例菜单。
+// 图片的画面：模型分几档分辨率时，点开是一块面板，比例和分辨率放在一起；不分档时只是一个比例菜单。
 function ImageRatioButton() {
   const ref = useRef<HTMLButtonElement>(null);
   // 只列当前模型收的比例；它一个都不收就不显示这个入口。
@@ -340,8 +319,9 @@ function ImageRatioButton() {
 
 function ImageFramePanel() {
   useStore('composer');
-  const { ratio, resolution } = composer.studio.image;
+  const { ratio, resolution, quality } = composer.studio.image;
   const ratios = imageRatios();
+  const qualities = imageQualities();
   return (
     <>
       <div className="popover-title">画面比例</div>
@@ -357,6 +337,8 @@ function ImageFramePanel() {
       </div>
       <div className="popover-title">分辨率</div>
       <Segmented options={imageSizes().map((r) => ({ value: r, label: r }))} value={resolution || ''} onChange={(next) => updateStudio('image', { resolution: next })} />
+      {qualities.length > 0 && <div className="popover-title">画质</div>}
+      {qualities.length > 0 && <Segmented options={qualities.map((q) => ({ value: q, label: IMAGE_QUALITY_LABELS[q] || q }))} value={quality || ''} onChange={(next) => updateStudio('image', { quality: next })} />}
     </>
   );
 }
@@ -374,10 +356,16 @@ function ImageToolbar() {
   );
 }
 
+// 语音、音效、配乐各只有一个模型，不能换，也照样写在工具栏里：点开是只有一项的菜单。
+function FixedModel({ model }: { model: string }) {
+  return <Dropdown key="fixed-model" variant="tool" control="model" icon="cube" label="模型" value={model} options={[{ value: model, label: modelLabel(model) }]} onChange={() => {}} />;
+}
+
 function SfxToolbar() {
   const sub = composer.studio.sfx;
   return (
     <>
+      <FixedModel model={AUDIO_MODEL} />
       <Dropdown
         key="sfx-duration"
         variant="tool"
@@ -388,7 +376,25 @@ function SfxToolbar() {
         options={[{ value: 'auto', label: '自动', display: '时长自动' }, ...SFX_DURATIONS.map((d) => ({ value: String(d), label: `${d} 秒` }))]}
         onChange={(duration) => updateStudio('sfx', { duration })}
       />
-      <Dropdown key="influence" variant="tool" control="influence" icon="sliders" label="提示词相关性" value={String(sub.influence)} options={SFX_INFLUENCES} onChange={(influence) => updateStudio('sfx', { influence })} />
+    </>
+  );
+}
+
+// 配乐多长：给了视频就跟着视频，不用选；没给就选一个。
+function MusicToolbar() {
+  const sub = composer.studio.music;
+  if (sub.video) {
+    return (
+      <>
+        <FixedModel model={AUDIO_MODEL} />
+        <span className="composer-hint">{`时长跟随视频 · ${musicSeconds(sub)} 秒`}</span>
+      </>
+    );
+  }
+  return (
+    <>
+      <FixedModel model={AUDIO_MODEL} />
+      <Dropdown key="music-duration" variant="tool" control="duration" icon="clock" label="时长" value={String(sub.duration)} options={MUSIC_DURATIONS.map((d) => ({ value: String(d), label: `${d} 秒` }))} onChange={(duration) => updateStudio('music', { duration: Number(duration) })} />
     </>
   );
 }
@@ -397,14 +403,17 @@ function Toolbar() {
   const { studio } = composer;
   if (studio.type === 'image') return <ImageToolbar />;
   if (studio.type === 'sfx') return <SfxToolbar />;
-  if (studio.type === 'music') return <span className="composer-hint">根据画面生成等长配乐</span>;
+  if (studio.type === 'music') return <MusicToolbar />;
   if (studio.type === 'speech') {
     const name = studio.speech.voiceName;
     return (
+      <>
+      <FixedModel model={SPEECH_MODEL} />
       <PanelButton name="voice" label="音色" ariaLabel={`音色：${name || '未选择'}`} className="voice-popover" panel={(close) => <VoicePanel close={close} />} onClose={stopPreview}>
         <Icon name="user" />
         <span>{name || '选择音色'}</span>
       </PanelButton>
+      </>
     );
   }
   return <VideoToolbar />;
@@ -414,9 +423,8 @@ function Toolbar() {
 function FramePanel() {
   useStore('composer');
   const { form } = composer;
-  const { resolutions: allowed, ratios } = capabilities();
-  // Flatkey 的模型固定列三档，不支持的那档变灰；火山方舟各模型的档位不一样（有的到 4k），直接列它支持的。
-  const resolutions = specDriven() ? allowed : RESOLUTIONS;
+  // 各模型的档位不一样（有的到 4k），直接列它支持的。
+  const { resolutions, ratios } = specOf();
   return (
     <>
       <div className="popover-title">画面比例</div>
@@ -431,9 +439,8 @@ function FramePanel() {
         ))}
       </div>
       <div className="popover-title">分辨率</div>
-      <Segmented options={resolutions.map((r) => ({ value: r, label: r, disabled: !allowed.includes(r) }))} value={form.resolution} onChange={(resolution) => update({ resolution })} />
-      {!specDriven() && allowed.length < RESOLUTIONS.length && <div className="small muted">{form.model} 不支持 1080p</div>}
-      {(isGrok() || specDriven()) && form.mode === 'frames' && <div className="small muted">画面比例跟随首帧</div>}
+      <Segmented options={resolutions.map((r) => ({ value: r, label: r }))} value={form.resolution} onChange={(resolution) => update({ resolution })} />
+      {form.mode === 'frames' && <div className="small muted">画面比例跟随首帧</div>}
     </>
   );
 }
@@ -442,7 +449,7 @@ function FramePanel() {
 function DurationPanel() {
   useStore('composer');
   const { form } = composer;
-  const { durations, autoDuration } = capabilities();
+  const { durations, autoDuration } = specOf();
   const min = durations[0];
   const max = durations[durations.length - 1];
   // 槽从 0 画起，每 5 秒一个刻度。
@@ -482,7 +489,7 @@ function NumberInput({ value, onInput, inputRef, ...attrs }: { value: string | n
 function MorePanel() {
   useStore('composer');
   const { form } = composer;
-  const can = traits();
+  const can = specOf();
   const seedInput = useRef<HTMLInputElement>(null);
   const randomSeed = () => {
     const seed = String(Math.floor(Math.random() * 2147483647));
@@ -491,18 +498,13 @@ function MorePanel() {
   };
   return (
     <>
-      {(can.audio || can.seedanceExtras) && <div className="popover-title">输出</div>}
+      {can.audio && <div className="popover-title">输出</div>}
       {can.audio && (
         <FormRow label="生成有声视频">
           <Toggle checked={form.generateAudio} onChange={(generateAudio) => update({ generateAudio })} label="生成有声视频" />
         </FormRow>
       )}
-      {can.seedanceExtras && (
-        <FormRow label="水印">
-          <Toggle checked={form.watermark} onChange={(watermark) => update({ watermark })} label="水印" />
-        </FormRow>
-      )}
-      {(can.seed || can.seedanceExtras) && <div className="popover-title">高级</div>}
+      {can.seed && <div className="popover-title">高级</div>}
       {can.seed && (
         <FormRow label="随机种子">
           <div className="row">
@@ -512,65 +514,6 @@ function MorePanel() {
             </button>
           </div>
         </FormRow>
-      )}
-      {can.seedanceExtras && <SeedanceExtras />}
-    </>
-  );
-}
-
-// 只有 Flatkey 上的 Seedance 才有的几项：联网搜索、输入模式、超分。
-function SeedanceExtras() {
-  const { form } = composer;
-  const sr = form.sr;
-  return (
-    <>
-      <FormRow label="联网搜索">
-        <Toggle checked={form.webSearch} onChange={(webSearch) => update({ webSearch })} label="联网搜索" />
-      </FormRow>
-      <FormRow label="输入模式">
-        <Dropdown label="输入模式" value={form.inputType} options={INPUT_TYPES} onChange={(inputType) => update({ inputType })} />
-      </FormRow>
-      <FormRow label="画质超分" desc="提升分辨率或帧率">
-        <Toggle checked={sr.enabled} onChange={(enabled) => updateSr({ enabled })} label="画质超分" />
-      </FormRow>
-      {sr.enabled && (
-        <div className="sub-panel">
-          <FormRow label="目标">
-            <Segmented
-              options={[
-                { value: 'resolution', label: '目标分辨率' },
-                { value: 'limit', label: '短边像素' },
-              ]}
-              value={sr.by}
-              onChange={(by) => updateSr({ by })}
-            />
-          </FormRow>
-          {sr.by === 'resolution' ? (
-            <FormRow label="目标分辨率" desc="需高于原始分辨率">
-              <Segmented options={SR_RESOLUTIONS.map((r) => ({ value: r, label: r.toUpperCase().replace('P', 'p'), disabled: RES_RANK[r] <= RES_RANK[form.resolution] }))} value={sr.resolution} onChange={(resolution) => updateSr({ resolution })} />
-            </FormRow>
-          ) : (
-            <FormRow label="短边像素">
-              <NumberInput value={sr.limit} onInput={(limit) => updateSr({ limit })} min="64" max="2160" step="1" placeholder="64 – 2160" aria-label="短边像素" />
-            </FormRow>
-          )}
-          <FormRow label="场景">
-            <Dropdown label="场景" value={sr.scene} options={SR_SCENES} onChange={(scene) => updateSr({ scene })} />
-          </FormRow>
-          <FormRow label="超分模式">
-            <Segmented
-              options={[
-                { value: 'standard', label: '标准' },
-                { value: 'professional', label: '专业' },
-              ]}
-              value={sr.tool}
-              onChange={(tool) => updateSr({ tool })}
-            />
-          </FormRow>
-          <FormRow label="输出帧率">
-            <NumberInput value={sr.fps} onInput={(fps) => updateSr({ fps })} min="1" max="120" step="1" placeholder="不改（1 – 120）" aria-label="输出帧率" />
-          </FormRow>
-        </div>
       )}
     </>
   );
@@ -659,6 +602,8 @@ async function pickCharacter(button: HTMLElement, type: 'image' | 'video') {
 
 function SendArea() {
   if (!state.app.hasKey) {
+    // 多人模式下 Key 由管理员配，成员只能等。
+    if (!canManage()) return <span className="composer-hint">管理员尚未配置 API Key</span>;
     return (
       <button className="btn btn-primary btn-sm" type="button" onClick={openSettings}>
         设置 API Key
@@ -702,7 +647,7 @@ function SendArea() {
             撤销润色
           </button>
         ) : (
-          <button key="polish" className="entry-action-btn" type="button" data-control="polish" {...tip('润色提示词')} disabled={polishing} onClick={polish}>
+          <button key="polish" className="entry-action-btn" type="button" data-control="polish" {...tip(type.value === 'speech' ? '润色朗读文本' : '润色提示词')} disabled={polishing} onClick={polish}>
             {polishing && <span className="spinner" />}
             润色
           </button>
@@ -766,7 +711,7 @@ export function Composer() {
 
   // 类型、生成方式、模型家族变了，输入框里的东西就不一样高。高度滑过去，下面的记录跟着挪，不是跳一下。
   // 只管这几种变化：打字撑高文本框时不做动效。
-  const shape = `${studio.type}:${composer.form.mode}:${modesFor().length}:${traits().lastFrame}:${studio.type === 'image' && imageRefLimit() > 0}:${Boolean(skill)}`;
+  const shape = `${studio.type}:${composer.form.mode}:${modesFor().length}:${hasLastFrame()}:${studio.type === 'image' && imageRefLimit() > 0}:${Boolean(skill)}`;
   useLayoutEffect(() => {
     const el = card.current!;
     // 上一次还没滑完就又变了，从现在停着的高度接着滑。
@@ -781,19 +726,18 @@ export function Composer() {
     if (resizing.current?.playState !== 'running') settledHeight.current = card.current!.offsetHeight;
   });
 
-  // 读到模型列表后，账号用不了的类型不能选。
-  const { known, image, audio } = state.catalog;
-  const missing: Record<string, boolean> = { image: known && !image.length, speech: known && !audio.speech, sfx: known && !audio.sfx, music: known && !audio.music };
+  // 读到模型列表后，没有可用模型的类型不能选。
+  const { known, image } = state.catalog;
+  const missing: Record<string, boolean> = { image: known && !image.length };
 
   return (
     <section className="composer">
       <h1 ref={title} className="composer-title">
         {type.title}
       </h1>
-      {/* 平台上只有视频一种时，不用选类型。 */}
-      <div ref={types} className="composer-types" hidden={availableTypes().length < 2}>
+      <div ref={types} className="composer-types">
         <Segmented
-          options={availableTypes().map((t) => ({ value: t.value, label: t.label, disabled: missing[t.value] && t.value !== studio.type, title: missing[t.value] ? '暂无可用模型' : null }))}
+          options={TYPES.map((t) => ({ value: t.value, label: t.label, disabled: missing[t.value] && t.value !== studio.type, title: missing[t.value] ? '暂无可用模型' : null }))}
           value={studio.type}
           onChange={setType}
           className="type-switch"

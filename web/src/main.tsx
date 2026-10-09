@@ -4,7 +4,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import './styles.css';
 import { App } from './App.tsx';
-import { state, on, emit, loadApp, loadModels, loadAssets, startHistoryLoop, startAssetLoop } from './store.ts';
+import { state, on, emit, loadApp, loadModels, startHistoryLoop, needsLogin, canManage } from './store.ts';
 import { initComposer } from './composer/state.ts';
 import { openSettings } from './settings.tsx';
 import { toast } from './ui/layers.tsx';
@@ -28,14 +28,14 @@ async function start() {
   } catch (err) {
     toast((err as Error).message, 'error', 8000);
   }
+  // 多人模式下还没登录：只画登录页，别的都不读。
+  if (needsLogin()) return emit('app');
   initComposer();
   state.booted = true;
   emit('boot');
   startHistoryLoop();
-  startAssetLoop();
-  loadAssets().catch(() => {});
   if (state.app.hasKey) loadModels().catch(() => {});
-  else openSettings();
+  else if (canManage()) openSettings();
 }
 
 // 滚动条平时不显示：哪一块在滚就给它加上 .is-scrolling，停下一会儿再去掉。页面上所有能滚的地方都走这里。

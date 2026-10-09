@@ -1,59 +1,81 @@
-// 表单 → 请求体。对照 Flatkey 文档里 POST /v1/videos 的参数。
+// 表单 → 发给本地服务的请求。
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildRequest, buildSpecRequest, refsInUse, carryRefs, buildImageRequest, buildSpeechRequest, buildSfxRequest, buildMusicRequest } from '../web/src/request.ts';
+import { buildVideoRequest, refsInUse, carryRefs, buildImageRequest, buildSpeechRequest, buildSfxRequest, buildMusicRequest } from '../web/src/request.ts';
 
 const baseForm = (patch = {}) => ({
   mode: 'text',
   prompt: '清晨的厨房',
-  model: 'seedance-2.0',
+  model: 'doubao-seedance-2-0-260128',
   resolution: '720p',
   ratio: '16:9',
   duration: 5,
   durationAuto: false,
   generateAudio: true,
-  watermark: false,
   seed: '',
-  webSearch: false,
-  inputType: 'auto',
-  sr: { enabled: false, by: 'resolution', resolution: '1080p', limit: 1440, scene: '', tool: 'standard', fps: '' },
   frames: { first: null, last: null },
   refs: { image: [], video: [], audio: [] },
   ...patch,
 });
 
 const ref = (kind, url) => ({ uid: url, kind, source: 'url', url });
+const local = (url) => ({ uid: url, kind: 'image', source: 'local', url });
+// 一个视频模型支持什么。
+const spec = (patch = {}) => ({ resolutions: ['480p', '720p'], ratios: ['16:9', '9:16'], durations: [4, 5], autoDuration: false, frames: ['first_frame', 'last_frame'], audio: true, seed: true, ...patch });
 
-test('文生视频：只有文本和基础参数', () => {
-  const { payload, problems } = buildRequest(baseForm());
+// ---------- 视频 ----------
+
+test('文生视频：提示词是 prompt 字符串，带比例、分辨率、时长', () => {
+  const { payload, problems } = buildVideoRequest(baseForm({ seed: '42' }), spec());
   assert.deepEqual(problems, []);
-  assert.deepEqual(payload, {
-    model: 'seedance-2.0',
-    content: [{ type: 'text', text: '清晨的厨房' }],
-    resolution: '720p',
-    ratio: '16:9',
-    duration: 5,
-    generate_audio: true,
-    watermark: false,
-  });
+  assert.deepEqual(payload, { model: 'doubao-seedance-2-0-260128', duration: 5, resolution: '720p', prompt: '清晨的厨房', aspect_ratio: '16:9', generate_audio: true, seed: 42 });
+  assert.deepEqual(buildVideoRequest(baseForm({ prompt: ' ' }), spec()).problems, ['请输入提示词']);
 });
 
-test('文生视频：没有提示词不能提交', () => {
-  assert.deepEqual(buildRequest(baseForm({ prompt: '   ' })).problems, ['请输入提示词']);
+test('模型不支持的选项不发：声音开关、随机种子', () => {
+  const { payload } = buildVideoRequest(baseForm({ seed: '42' }), spec({ audio: false, seed: false }));
+  assert.equal('generate_audio' in payload, false);
+  assert.equal('seed' in payload, false);
 });
 
-test('首尾帧：角色是 first_frame / last_frame，首帧必填', () => {
-  const frames = { first: ref('image', 'https://a/first.jpg'), last: ref('image', 'https://a/last.jpg') };
-  const { payload, problems } = buildRequest(baseForm({ mode: 'frames', frames }));
-  assert.deepEqual(problems, []);
-  assert.deepEqual(payload.content.slice(1), [
-    { type: 'image_url', image_url: { url: 'https://a/first.jpg' }, role: 'first_frame' },
-    { type: 'image_url', image_url: { url: 'https://a/last.jpg' }, role: 'last_frame' },
+test('首尾帧：放在 frame_images 里，比例跟着图片走；模型只收首帧时不发尾帧', () => {
+  const frames = { first: local('/media/images/a.jpg'), last: local('/media/images/b.jpg') };
+  const both = buildVideoRequest(baseForm({ mode: 'frames', frames }), spec());
+  assert.deepEqual(both.problems, []);
+  assert.deepEqual(both.payload.frame_images, [
+    { type: 'image_url', image_url: { url: '/media/images/a.jpg' }, frame_type: 'first_frame' },
+    { type: 'image_url', image_url: { url: '/media/images/b.jpg' }, frame_type: 'last_frame' },
   ]);
+  assert.equal('aspect_ratio' in both.payload, false);
+  assert.equal(buildVideoRequest(baseForm({ mode: 'frames', frames }), spec({ frames: ['first_frame'] })).payload.frame_images.length, 1);
+  assert.deepEqual(buildVideoRequest(baseForm({ mode: 'frames' }), spec()).problems, ['请添加首帧图片']);
+});
 
-  const missing = buildRequest(baseForm({ mode: 'frames', frames: { first: null, last: frames.last } }));
-  assert.deepEqual(missing.problems, ['请添加首帧图片']);
+test('参考生成：素材放在 input_references 里；本机的视频用不了', () => {
+  const refs = { image: [local('/media/images/a.jpg')], video: [ref('video', 'https://example.com/a.mp4')], audio: [] };
+  const { payload, problems } = buildVideoRequest(baseForm({ mode: 'reference', refs }), spec());
+  assert.deepEqual(problems, []);
+  assert.deepEqual(payload.input_references, [
+    { type: 'image_url', image_url: { url: '/media/images/a.jpg' } },
+    { type: 'video_url', video_url: { url: 'https://example.com/a.mp4' } },
+  ]);
+  assert.equal(payload.aspect_ratio, '16:9');
+
+  const localVideo = { image: [], video: [{ uid: 'v', kind: 'video', source: 'local', url: '/media/videos/a.mp4' }], audio: [] };
+  assert.match(buildVideoRequest(baseForm({ mode: 'reference', refs: localVideo }), spec()).problems[0], /公网链接/);
+  // 本机的参考音频可以用：由本地服务内嵌进请求
+  const localAudio = { image: [], video: [], audio: [{ uid: 'a', kind: 'audio', source: 'local', url: '/media/uploads/a.mp3' }] };
+  const withAudio = buildVideoRequest(baseForm({ mode: 'reference', refs: localAudio }), spec());
+  assert.deepEqual(withAudio.problems, []);
+  assert.deepEqual(withAudio.payload.input_references, [{ type: 'audio_url', audio_url: { url: '/media/uploads/a.mp3' } }]);
+  assert.deepEqual(buildVideoRequest(baseForm({ mode: 'reference', prompt: '', refs: localAudio }), spec()).problems, ['仅有音频无法生成，请添加提示词、图片或视频']);
+  // 换回文生视频时，之前选的参考素材不会被带上。
+  assert.deepEqual(refsInUse(baseForm({ mode: 'text', refs })), []);
+});
+test('随机种子必须是整数', () => {
+  assert.deepEqual(buildVideoRequest(baseForm({ seed: '1.5' }), spec()).problems, ['随机种子须为整数']);
+  assert.equal(buildVideoRequest(baseForm({ seed: ' -7 ' }), spec()).payload.seed, -7);
 });
 
 test('换生成方式：图片跟着走，不用重新添加', () => {
@@ -85,119 +107,17 @@ test('换生成方式：图片跟着走，不用重新添加', () => {
   assert.deepEqual([text.frames, text.refs.image], [{ first: null, last: null }, [a, b]]);
 });
 
-test('参考生成：图片、视频、音频各用自己的字段和角色', () => {
-  const refs = {
-    image: [ref('image', 'asset://ast_1'), ref('image', 'https://a/2.png')],
-    video: [ref('video', 'asset://ast_3')],
-    audio: [ref('audio', 'asset://ast_4')],
-  };
-  const { payload, problems } = buildRequest(baseForm({ mode: 'reference', refs }));
-  assert.deepEqual(problems, []);
-  assert.deepEqual(payload.content, [
-    { type: 'text', text: '清晨的厨房' },
-    { type: 'image_url', image_url: { url: 'asset://ast_1' }, role: 'reference_image' },
-    { type: 'image_url', image_url: { url: 'https://a/2.png' }, role: 'reference_image' },
-    { type: 'video_url', video_url: { url: 'asset://ast_3' }, role: 'reference_video' },
-    { type: 'audio_url', audio_url: { url: 'asset://ast_4' }, role: 'reference_audio' },
-  ]);
-});
-
-test('参考生成：只有音频不够', () => {
-  const refs = { image: [], video: [], audio: [ref('audio', 'asset://ast_4')] };
-  const { problems } = buildRequest(baseForm({ mode: 'reference', prompt: '', refs }));
-  assert.deepEqual(problems, ['仅有音频无法生成，请添加提示词、图片或视频']);
-});
-
-test('切回文生视频时，之前选的参考素材不会被带上', () => {
-  const refs = { image: [ref('image', 'asset://ast_1')], video: [], audio: [] };
-  const form = baseForm({ mode: 'text', refs });
-  assert.deepEqual(refsInUse(form), []);
-  assert.equal(buildRequest(form).payload.content.length, 1);
-});
-
-test('素材没就绪或不可用时不能提交', () => {
-  const refs = { image: [ref('image', 'asset://ast_1')], video: [], audio: [] };
-  const form = baseForm({ mode: 'reference', refs });
-  assert.match(buildRequest(form, () => ({ ready: false, tone: 'pending' })).problems[0], /处理中/);
-  assert.match(buildRequest(form, () => ({ ready: false, tone: 'error' })).problems[0], /不可用/);
-});
-
-test('时长自动传 -1', () => {
-  assert.equal(buildRequest(baseForm({ durationAuto: true })).payload.duration, -1);
-});
-
-test('可选参数只在设置时出现', () => {
-  const plain = buildRequest(baseForm()).payload;
-  for (const key of ['seed', 'web_search', 'input_type', 'super_resolution_config']) assert.equal(key in plain, false, key);
-
-  const { payload, problems } = buildRequest(baseForm({ seed: '42', webSearch: true, inputType: 'reference' }));
-  assert.deepEqual(problems, []);
-  assert.equal(payload.seed, 42);
-  assert.equal(payload.web_search, true);
-  assert.equal(payload.input_type, 'reference');
-});
-
-test('随机种子必须是整数', () => {
-  assert.deepEqual(buildRequest(baseForm({ seed: '1.5' })).problems, ['随机种子须为整数']);
-});
-
-test('超分：按目标分辨率，且必须高于原始分辨率', () => {
-  const sr = { enabled: true, by: 'resolution', resolution: '4k', limit: 1440, scene: 'aigc', tool: 'professional', fps: '60' };
-  const ok = buildRequest(baseForm({ resolution: '1080p', sr }));
-  assert.deepEqual(ok.problems, []);
-  assert.deepEqual(ok.payload.super_resolution_config, { resolution: '4k', scene: 'aigc', tool_version: 'professional', fps: 60 });
-
-  const same = buildRequest(baseForm({ resolution: '1080p', sr: { ...sr, resolution: '1080p' } }));
-  assert.deepEqual(same.problems, ['超分目标分辨率须高于原始分辨率']);
-});
-
-test('超分：按短边像素时不带 resolution，范围 64–2160', () => {
-  const sr = { enabled: true, by: 'limit', resolution: '1080p', limit: '1440', scene: '', tool: 'standard', fps: '' };
-  const ok = buildRequest(baseForm({ sr }));
-  assert.deepEqual(ok.problems, []);
-  assert.deepEqual(ok.payload.super_resolution_config, { resolution_limit: 1440, tool_version: 'standard' });
-
-  assert.equal(buildRequest(baseForm({ sr: { ...sr, limit: '4000' } })).problems.length, 1);
-  assert.equal(buildRequest(baseForm({ sr: { ...sr, fps: '0' } })).problems.length, 1);
-});
-
-// ---------- Grok 视频 ----------
-
-const local = (url) => ({ uid: url, kind: 'image', source: 'local', url });
-
-test('Grok 文生视频：用 prompt 字符串，带比例、分辨率、时长，不带 Seedance 的参数', () => {
-  const { payload, problems } = buildRequest(baseForm({ model: 'grok-imagine-video', ratio: '9:16', duration: 3, seed: '7', webSearch: true }));
-  assert.deepEqual(problems, []);
-  assert.deepEqual(payload, { model: 'grok-imagine-video', prompt: '清晨的厨房', duration: 3, resolution: '720p', aspect_ratio: '9:16' });
-});
-
-test('Grok 图生视频：首帧放在 image 里，比例跟着图片走；素材库里的素材用不了', () => {
-  const withFrame = buildRequest(baseForm({ model: 'grok-imagine-video-1.5', mode: 'frames', frames: { first: local('/media/images/img_1.jpg'), last: null } }));
-  assert.deepEqual(withFrame.problems, []);
-  assert.deepEqual(withFrame.payload.image, { url: '/media/images/img_1.jpg' });
-  assert.equal('aspect_ratio' in withFrame.payload, false);
-
-  const fromLibrary = { uid: 'a', kind: 'image', source: 'asset', assetId: 'ast_1', url: 'asset://ast_1' };
-  assert.deepEqual(buildRequest(baseForm({ model: 'grok-imagine-video', mode: 'frames', frames: { first: fromLibrary, last: null } })).problems, ['当前模型不支持素材库素材，请移除后重新添加首帧']);
-  assert.deepEqual(buildRequest(baseForm({ model: 'grok-imagine-video', mode: 'frames' })).problems, ['请添加首帧图片']);
-  assert.deepEqual(buildRequest(baseForm({ model: 'grok-imagine-video', mode: 'reference' })).problems, ['当前模型不支持参考生成，请改用文生视频或图生视频']);
-});
-
-test('Seedance 用不了只存在本机的首帧', () => {
-  const { problems } = buildRequest(baseForm({ mode: 'frames', frames: { first: local('/media/uploads/up_1.png'), last: null } }));
-  assert.deepEqual(problems, ['Seedance 不支持本地素材，请移除后重新添加']);
-});
 
 // ---------- 图片、语音、音效、配乐 ----------
 
 test('生图：模型、提示词、张数、比例', () => {
-  assert.deepEqual(buildImageRequest({ prompt: ' 红色纸船 ', model: 'grok-imagine-image-2.0', ratio: '16:9', count: 2 }), {
-    payload: { model: 'grok-imagine-image-2.0', prompt: '红色纸船', n: 2, aspect_ratio: '16:9' },
+  assert.deepEqual(buildImageRequest({ prompt: ' 红色纸船 ', model: 'doubao-seedream-5-0-pro-260628', ratio: '16:9', count: 2 }), {
+    payload: { model: 'doubao-seedream-5-0-pro-260628', prompt: '红色纸船', n: 2, aspect_ratio: '16:9' },
     problems: [],
   });
   assert.deepEqual(buildImageRequest({ prompt: '', model: 'm', ratio: '1:1', count: 1 }).problems, ['请输入提示词']);
 
-  // 图生图：参考图放进 input_references；模型不收、超了张数、来自素材库都说明原因。
+  // 图生图：参考图放进 input_references；模型不收、超了张数都说明原因。
   const local = { uid: 'a', kind: 'image', source: 'local', url: '/media/images/a.png', name: 'a', thumb: null };
   const edit = buildImageRequest({ prompt: '改成水彩', model: 'm', ratio: '1:1', count: 1, refs: [local] }, 3);
   assert.deepEqual(edit.problems, []);
@@ -205,7 +125,6 @@ test('生图：模型、提示词、张数、比例', () => {
   assert.match(buildImageRequest({ prompt: '改', model: 'm', ratio: '1:1', count: 1, refs: [local] }).problems[0], /不支持参考图/);
   assert.match(buildImageRequest({ prompt: '改', model: 'm', ratio: '1:1', count: 1, refs: [local, local] }, 1).problems[0], /最多支持 1 张/);
   assert.match(buildImageRequest({ prompt: '', model: 'm', ratio: '1:1', count: 1, refs: [local] }, 3).problems[0], /修改要求/);
-  assert.match(buildImageRequest({ prompt: '改', model: 'm', ratio: '1:1', count: 1, refs: [{ ...local, source: 'asset' }] }, 3).problems[0], /素材库/);
 });
 
 test('语音：要有文字和音色', () => {
@@ -215,65 +134,24 @@ test('语音：要有文字和音色', () => {
 });
 
 test('音效：时长选自动时不传', () => {
-  assert.deepEqual(buildSfxRequest({ prompt: '关门声', duration: 'auto', influence: '0.3' }).body, { text: '关门声', influence: 0.3 });
-  assert.deepEqual(buildSfxRequest({ prompt: '关门声', duration: '5', influence: '0.6' }).body, { text: '关门声', influence: 0.6, duration: 5 });
-  assert.deepEqual(buildSfxRequest({ prompt: ' ', duration: 'auto', influence: '0.3' }).problems, ['请输入音效描述']);
+  assert.deepEqual(buildSfxRequest({ prompt: '关门声', duration: 'auto' }).body, { text: '关门声' });
+  assert.deepEqual(buildSfxRequest({ prompt: '关门声', duration: '5' }).body, { text: '关门声', duration: 5 });
+  assert.deepEqual(buildSfxRequest({ prompt: ' ', duration: 'auto' }).problems, ['请输入音效描述']);
 });
 
-test('配乐：要有视频，并且读到了时长', () => {
-  assert.deepEqual(buildMusicRequest({ video: { url: '/media/videos/a.mp4', duration: 5.04 } }), { body: { video: '/media/videos/a.mp4', duration: 5.04 }, problems: [] });
-  assert.deepEqual(buildMusicRequest({ video: null }).problems, ['请选择视频']);
-  assert.deepEqual(buildMusicRequest({ video: { url: '/media/videos/a.mp4', duration: 0 } }).problems, ['无法获取视频时长，请重新选择']);
+test('配乐：要有描述；给了视频就和视频一样长，最长 120 秒，没给就用选的时长', () => {
+  assert.deepEqual(buildMusicRequest({ prompt: ' 轻快的钢琴 ', video: null, duration: 30 }), { body: { text: '轻快的钢琴', duration: 30 }, problems: [] });
+  assert.deepEqual(buildMusicRequest({ prompt: '轻快的钢琴', video: { url: '/media/videos/a.mp4', duration: 5.04 }, duration: 30 }).body, { text: '轻快的钢琴', duration: 5, video: '/media/videos/a.mp4' });
+  assert.equal(buildMusicRequest({ prompt: '轻快的钢琴', video: { url: '/media/videos/a.mp4', duration: 300 }, duration: 30 }).body.duration, 120);
+  assert.deepEqual(buildMusicRequest({ prompt: '', video: null, duration: 30 }).problems, ['请输入配乐描述']);
+  assert.deepEqual(buildMusicRequest({ prompt: '轻快的钢琴', video: { url: '/media/videos/a.mp4', duration: 0 }, duration: 30 }).problems, ['无法获取视频时长，请重新选择']);
 });
 
-// ---------- 火山方舟 ----------
-
-const spec = (patch = {}) => ({ resolutions: ['480p', '720p'], ratios: ['16:9', '9:16'], durations: [4, 5], autoDuration: false, frames: ['first_frame', 'last_frame'], audio: true, seed: true, ...patch });
-const orForm = (patch = {}) => baseForm({ model: 'doubao-seedance-2-0-260128', ...patch });
-
-test('火山方舟文生视频：提示词是 prompt 字符串，不带 Seedance 在 Flatkey 上的那些参数', () => {
-  const { payload, problems } = buildSpecRequest(orForm({ seed: '42', webSearch: true, watermark: true, durationAuto: true }), spec());
-  assert.deepEqual(problems, []);
-  assert.deepEqual(payload, { model: 'doubao-seedance-2-0-260128', duration: 5, resolution: '720p', prompt: '清晨的厨房', aspect_ratio: '16:9', generate_audio: true, seed: 42 });
-  assert.deepEqual(buildSpecRequest(orForm({ prompt: ' ' }), spec()).problems, ['请输入提示词']);
-});
-
-test('火山方舟模型不支持的选项不发：声音开关、随机种子', () => {
-  const { payload } = buildSpecRequest(orForm({ seed: '42' }), spec({ audio: false, seed: false }));
-  assert.equal('generate_audio' in payload, false);
-  assert.equal('seed' in payload, false);
-});
-
-test('火山方舟首尾帧：放在 frame_images 里，比例跟着图片走；模型只收首帧时不发尾帧', () => {
-  const frames = { first: local('/media/images/a.jpg'), last: local('/media/images/b.jpg') };
-  const both = buildSpecRequest(orForm({ mode: 'frames', frames }), spec());
-  assert.deepEqual(both.problems, []);
-  assert.deepEqual(both.payload.frame_images, [
-    { type: 'image_url', image_url: { url: '/media/images/a.jpg' }, frame_type: 'first_frame' },
-    { type: 'image_url', image_url: { url: '/media/images/b.jpg' }, frame_type: 'last_frame' },
-  ]);
-  assert.equal('aspect_ratio' in both.payload, false);
-  assert.equal(buildSpecRequest(orForm({ mode: 'frames', frames }), spec({ frames: ['first_frame'] })).payload.frame_images.length, 1);
-  assert.deepEqual(buildSpecRequest(orForm({ mode: 'frames' }), spec()).problems, ['请添加首帧图片']);
-});
-
-test('火山方舟参考生成：素材放在 input_references 里；本机的视频和 Flatkey 素材库里的素材用不了', () => {
-  const refs = { image: [local('/media/images/a.jpg')], video: [ref('video', 'https://example.com/a.mp4')], audio: [] };
-  const { payload, problems } = buildSpecRequest(orForm({ mode: 'reference', refs }), spec());
-  assert.deepEqual(problems, []);
-  assert.deepEqual(payload.input_references, [
-    { type: 'image_url', image_url: { url: '/media/images/a.jpg' } },
-    { type: 'video_url', video_url: { url: 'https://example.com/a.mp4' } },
-  ]);
-  assert.equal(payload.aspect_ratio, '16:9');
-
-  const localVideo = { image: [], video: [{ uid: 'v', kind: 'video', source: 'local', url: '/media/videos/a.mp4' }], audio: [] };
-  assert.match(buildSpecRequest(orForm({ mode: 'reference', refs: localVideo }), spec()).problems[0], /公网链接/);
-  // 本机的参考音频可以用：由本地服务内嵌进请求
-  const localAudio = { image: [], video: [], audio: [{ uid: 'a', kind: 'audio', source: 'local', url: '/media/uploads/a.mp3' }] };
-  const withAudio = buildSpecRequest(orForm({ mode: 'reference', refs: localAudio }), spec());
-  assert.deepEqual(withAudio.problems, []);
-  assert.deepEqual(withAudio.payload.input_references, [{ type: 'audio_url', audio_url: { url: '/media/uploads/a.mp3' } }]);
-  const fromLibrary = { image: [{ uid: 'a', kind: 'image', source: 'asset', assetId: 'ast_1', url: 'asset://ast_1' }], video: [], audio: [] };
-  assert.match(buildSpecRequest(orForm({ mode: 'reference', refs: fromLibrary }), spec()).problems[0], /素材库/);
+test('必须写提示词的模型（MiniMax H3）：只给素材不行，首尾帧、参考生成都一样', () => {
+  const h3 = spec({ audio: false, seed: false, promptRequired: true });
+  const framed = buildVideoRequest(baseForm({ mode: 'frames', prompt: '', frames: { first: local('/media/uploads/a.png'), last: null } }), h3);
+  assert.deepEqual(framed.problems, ['请输入提示词']);
+  assert.equal('generate_audio' in framed.payload, false);
+  assert.deepEqual(buildVideoRequest(baseForm({ mode: 'reference', prompt: '', refs: { image: [local('/media/uploads/a.png')], video: [], audio: [] } }), h3).problems, ['请输入提示词']);
+  assert.deepEqual(buildVideoRequest(baseForm({ mode: 'reference', prompt: '跳舞', refs: { image: [local('/media/uploads/a.png')], video: [], audio: [] } }), h3).problems, []);
 });

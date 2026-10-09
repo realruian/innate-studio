@@ -4,7 +4,6 @@
 import { memo, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { api, state, emit, useStore, loadHistory, isPendingTask, isTimedOutTask, goTo } from './store.ts';
 import { fmtTime, fmtDuration, fmtBytes, fmtCost } from './format.ts';
-import { videoFamily } from './request.ts';
 import { stopPlaying } from './playback.ts';
 import { VideoPlayer, AudioPlayer } from './player.tsx';
 import { Thumb } from './assets.tsx';
@@ -12,9 +11,9 @@ import { Icon } from './ui/Icon.tsx';
 import { Segmented, SearchBox, tip, clipTip } from './ui/controls.tsx';
 import { toast, openModal, openMenu, confirmDialog, copyText } from './ui/layers.tsx';
 import { enter } from './ui/motion.ts';
-import { setForm, setStudio, useImageForVideo, useVideoForMusic, useVideoAsSource } from './composer/state.ts';
+import { setForm, setStudio, useImageForVideo, useVideoForMusic } from './composer/state.ts';
 import { openCharacterEditor } from './characters.tsx';
-import { VIDEO_TASKS, videoFamilyOf, referenceModeLabel, estimateCost, type VideoTask } from '../../shared/models.ts';
+import { IMAGE_QUALITY_LABELS, REFERENCE_MODE_LABEL, estimateCost } from '../../shared/models.ts';
 import type { CreateType, HistoryItem, Ref } from './types.ts';
 
 const MODE_LABELS: Record<string, string> = { text: '文生视频', frames: '首尾帧' };
@@ -37,23 +36,16 @@ const RECENT_COUNT = 6;
 // 在画布里生成的（提交时画布在表单里留了记号）。它们不进创作页的「最近生成」，记录页里单独看。
 const fromCanvas = (item: HistoryItem) => item.form?.from === 'canvas';
 
+// 表单里记着生成方式；很早的记录没存表单，看请求里的素材各是什么用途。
 function modeOf(item: HistoryItem) {
-  if (videoFamily(item.model) === 'grok') return item.payload?.image || item.payload?.frame_images?.length ? '图生视频' : '文生视频';
-  const mode = seedanceModeOf(item);
-  return mode === 'reference' ? referenceModeLabel(item.model) : MODE_LABELS[mode];
-}
-
-function seedanceModeOf(item: HistoryItem): string {
-  if (item.form?.mode) return item.form.mode;
   const roles: string[] = (item.payload?.content || []).map((c: { role?: string }) => c.role).filter(Boolean);
-  if (roles.some((r) => r === 'first_frame' || r === 'last_frame')) return 'frames';
-  return roles.length ? 'reference' : 'text';
+  const mode: string = item.form?.mode || (roles.some((r) => r === 'first_frame' || r === 'last_frame') ? 'frames' : roles.length ? 'reference' : 'text');
+  return mode === 'reference' ? REFERENCE_MODE_LABEL : MODE_LABELS[mode];
 }
 
 function refsOf(item: HistoryItem): Ref[] {
   const f = item.form;
   if (!f || item.kind !== 'video') return [];
-  if (videoFamily(item.model) === 'grok') return f.mode === 'frames' && f.frames?.first ? [f.frames.first] : [];
   if (f.mode === 'frames') return [f.frames?.first, f.frames?.last].filter(Boolean);
   if (f.mode === 'reference') return [...(f.refs?.image || []), ...(f.refs?.video || []), ...(f.refs?.audio || [])];
   return [];
@@ -115,23 +107,11 @@ async function recheck(item: HistoryItem) {
   }
 }
 
-// 把一张生成的图片拿去生成视频。Seedance 要先把图传进素材库，会等一小会儿。
+// 把一张生成的图片拿去生成视频。
 async function animate(item: HistoryItem) {
   try {
     await useImageForVideo(item);
-    toast('已添加为首帧', 'success');
-  } catch (err) {
-    toast(message(err), 'error', 6000);
-  }
-}
-
-// 延长或编辑一条视频。只有 Flatkey 上的 Seedance 能做（要把视频传进素材库当参考），用的是火山方舟或者账号里没有 Seedance 型号时不出现这两个入口。
-const canRework = (item: HistoryItem) => done(item) && item.kind === 'video' && state.app.provider === 'flatkey' && state.models.some((id) => videoFamilyOf(id) === 'seedance');
-async function rework(item: HistoryItem, task: VideoTask) {
-  if (!item.savedLocally) return toast('视频保存中，请稍后重试', 'info');
-  try {
-    await useVideoAsSource(item, task);
-    toast('已添加视频', 'success');
+    toast('已添加为参考图', 'success');
   } catch (err) {
     toast(message(err), 'error', 6000);
   }
@@ -166,8 +146,6 @@ function openCardMenu(button: HTMLElement, id: string, scope: Scope) {
     recheck: () => recheck(item),
     reuse: () => reuse(item),
     score: () => score(item),
-    extend: () => rework(item, 'extend'),
-    edit: () => rework(item, 'edit'),
     animate: () => animate(item),
     character: () => openCharacterEditor({ images: [item.mediaUrl!] }),
     detail: () => openDetail(item.id, scope),
@@ -182,9 +160,7 @@ function openCardMenu(button: HTMLElement, id: string, scope: Scope) {
       isPendingTask(item) && !item.direct && { value: 'refresh', label: '刷新' },
       isTimedOutTask(item) && { value: 'recheck', label: '重新查询' },
       { value: 'reuse', label: '复用' },
-      canRework(item) && { value: 'extend', label: VIDEO_TASKS.extend.label },
-      canRework(item) && { value: 'edit', label: VIDEO_TASKS.edit.label },
-      done(item) && item.kind === 'video' && state.catalog.audio.music && { value: 'score', label: '配乐' },
+      done(item) && item.kind === 'video' && { value: 'score', label: '配乐' },
       done(item) && item.kind === 'image' && { value: 'animate', label: '生成视频' },
       done(item) && item.kind === 'image' && item.savedLocally && { value: 'character', label: '存为角色' },
       { value: 'detail', label: '详情' },
@@ -205,7 +181,7 @@ function ImageView({ item, large }: { item: HistoryItem; large: boolean }) {
     <div className={`image-view${ratio ? ' fit' : ''}`} style={ratio ? ({ '--ratio': ratio } as CSSProperties) : undefined}>
       <img
         className={`media-image${cover ? ' cover' : ''}`}
-        src={item.mediaUrl}
+        src={(!large && item.thumbUrl) || item.mediaUrl}
         alt={item.prompt || '生成的图片'}
         onLoad={large ? (e) => setRatio(e.currentTarget.naturalWidth / e.currentTarget.naturalHeight) : (e) => setCover(Math.abs(e.currentTarget.naturalWidth / e.currentTarget.naturalHeight / (16 / 9) - 1) < 0.03)}
       />
@@ -236,7 +212,7 @@ function MediaBox({ item, large = false }: { item: HistoryItem; large?: boolean 
   if (done(item)) {
     if (item.kind === 'image') return <ImageView item={item} large={large} />;
     if (item.kind === 'audio') return <AudioView item={item} large={large} />;
-    return <VideoPlayer src={item.videoUrl} autoplay={large} hoverPlay={!large} fit={large} frameRatio={large ? null : 16 / 9} showLength={!large} label={item.prompt || '生成的视频'} />;
+    return <VideoPlayer src={item.videoUrl} poster={large ? null : item.thumbUrl} size={large ? undefined : item.media} autoplay={large} hoverPlay={!large} fit={large} frameRatio={large ? null : 16 / 9} showLength={!large} label={item.prompt || '生成的视频'} />;
   }
   if (item.status === 'failed') {
     const reason = explainFailure(item.error?.message);
@@ -335,12 +311,12 @@ function paramsOf(item: HistoryItem): Entry[] {
   const p = item.payload || {};
   // 用了技能的记录：提示词是扩写出来的，这里标出用的是哪个技能、用户原来写的是什么。
   const skill: Entry[] = item.form?.skill ? [['技能', item.form.skill.name], ['原始输入', item.form.prompt, true]] : [];
-  if (item.kind === 'image') return [['模型', item.model, true], ['画面比例', p.aspect_ratio], ['分辨率', p.resolution], ...skill];
+  if (item.kind === 'image') return [['模型', item.model, true], ['画面比例', p.aspect_ratio], ['分辨率', p.resolution], ['画质', p.quality ? IMAGE_QUALITY_LABELS[p.quality] || p.quality : null], ...skill];
   if (item.tool === 'speech') return [['模型', item.model, true], ['音色', p.voice_name || p.voice_id]];
   if (item.tool === 'sfx') {
     return [['模型', item.model, true], ['时长', p.duration_seconds ? `${p.duration_seconds} 秒` : '自动'], ['提示词相关性', p.prompt_influence]];
   }
-  if (item.tool === 'music') return [['模型', item.model, true], ['视频时长', p.duration_seconds && `${Math.round(p.duration_seconds * 10) / 10} 秒`]];
+  if (item.tool === 'music') return [['模型', item.model, true], ['时长', p.duration_seconds && `${Math.round(p.duration_seconds * 10) / 10} 秒`]];
   const ratio = p.ratio || p.aspect_ratio;
   return [
     ['模式', modeOf(item)],
@@ -465,9 +441,7 @@ function Detail({ item, close, nav }: { item: HistoryItem; close: () => void; na
         </a>
       )}
       {leaveTo('复用参数', reuse)}
-      {canRework(item) && leaveTo(VIDEO_TASKS.extend.label, (it) => rework(it, 'extend'))}
-      {canRework(item) && leaveTo(VIDEO_TASKS.edit.label, (it) => rework(it, 'edit'))}
-      {done(item) && item.kind === 'video' && state.catalog.audio.music && leaveTo('配乐', score)}
+      {done(item) && item.kind === 'video' && leaveTo('配乐', score)}
       {done(item) && item.kind === 'image' && leaveTo('生成视频', animate)}
       {isTimedOutTask(item) && leaveTo('重新查询', recheck)}
       {!item.savedLocally && item.status === 'completed' && !item.direct && (
@@ -485,10 +459,10 @@ function Detail({ item, close, nav }: { item: HistoryItem; close: () => void; na
         <MediaBox item={item} large />
       </div>
       {nav}
-      {/* 右边：上面是信息，分成几组，放不下就在这一栏里滚动；下面是能对它做的事。配乐没有提示词，就没有第一组。 */}
+      {/* 右边：上面是信息，分成几组，放不下就在这一栏里滚动；下面是能对它做的事。以前的配乐没有提示词，就没有第一组。 */}
       <div className="detail-side">
         <div className="detail-info">
-          {item.tool !== 'music' && (
+          {(item.tool !== 'music' || item.prompt) && (
             <Section
               title={item.tool === 'speech' ? '朗读文本' : '提示词'}
               action={

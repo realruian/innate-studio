@@ -1,15 +1,14 @@
-// 整个页面：侧边栏（导航和设置）和七个页面。页面第一次打开时才画，之后切走只是藏起来。
+// 整个页面：侧边栏（导航和设置）和五个页面。多人模式下没登录时只有登录页。页面第一次打开时才画，之后切走只是藏起来。
 
 import { useEffect, useRef } from 'react';
-import { state, useStore, goTo, loadPersons } from './store.ts';
+import { state, useStore, goTo, needsLogin } from './store.ts';
+import { Login } from './account.tsx';
 import { Icon, type IconName } from './ui/Icon.tsx';
 import { LayerHosts } from './ui/layers.tsx';
 import { tip } from './ui/controls.tsx';
 import { Composer } from './composer/Composer.tsx';
 import { focusComposer } from './composer/state.ts';
 import { Recent, Records } from './history.tsx';
-import { Library } from './assets.tsx';
-import { Persons } from './persons.tsx';
 import { Projects } from './canvas/Projects.tsx';
 import { Characters } from './characters.tsx';
 import { Skills } from './skills.tsx';
@@ -17,28 +16,28 @@ import { openSettings } from './settings.tsx';
 import { SpendButton } from './spend.tsx';
 import type { ViewId } from './types.ts';
 
-// 七项是同一层的页签。「创造」是首页，在首页再点一次会回到顶部并把光标放回输入框。
-// 素材库和真人档案是 Flatkey 才有的，feature 写着它们各自要平台支持哪一项，平台不支持就不显示。
+// 五项是同一层的页签。「创造」是首页，在首页再点一次会回到顶部并把光标放回输入框。
 // 侧栏的图标线宽是 2，比别处的 1.5 粗一档。
 // Sparkle 在库里画得比别的图标小一圈（只占画布中间六成），所以放大到 22 显示，线条相应调细，看上去和其他几项一样大、一样粗。
-const VIEWS: { id: ViewId; label: string; icon: IconName; size?: number; stroke?: number; feature?: 'library' | 'persons' }[] = [
+const VIEWS: { id: ViewId; label: string; icon: IconName; size?: number; stroke?: number }[] = [
   { id: 'create', label: '创造', icon: 'sparkle', size: 22, stroke: 1.45 },
   { id: 'canvas', label: '画布', icon: 'workflow' },
   { id: 'records', label: '创作记录', icon: 'history' },
   { id: 'characters', label: '角色', icon: 'userStory' },
   { id: 'skills', label: '技能', icon: 'wandSparkles' },
-  { id: 'library', label: '素材库', icon: 'folderLibrary', feature: 'library' },
-  { id: 'persons', label: '真人档案', icon: 'userCircle', feature: 'persons' },
 ];
 const NAV_STROKE = 2;
 const NO_KEY = '未配置 API Key';
 
 export function App() {
+  useStore('app');
+  return needsLogin() ? <Login /> : <Workbench />;
+}
+
+function Workbench() {
   const visit = useStore('view');
   useStore('boot', 'app', 'immersive');
-  const views = VIEWS.filter((v) => !v.feature || state.app.features[v.feature]);
-  // 正开着的页面在换平台之后没有了，就回到创作页。
-  const view = views.some((v) => v.id === state.view) ? state.view : 'create';
+  const view = state.view;
   const main = useRef<HTMLElement>(null);
   const opened = useRef(new Set<ViewId>(['create'])).current;
   opened.add(view);
@@ -47,7 +46,6 @@ export function App() {
   useEffect(() => {
     // 离开一个页面时停掉它里面正在放的视频和音频，免得声音留在后台。
     for (const media of main.current!.querySelectorAll<HTMLMediaElement>('.view[hidden] :is(video, audio)')) media.pause();
-    if (view === 'persons') loadPersons();
     if (view === 'create') {
       main.current!.querySelector('.view-create')!.scrollTo({ top: 0 });
       focusComposer();
@@ -63,7 +61,7 @@ export function App() {
           <span className="brand-word" role="img" aria-label="INNATE" />
         </div>
         <nav className="nav">
-          {views.map((v) => {
+          {VIEWS.map((v) => {
             const current = view === v.id;
             return (
               <button key={v.id} className={`nav-item ${current ? 'active' : ''}`} type="button" aria-current={current ? 'page' : undefined} onClick={() => goTo(v.id)}>
@@ -104,12 +102,6 @@ export function App() {
         </div>
         <div className="view" hidden={view !== 'skills'}>
           {opened.has('skills') && <Skills />}
-        </div>
-        <div className="view" hidden={view !== 'library'}>
-          {opened.has('library') && <Library />}
-        </div>
-        <div className="view" hidden={view !== 'persons'}>
-          {opened.has('persons') && <Persons />}
         </div>
       </main>
       <LayerHosts />

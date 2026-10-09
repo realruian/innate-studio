@@ -134,16 +134,22 @@ interface VideoPlayerProps {
   showLength?: boolean;
   // 给视频配的那段音乐的地址。传了它，视频自己的声音关掉，播放、暂停、拖动时这段音乐跟着画面走，静音键管的也是它。
   soundtrack?: string | null;
+  // 封面图和视频的宽高、时长。给了封面，鼠标移上来之前不去读视频文件，比例和时长用这里给的。
+  poster?: string | null;
+  size?: { width?: number; height?: number; duration?: number };
 }
 
-export function VideoPlayer({ src, autoplay = false, label = '视频', clickToPlay = true, hoverPlay = false, frameRatio = null, fit = false, showLength = false, soundtrack = null }: VideoPlayerProps) {
+export function VideoPlayer({ src, autoplay = false, label = '视频', clickToPlay = true, hoverPlay = false, frameRatio = null, fit = false, showLength = false, soundtrack = null, poster = null, size }: VideoPlayerProps) {
   const root = useRef<HTMLDivElement>(null);
   const video = useRef<HTMLVideoElement>(null);
   const music = useRef<HTMLAudioElement>(null);
   const { playing, toggle, time, fill, rail, trackProps } = useMediaControls(video, root);
   const [muted, setMutedState] = useState(false);
-  const [cover, setCover] = useState(false);
-  const [length, setLength] = useState(0);
+  // 视频比例和画框差不多就铺满画框，不然边上会露出一线底色；
+  // 差得多（比如竖屏视频）就完整显示、两边留出底色，不去裁画面。
+  const fills = (width?: number, height?: number) => Boolean(frameRatio && width && height && Math.abs(width / height / frameRatio - 1) < 0.03);
+  const [cover, setCover] = useState(fills(size?.width, size?.height));
+  const [length, setLength] = useState(size?.duration || 0);
   const [ratio, setRatio] = useState(0);
 
   function setMuted(next: boolean) {
@@ -204,7 +210,8 @@ export function VideoPlayer({ src, autoplay = false, label = '视频', clickToPl
         ref={video}
         className={`player-video${cover ? ' cover' : ''}`}
         src={src}
-        preload="metadata"
+        poster={poster || undefined}
+        preload={poster ? 'none' : 'metadata'}
         playsInline
         loop
         autoPlay={autoplay}
@@ -213,9 +220,7 @@ export function VideoPlayer({ src, autoplay = false, label = '视频', clickToPl
         onClick={clickToPlay && !hoverPlay ? toggle : undefined}
         onLoadedMetadata={(e) => {
           const el = e.currentTarget;
-          // 视频比例和画框差不多就铺满画框，不然边上会露出一线底色；
-          // 差得多（比如竖屏视频）就完整显示、两边留出底色，不去裁画面。
-          if (frameRatio) setCover(Math.abs(el.videoWidth / el.videoHeight / frameRatio - 1) < 0.03);
+          if (frameRatio) setCover(fills(el.videoWidth, el.videoHeight));
           if (el.videoWidth && el.videoHeight) setRatio(el.videoWidth / el.videoHeight);
           if (Number.isFinite(el.duration)) setLength(el.duration);
         }}

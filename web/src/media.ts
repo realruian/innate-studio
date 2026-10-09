@@ -1,8 +1,8 @@
 // 素材文件的处理：缩略图、上传、把素材或生成记录变成一份参考素材。不碰界面。
 
-import { api, ApiError, KINDS, rememberAsset } from './store.ts';
+import { ApiError, KINDS } from './store.ts';
 import { fmtBytes } from './format.ts';
-import type { Asset, HistoryItem, Kind, Ref } from './types.ts';
+import type { HistoryItem, Kind, Ref } from './types.ts';
 
 // ---------- 缩略图 ----------
 
@@ -88,34 +88,8 @@ export function checkFileSize(file: File, kind: Kind) {
   if (file.size > maxBytes) throw new Error(`文件过大：${label}上限 ${Math.round(maxBytes / 1024 / 1024)} MB，当前 ${fmtBytes(file.size)}`);
 }
 
-export async function uploadVirtualAsset(file: File, kind: Kind, onProgress?: Progress): Promise<Asset> {
-  checkFileSize(file, kind);
-  const thumb = await makeThumb(file, kind);
-  const form = new FormData();
-  form.append('file', file);
-  form.append('asset_type', KINDS[kind].type);
-  const asset = await xhrUpload<Asset>('/api/assets/upload', form, { 'X-Asset-Name': encodeURIComponent(file.name), 'X-Asset-Type': KINDS[kind].type }, onProgress);
-  const saved = thumb ? await api<Asset>('PATCH', `/api/assets/${asset.id}`, { thumb }).catch(() => asset) : asset;
-  rememberAsset(saved);
-  return saved;
-}
-
-export function refFromAsset(asset: Asset, kind: Kind): Ref {
-  return {
-    uid: crypto.randomUUID(),
-    kind,
-    source: 'asset',
-    assetId: asset.id,
-    personId: asset.personId || null,
-    url: asset.asset_url || `asset://${asset.id}`,
-    name: asset.name || asset.id,
-    thumb: asset.thumb || null,
-  };
-}
-
-// ---------- 只存在本机的素材 ----------
-// Grok 的首帧、要配乐的视频不经过 Flatkey 的素材库：文件存在本地服务的 data/uploads 里，
-// 或者直接用生成记录里已经存到本机的结果。这类素材的 source 是 local，地址是 /media/ 开头的本机地址。
+// ---------- 存在本机的素材 ----------
+// 从电脑里选的文件存在本地服务的 uploads 里，生成记录里的结果直接引用。这类素材的 source 是 local，地址是 /media/ 开头的本机地址。
 
 export async function uploadLocalFile(file: File, kind: Kind, onProgress?: Progress): Promise<Ref> {
   checkFileSize(file, kind);
@@ -133,13 +107,4 @@ export async function refFromRecord(item: HistoryItem): Promise<Ref> {
   if (item.kind !== 'video') return ref;
   const video = await readVideo(item.mediaUrl!).catch(() => null);
   return { ...ref, thumb: video?.thumb || null, duration: video?.duration || 0 };
-}
-
-// Seedance 只认素材库里的素材：把生成记录里的文件取出来，传进 Flatkey 的素材库。
-export async function assetFromRecord(item: HistoryItem) {
-  const res = await fetch(item.mediaUrl!);
-  if (!res.ok) throw new Error('文件已不存在');
-  const blob = await res.blob();
-  const file = new File([blob], `${recordName(item)}.${item.mediaUrl!.split('.').pop()}`, { type: blob.type });
-  return uploadVirtualAsset(file, item.kind);
 }
