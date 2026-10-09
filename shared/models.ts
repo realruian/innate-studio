@@ -41,16 +41,19 @@ export const isProvider = (id: unknown): id is ProviderId => id === 'flatkey' ||
 
 export const videoFamilyOf = (id?: string): VideoFamily | null => (/(^|\/)grok-imagine-video/i.test(id || '') ? 'grok' : /seedance/i.test(id || '') ? 'seedance' : null);
 
+// 带参考素材的那种生成方式叫什么。Seedance 用字节自己的叫法「全能参考」（即梦界面和发布稿都这么叫）；
+// 别的模型没有这个说法，叫「参考生成」，对应 OpenRouter 的 Reference-to-Video。
+export const referenceModeLabel = (id?: string) => (videoFamilyOf(id) === 'seedance' ? '全能参考' : '参考生成');
+
 // ---------- 型号后面的附注 ----------
 // 只说它是同一代里的哪一档，依据是型号名里的后缀，所以同一档的型号附注一定相同，新出的型号也不用再登记。
-// seedance-2.0 不带后缀，但它就是专业版：Flatkey 的文档把它叫作专业模型，模型目录里它和 seedance-2.0-pro 同价。
-// 没有分档的模型（Grok、Seedance 2.5）不加附注。
+// 字节官方只分出 Fast 和 Mini 两档，附注是这两个词的直译。不带后缀的和带 -pro 的官方没有另外的叫法，不加附注
+// （「专业版」是 Flatkey 文档的说法，不是官方的）。Grok 也不加。
 
 export function modelNote(id: string): string {
   if (!/^seedance/i.test(id)) return '';
   if (/-fast$/i.test(id)) return '快速版';
   if (/-mini$/i.test(id)) return '轻量版';
-  if (/-pro$/i.test(id) || /^seedance-2\.0$/i.test(id)) return '专业版';
   return '';
 }
 
@@ -150,7 +153,7 @@ const seedanceReference = (refs: NonNullable<PolishTarget['refs']>) => {
   return `
 
 这次是参考生成，带了参考素材：${have.join('、')}。在提示词里按添加的顺序用"图片1""视频1""音频1"这样的叫法指代它们；草稿里写的"图1"就是"图片1"，统一改成这种叫法。草稿已经写了怎么用这些素材的，保留它的意思；草稿没写的，不要替用户编造每份素材的用途。用到参考图片里的人或物时写成"参考图片1中的…"，之后每次提到都用同一个称呼。
-如果草稿是在延长或修改一段视频（写着"延长视频1""编辑视频1""接视频2"这类），保留它原来的句式和结尾的约束（比如"镜头和景别保持不变""其他内容、动作和运镜保持不变"），直接说"视频1"，不要改成"参考视频1"，否则会被当成普通的参考生成。这时只把用户写的那部分内容补具体，不要拆成多个镜头，也不要另加运镜。`;
+如果草稿是在延长或编辑一段视频（写着"延长视频1""编辑视频1""接视频2"这类），保留它原来的句式和结尾的约束（比如"镜头和景别保持不变""其他内容、动作和运镜保持不变"），直接说"视频1"，不要改成"参考视频1"，否则会被当成普通的参考生成。这时只把用户写的那部分内容补具体，不要拆成多个镜头，也不要另加运镜。`;
 };
 
 const GROK_VIDEO = `你在帮用户改写一条 Grok Imagine 视频模型的提示词，按 X 官方的 Grok Imagine 指南来写。${RULES}
@@ -198,7 +201,8 @@ const ELEVEN_SFX = `你在帮用户改写一条 ElevenLabs 音效模型的提示
 - 想要更干净的录音感，可以加上 "high-quality, professionally recorded"。
 - 写得具体，但保持简短，不超过 30 个英文单词。`;
 
-// ---------- Seedance：延长和修改一段已有的视频 ----------
+// ---------- Seedance：延长和编辑一段已有的视频 ----------
+// 两个名字是火山方舟文档里「延长视频」「编辑视频」的简称。
 // 这两种任务没有单独的接口，就是参考生成：把视频当参考素材传进去，靠提示词的句式区分。
 // 下面的句式 2026-10-09 在 Flatkey 上用 seedance-2.0、480p 实测过：
 // 「向后延长视频1：…」加上「镜头和景别保持不变」，新片段的第一帧和原视频的最后一帧接得上；
@@ -207,7 +211,7 @@ const ELEVEN_SFX = `你在帮用户改写一条 ElevenLabs 音效模型的提示
 // lead 是给用户填好的开头，用户接着写；keep 是放在后面的那句约束。
 export const VIDEO_TASKS = {
   extend: { label: '延长', lead: '向后延长视频1：', keep: '镜头和景别保持不变。', hint: '写下接下来发生什么' },
-  edit: { label: '修改', lead: '严格编辑视频1，', keep: '其他内容、动作和运镜保持不变。', hint: '写下要把什么改成什么' },
+  edit: { label: '编辑', lead: '严格编辑视频1，', keep: '其他内容、动作和运镜保持不变。', hint: '写下要把什么改成什么' },
 };
 export type VideoTask = keyof typeof VIDEO_TASKS;
 

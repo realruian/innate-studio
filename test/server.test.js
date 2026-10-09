@@ -376,7 +376,7 @@ test('提示词润色：按要用的生成模型选规则', async () => {
   const reference = await guideFor('video', { model: 'seedance-2.0', mode: 'reference', refs: { image: 2, video: 0, audio: 1 } });
   assert.match(reference, /图片 2 张、音频 1 段/);
   assert.doesNotMatch(reference, /视频 \d+ 段/);
-  // 延长和修改视频也是参考生成，句式不能被改写成普通的参考。
+  // 延长和编辑视频也是参考生成，句式不能被改写成普通的参考。
   assert.match(reference, /不要改成"参考视频1"/);
 
   const grok = await guideFor('video', { model: 'grok-imagine-video-1.5', mode: 'text' });

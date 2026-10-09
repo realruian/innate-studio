@@ -2,16 +2,18 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { modelNote, videoFamilyOf, videoCapabilities, videoSpecOf, polishGuide } from '../shared/models.ts';
+import { modelNote, videoFamilyOf, referenceModeLabel, videoCapabilities, videoSpecOf, polishGuide } from '../shared/models.ts';
 
 test('型号附注：同一档的型号附注相同，没有分档的不加', () => {
-  // seedance-2.0 就是专业版，和带 -pro 的是同一档，两个都要标。
-  assert.equal(modelNote('seedance-2.0'), '专业版');
-  assert.equal(modelNote('seedance-2.0-pro'), '专业版');
-  assert.equal(modelNote('seedance-2.5-pro'), '专业版');
   assert.equal(modelNote('seedance-2.0-fast'), '快速版');
   assert.equal(modelNote('seedance-2.0-mini'), '轻量版');
-  for (const id of ['seedance-2.5', 'grok-imagine-video', 'grok-imagine-video-1.5', 'grok-imagine-image-2.0']) assert.equal(modelNote(id), '', id);
+  // 官方只有 Fast 和 Mini 两档有名字，不带后缀的和带 -pro 的不标。
+  for (const id of ['seedance-2.0', 'seedance-2.0-pro', 'seedance-2.5-pro', 'seedance-2.5', 'grok-imagine-video', 'grok-imagine-video-1.5', 'grok-imagine-image-2.0']) assert.equal(modelNote(id), '', id);
+});
+
+test('带参考素材的生成方式：Seedance 叫全能参考，别的模型叫参考生成', () => {
+  for (const id of ['seedance-2.0', 'seedance-2.5', 'bytedance/seedance-2.0-fast']) assert.equal(referenceModeLabel(id), '全能参考', id);
+  for (const id of ['google/veo-3.1', 'kwaivgi/kling-v2.5', 'x-ai/grok-imagine-video', undefined]) assert.equal(referenceModeLabel(id), '参考生成', String(id));
 });
 
 test('视频模型分两族，认不出来的不算视频模型', () => {

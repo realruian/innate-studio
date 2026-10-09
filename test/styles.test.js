@@ -28,10 +28,11 @@ function declarations(prop) {
 const offenders = (list, ok) => list.filter(({ value }) => !ok(value)).map(({ value, where }) => `${value}  ←  ${where}`);
 
 test('变量：字号六档、行高三档、间距阶梯的取值没有被改动或加塞', () => {
-  // 取某个前缀下的全部变量。--text- 开头的还有文字颜色（--text-2 等），所以字号只看取值是像素的。
+  // 取某个前缀下的全部变量。--text- 开头的还有文字颜色（--text-2 等），所以字号只看取值是 rem 的。
+  // 字号写成 rem（1rem 是 16 像素），用户调大浏览器的默认字号时会跟着变；上面的表里记的是对应的像素值。
   const defined = (prefix, only = () => true) =>
     Object.fromEntries([...tokens.matchAll(new RegExp(`--${prefix}-(\\w+):\\s*([^;]+);`, 'g'))].map((m) => [m[1], m[2].trim()]).filter(([, value]) => only(value)));
-  assert.deepEqual(defined('text', (v) => v.endsWith('px')), Object.fromEntries(Object.entries(TEXT_SIZES).map(([k, v]) => [k, `${v}px`])));
+  assert.deepEqual(defined('text', (v) => v.endsWith('rem')), Object.fromEntries(Object.entries(TEXT_SIZES).map(([k, v]) => [k, `${v / 16}rem`])));
   assert.deepEqual(defined('lh'), Object.fromEntries(Object.entries(LINE_HEIGHTS).map(([k, v]) => [k, String(v)])));
   assert.deepEqual(defined('sp'), Object.fromEntries(SPACING_SCALE.map((n) => [String(n), `${n}px`])));
 });

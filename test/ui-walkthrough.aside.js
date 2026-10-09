@@ -258,7 +258,7 @@ if (pinned) {
   }, P);
   if (!cardMenu) problems.push('点卡片的「更多」没有打开菜单');
   else {
-    if (cardMenu.items !== '下载|复用|延长|修改|配乐|详情|删除') problems.push(`已完成视频卡片的菜单项不对：${cardMenu.items}`);
+    if (cardMenu.items !== '下载|复用|延长|编辑|配乐|详情|删除') problems.push(`已完成视频卡片的菜单项不对：${cardMenu.items}`);
     if (!cardMenu.aligned) problems.push('「更多」的菜单没有和按钮右对齐');
   }
   if (await count('.modal')) problems.push('点「更多」不应该打开详情');
@@ -302,7 +302,7 @@ if ((await count('.menu .menu-item')) < 2) problems.push('模型菜单没有出�
 if ((await count('.menu .menu-item.selected .menu-item-check svg')) !== 1) problems.push('模型菜单没有标出当前项');
 // 型号后面的附注说的是它在同一代里是哪一档：同一族的要么都标，要么都不标，不能只标其中一个
 const modelNotes = Object.fromEntries(await pg.evaluate(() => [...document.querySelectorAll('.menu .menu-item')].map((e) => [e.querySelector('.menu-item-label').textContent, e.querySelector('.menu-item-note')?.textContent || ''])));
-if (modelNotes['seedance-2.0'] !== '专业版' || modelNotes['seedance-2.0-fast'] !== '快速版' || modelNotes['grok-imagine-video'] !== '') problems.push(`型号的附注不对：${JSON.stringify(modelNotes)}`);
+if (modelNotes['seedance-2.0'] !== '' || modelNotes['seedance-2.0-fast'] !== '快速版' || modelNotes['grok-imagine-video'] !== '') problems.push(`型号的附注不对：${JSON.stringify(modelNotes)}`);
 if ('seedance2.0-pro' in modelNotes) problems.push('模型菜单里列出了走不通的型号 seedance2.0-pro');
 await audit('模型菜单');
 await shot('02-model-menu');
@@ -352,11 +352,11 @@ await sleep(200);
 if (await count('.more-popover')) problems.push('点外面没有关掉更多面板');
 if ((await layout()) !== layoutBefore) problems.push(`关闭面板后页面位置没有复原：${layoutBefore} → ${await layout()}`);
 
-// 4. 参考生成：选素材弹窗、上传、等待可用
+// 4. 全能参考：选素材弹窗、上传、等待可用
 await pg.locator('textarea.prompt').fill('保持产品主体一致，生成干净的工作室展示视频，镜头缓慢环绕');
 await must('打开生成方式菜单', click(control('mode')));
 await sleep(200);
-await must('选参考生成', clickText('.menu .menu-item', '参考生成'));
+await must('选全能参考', clickText('.menu .menu-item', '全能参考'));
 await sleep(250);
 await must('点添加参考', click('.ref-row .ref-add', 0));
 await sleep(250);
@@ -404,7 +404,7 @@ await pg.evaluate(async () => {
 await sleep(2000);
 if (await count('.modal')) problems.push('上传完成后弹窗没有关闭');
 if ((await count('.ref-tile:not(.ref-add)')) !== 1) problems.push('上传后没有出现参考图');
-await audit('参考生成·素材处理中');
+await audit('全能参考·素材处理中');
 await shot('05-reference');
 for (let i = 0; i < 30 && (await count('.ref-state')); i += 1) await sleep(500);
 if (await count('.ref-state')) problems.push('素材一直没有变成可用');
@@ -474,7 +474,7 @@ const detail = await pg.evaluate(() => {
 });
 // 「参考素材」这一组只有用了素材的记录才有。
 if (!['提示词|参考素材|生成参数|任务信息', '提示词|生成参数|任务信息'].includes(detail.titles)) problems.push(`详情右侧的分组不对：${detail.titles}`);
-if (detail.actions !== '下载视频|复用参数|延长|修改|配乐' || detail.buttonsOutside || !detail.actionsAtBottom) problems.push(`详情的操作应该都在右栏最下面：${detail.actions}，别处的按钮 ${detail.buttonsOutside} 个`);
+if (detail.actions !== '下载视频|复用参数|延长|编辑|配乐' || detail.buttonsOutside || !detail.actionsAtBottom) problems.push(`详情的操作应该都在右栏最下面：${detail.actions}，别处的按钮 ${detail.buttonsOutside} 个`);
 if (detail.nav !== '上一条|下一条') problems.push(`详情里应该有上一条、下一条：${detail.nav}`);
 // 上一条、下一条：换了内容，弹窗的大小不变；方向键也能换
 const detailStep = async (how) => {
@@ -678,23 +678,23 @@ if (await count('.view-create .feed-head .entry-action-btn:not([hidden])')) {
   await sleep(300);
 }
 
-// 图片拿去生成视频：Seedance 下是参考生成，图片作为「图1」，不是首尾帧的首帧
+// 图片拿去生成视频：Seedance 下是全能参考，图片作为「图片1」，不是首尾帧的首帧
 await must('打开图片卡片的更多', click('.view-create .card .card-more', 0));
 await sleep(300);
 await must('点生成视频', clickText('.menu .menu-item', '生成视频'));
 for (let i = 0; i < 30 && !(await count('.view-create .ref-row .ref-tile:not(.ref-add)')); i += 1) await sleep(500);
 const fromImage = await pg.evaluate(() => ({ title: document.querySelector('.composer-title').textContent, mode: document.querySelector('[data-control=mode]')?.textContent.trim(), tiles: document.querySelectorAll('.ref-row .ref-tile:not(.ref-add)').length, index: document.querySelector('.ref-row .ref-index')?.textContent, frames: document.querySelectorAll('.frame-slot').length }));
-if (fromImage.title !== '想生成什么视频？' || fromImage.mode !== '参考生成' || fromImage.tiles !== 1 || fromImage.index !== '图1' || fromImage.frames) problems.push(`图片点「生成视频」后应该是参考生成、带着这张图：${JSON.stringify(fromImage)}`);
+if (fromImage.title !== '想生成什么视频？' || fromImage.mode !== '全能参考' || fromImage.tiles !== 1 || fromImage.index !== '图片1' || fromImage.frames) problems.push(`图片点「生成视频」后应该是全能参考、带着这张图：${JSON.stringify(fromImage)}`);
 // 图片素材的汇总状态可能是失败，只要要用的模型能用就不该显示处理失败
 for (let i = 0; i < 30 && (await count('.ref-state')); i += 1) await sleep(500);
 if (await count('.ref-state')) problems.push(`图片素材没有变成可用：${(await text('.ref-state')).join('')}`);
-// 换成首尾帧：这张图自动变成首帧，不用重新添加；点互换去尾帧；换回参考生成，图还在
+// 换成首尾帧：这张图自动变成首帧，不用重新添加；点互换去尾帧；换回全能参考，图还在
 const frameSlots = () => pg.evaluate(() => [...document.querySelectorAll('.frame-slot')].map((s) => (s.querySelector('.ref-tile:not(.ref-add)') ? '有' : '空')).join(''));
 await must('打开生成方式', click(control('mode')));
 await sleep(200);
 await must('选首尾帧', clickText('.menu .menu-item', '首尾帧'));
 await sleep(300);
-if ((await frameSlots()) !== '有空') problems.push(`参考生成换成首尾帧，参考图应该变成首帧：${await frameSlots()}`);
+if ((await frameSlots()) !== '有空') problems.push(`全能参考换成首尾帧，参考图应该变成首帧：${await frameSlots()}`);
 await audit('首尾帧·带着参考图');
 await shot('frames-carried');
 await must('点互换', click('.frames-swap'));
@@ -705,9 +705,9 @@ await sleep(200);
 if ((await frameSlots()) !== '有空') problems.push(`再点互换后图应该回到首帧：${await frameSlots()}`);
 await must('打开生成方式', click(control('mode')));
 await sleep(200);
-await must('选参考生成', clickText('.menu .menu-item', '参考生成'));
+await must('选全能参考', clickText('.menu .menu-item', '全能参考'));
 await sleep(300);
-if ((await count('.ref-row .ref-tile:not(.ref-add)')) !== 1 || (await count('.frame-slot'))) problems.push('首尾帧换回参考生成，首帧应该回到参考图里');
+if ((await count('.ref-row .ref-tile:not(.ref-add)')) !== 1 || (await count('.frame-slot'))) problems.push('首尾帧换回全能参考，首帧应该回到参考图里');
 await must('移除参考图', click('.ref-row .ref-remove'));
 await must('打开生成方式', click(control('mode')));
 await sleep(200);
@@ -793,13 +793,13 @@ await must('生成音效', click('.send-btn'));
 await sleep(700);
 await waitNew('audio-player', '音效没有生成出来');
 
-// 延长和修改：从视频卡片的菜单进来。视频先传进素材库，然后切到参考生成，提示词填好开头的句式和结尾的约束，光标停在两者之间
+// 延长和编辑：从视频卡片的菜单进来。视频先传进素材库，然后切到全能参考，提示词填好开头的句式和结尾的约束，光标停在两者之间
 await must('进入创作记录', clickText('.nav-item', '创作记录'));
 await sleep(500);
 await searchFor('');
 await must('看全部类型', clickText(`${V} .filters .seg`, '全部'));
 await sleep(300);
-for (const [label, lead, keep] of [['延长', '向后延长视频1：', '镜头和景别保持不变。'], ['修改', '严格编辑视频1，', '其他内容、动作和运镜保持不变。']]) {
+for (const [label, lead, keep] of [['延长', '向后延长视频1：', '镜头和景别保持不变。'], ['编辑', '严格编辑视频1，', '其他内容、动作和运镜保持不变。']]) {
   const at = await pg.evaluate((v) => [...document.querySelectorAll(`${v} .card`)].findIndex((c) => c.querySelector('.player')), V);
   await must(`打开视频卡片的更多（${label}）`, click(`${V} .card .card-more`, at));
   await sleep(300);
@@ -811,7 +811,7 @@ for (const [label, lead, keep] of [['延长', '向后延长视频1：', '镜头�
     const prompt = document.querySelector('textarea.prompt');
     return { prompt: prompt.value, caret: prompt.selectionStart, focused: document.activeElement === prompt, mode: document.querySelector('[data-control=mode]')?.textContent.trim(), videos: document.querySelectorAll('.ref-row .ref-tile:not(.ref-add)').length, index: document.querySelector('.ref-row .ref-index')?.textContent };
   });
-  if (reworked.prompt !== `${lead}\n${keep}` || reworked.caret !== lead.length || !reworked.focused || reworked.mode !== '参考生成' || reworked.videos !== 1 || reworked.index !== '视频1') problems.push(`从视频卡片点「${label}」后输入框不对：${JSON.stringify(reworked)}`);
+  if (reworked.prompt !== `${lead}\n${keep}` || reworked.caret !== lead.length || !reworked.focused || reworked.mode !== '全能参考' || reworked.videos !== 1 || reworked.index !== '视频1') problems.push(`从视频卡片点「${label}」后输入框不对：${JSON.stringify(reworked)}`);
   // 视频素材的汇总状态是「失败」，但要用的模型在可用列表里：不能显示成处理失败，等它处理完就能提交
   for (let i = 0; i < 30 && (await count('.ref-state')); i += 1) await sleep(500);
   if (await count('.ref-state')) problems.push(`${label}：视频素材没有变成可用：${(await text('.ref-state')).join('')}`);

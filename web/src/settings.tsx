@@ -162,7 +162,7 @@ function Settings() {
           </div>
         </FormRow>
       </div>
-      {provider === 'openrouter' && <p className="small muted">OpenRouter 上能生成视频、图片和语音，也能润色提示词。音效、配乐、素材库、真人档案只有 Flatkey 有，切换回去就能用；延长和修改视频也只在 Flatkey 上。</p>}
+      {provider === 'openrouter' && <p className="small muted">OpenRouter 上能生成视频、图片和语音，也能润色提示词。音效、配乐、素材库、真人档案只有 Flatkey 有，切换回去就能用；延长和编辑视频也只在 Flatkey 上。</p>}
       <div className="section-title">{platform} API Key</div>
       <div className="form-section">
         <FormRow label="当前 Key">
@@ -172,7 +172,7 @@ function Settings() {
           <span className="mono">{baseUrl}</span>
         </FormRow>
         <FormRow label="账户余额">
-          <span className="muted">{credits}</span>
+          <span className="muted amount">{credits}</span>
         </FormRow>
       </div>
       <div className="row">
@@ -210,7 +210,7 @@ function Settings() {
           清除已保存的 Key
         </button>
       </div>
-      <div className={`small ${test.tone}`}>{test.text}</div>
+      {test.text && <div className={`small ${test.tone}`}>{test.text}</div>}
     </>
   );
 }

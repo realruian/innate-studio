@@ -4,7 +4,7 @@
 import { useEffect, useLayoutEffect, useRef, type ReactNode } from 'react';
 import { state, useStore, KINDS, polishModel } from '../store.ts';
 import { RES_RANK } from '../request.ts';
-import { modelNote } from '../../../shared/models.ts';
+import { modelNote, referenceModeLabel } from '../../../shared/models.ts';
 import { Icon, type IconName } from '../ui/Icon.tsx';
 import { Segmented, Toggle, Dropdown, FormRow, tip, clipTip } from '../ui/controls.tsx';
 import { openPopover, openMenu } from '../ui/layers.tsx';
@@ -33,17 +33,18 @@ const MODES: { value: VideoForm['mode']; label: string; icon: IconName; note: st
 ];
 // 只能给首帧、不能给尾帧的模型，第二种方式叫「图生视频」。
 const FIRST_FRAME_MODE: (typeof MODES)[number] = { value: 'frames', label: '图生视频', icon: 'frames', note: '给一张首帧' };
-// 当前模型能用的生成方式。
+// 当前模型能用的生成方式。第三种的名字跟着模型走：Seedance 叫「全能参考」，别的模型叫「参考生成」。
 function modesFor() {
   const can = traits();
-  return [MODES[0], ...(can.frames ? [can.lastFrame ? MODES[1] : FIRST_FRAME_MODE] : []), ...(can.reference ? [MODES[2]] : [])];
+  return [MODES[0], ...(can.frames ? [can.lastFrame ? MODES[1] : FIRST_FRAME_MODE] : []), ...(can.reference ? [{ ...MODES[2], label: referenceModeLabel(composer.form.model) }] : [])];
 }
 const INPUT_TYPES = [
   { value: 'auto', label: '自动判断', note: '推荐' },
   { value: 'reference', label: 'reference', note: '参考' },
   { value: 'first_last_frame', label: 'first_last_frame', note: '首尾帧' },
 ];
-const REF_PREFIX: Record<Kind, string> = { image: '图', video: '视频', audio: '音频' };
+// 和官方提示词里指代素材的叫法一致：图片1、视频1、音频1。
+const REF_PREFIX: Record<Kind, string> = { image: '图片', video: '视频', audio: '音频' };
 
 const IMAGE_COUNTS = [1, 2, 3, 4];
 const SFX_DURATIONS = [1, 2, 3, 5, 8, 10, 15, 20];
@@ -367,8 +368,8 @@ function MorePanel() {
     <>
       {(can.audio || can.seedanceExtras) && <div className="popover-title">输出</div>}
       {can.audio && (
-        <FormRow label="同步音频" desc="同时生成与画面同步的声音">
-          <Toggle checked={form.generateAudio} onChange={(generateAudio) => update({ generateAudio })} label="同步音频" />
+        <FormRow label="生成有声视频" desc="同时生成与画面同步的声音">
+          <Toggle checked={form.generateAudio} onChange={(generateAudio) => update({ generateAudio })} label="生成有声视频" />
         </FormRow>
       )}
       {can.seedanceExtras && (
@@ -398,8 +399,8 @@ function SeedanceExtras() {
   const sr = form.sr;
   return (
     <>
-      <FormRow label="联网搜索增强" desc="让任务先联网检索相关信息">
-        <Toggle checked={form.webSearch} onChange={(webSearch) => update({ webSearch })} label="联网搜索增强" />
+      <FormRow label="联网搜索" desc="让任务先联网检索相关信息">
+        <Toggle checked={form.webSearch} onChange={(webSearch) => update({ webSearch })} label="联网搜索" />
       </FormRow>
       <FormRow label="输入模式">
         <Dropdown label="输入模式" value={form.inputType} options={INPUT_TYPES} onChange={(inputType) => update({ inputType })} />
@@ -459,6 +460,8 @@ function VoicePanel({ close }: { close: () => void }) {
   const languages = state.voices.some((voice) => voice.language);
   return (
     <>
+      {/* 没有筛选的那一排时，补一个和其他菜单一样的小标题。 */}
+      {!languages && <div className="popover-title voice-title">音色</div>}
       {languages && <Segmented
         options={[
           { value: 'all', label: '全部' },

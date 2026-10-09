@@ -13,10 +13,10 @@ import { Segmented, tip, clipTip } from './ui/controls.tsx';
 import { toast, openModal, openMenu, confirmDialog, copyText } from './ui/layers.tsx';
 import { enter } from './ui/motion.ts';
 import { setForm, setStudio, useImageForVideo, useVideoForMusic, useVideoAsSource } from './composer/state.ts';
-import { VIDEO_TASKS, videoFamilyOf, type VideoTask } from '../../shared/models.ts';
+import { VIDEO_TASKS, videoFamilyOf, referenceModeLabel, type VideoTask } from '../../shared/models.ts';
 import type { CreateType, HistoryItem, Ref } from './types.ts';
 
-const MODE_LABELS: Record<string, string> = { text: '文生视频', frames: '首尾帧', reference: '参考生成' };
+const MODE_LABELS: Record<string, string> = { text: '文生视频', frames: '首尾帧' };
 const STATUS_LABELS: Record<string, string> = { queued: '排队中', in_progress: '生成中', completed: '已完成', failed: '失败' };
 const KIND_LABELS = { video: '视频', image: '图片', audio: '音频' };
 // 五种内容，和创作页输入框上方的切换是同一组。
@@ -37,7 +37,8 @@ const RECENT_COUNT = 6;
 
 function modeOf(item: HistoryItem) {
   if (videoFamily(item.model) === 'grok') return item.payload?.image || item.payload?.frame_images?.length ? '图生视频' : '文生视频';
-  return MODE_LABELS[seedanceModeOf(item)];
+  const mode = seedanceModeOf(item);
+  return mode === 'reference' ? referenceModeLabel(item.model) : MODE_LABELS[mode];
 }
 
 function seedanceModeOf(item: HistoryItem): string {
@@ -119,7 +120,7 @@ async function animate(item: HistoryItem) {
   }
 }
 
-// 延长或修改一条视频。只有 Flatkey 上的 Seedance 能做（要把视频传进素材库当参考），用的是 OpenRouter 或者账号里没有 Seedance 型号时不出现这两个入口。
+// 延长或编辑一条视频。只有 Flatkey 上的 Seedance 能做（要把视频传进素材库当参考），用的是 OpenRouter 或者账号里没有 Seedance 型号时不出现这两个入口。
 const canRework = (item: HistoryItem) => done(item) && item.kind === 'video' && state.app.provider === 'flatkey' && state.models.some((id) => videoFamilyOf(id) === 'seedance');
 async function rework(item: HistoryItem, task: VideoTask) {
   if (!item.savedLocally) return toast('这条视频还没保存到本机，稍后再试', 'info');
@@ -216,7 +217,7 @@ function AudioView({ item, large }: { item: HistoryItem; large: boolean }) {
 
 // 平台返回的失败原因是英文的。认识的换成人话，并说一句可以怎么办；不认识的原样显示，只去掉末尾的请求编号。
 // 只登记实际遇到过的。
-const KNOWN_FAILURES: [RegExp, string][] = [[/output audio .*copyright/i, '生成的声音可能涉及版权，被平台拦下了。可以关掉「更多」里的「同步音频」再试一次。']];
+const KNOWN_FAILURES: [RegExp, string][] = [[/output audio .*copyright/i, '生成的声音可能涉及版权，被平台拦下了。可以关掉「更多」里的「生成有声视频」再试一次。']];
 function explainFailure(message?: string) {
   if (!message) return '未知错误';
   return KNOWN_FAILURES.find(([pattern]) => pattern.test(message))?.[1] || message.replace(/\s*Request id:.*$/i, '').trim();
@@ -325,22 +326,23 @@ type Entry = [name: string, value: ReactNode, wide?: boolean];
 const present = ([, value]: Entry) => value != null && value !== '' && value !== false;
 
 // 详情右边「生成参数」那一组：一格一项，名称在上、取值在下。第三个值为 true 的独占一行。
+// 型号名长（OpenRouter 的还带厂商前缀），挤在一格里会从中间断行，所以「模型」独占一行。
 function paramsOf(item: HistoryItem): Entry[] {
   const p = item.payload || {};
-  if (item.kind === 'image') return [['模型', item.model], ['画面比例', p.aspect_ratio]];
-  if (item.tool === 'speech') return [['模型', item.model], ['音色', p.voice_name || p.voice_id]];
+  if (item.kind === 'image') return [['模型', item.model, true], ['画面比例', p.aspect_ratio]];
+  if (item.tool === 'speech') return [['模型', item.model, true], ['音色', p.voice_name || p.voice_id]];
   if (item.tool === 'sfx') {
-    return [['模型', item.model], ['时长', p.duration_seconds ? `${p.duration_seconds} 秒` : '由模型决定'], ['和描述的贴合度', p.prompt_influence]];
+    return [['模型', item.model, true], ['时长', p.duration_seconds ? `${p.duration_seconds} 秒` : '由模型决定'], ['和描述的贴合度', p.prompt_influence]];
   }
-  if (item.tool === 'music') return [['模型', item.model], ['视频时长', p.duration_seconds && `${Math.round(p.duration_seconds * 10) / 10} 秒`]];
+  if (item.tool === 'music') return [['模型', item.model, true], ['视频时长', p.duration_seconds && `${Math.round(p.duration_seconds * 10) / 10} 秒`]];
   const ratio = p.ratio || p.aspect_ratio;
   return [
     ['模式', modeOf(item)],
-    ['模型', item.model],
+    ['模型', item.model, true],
     ['分辨率', p.resolution],
     ['画面比例', ratio === 'adaptive' ? '自适应' : ratio],
     ['时长', p.duration === -1 ? '由模型决定' : p.duration && `${p.duration} 秒`],
-    ['同步音频', p.generate_audio === undefined ? null : p.generate_audio ? '开' : '关'],
+    ['生成有声视频', p.generate_audio === undefined ? null : p.generate_audio ? '开' : '关'],
     ['水印', p.watermark === undefined ? null : p.watermark ? '开' : '关'],
     ['随机种子', p.seed],
     ['联网搜索', p.web_search ? '开' : null],

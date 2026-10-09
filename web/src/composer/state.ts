@@ -329,15 +329,15 @@ export async function useImageForVideo(item: HistoryItem) {
   goTo('create');
 }
 
-// 延长或修改一条已经存到本机的视频。Seedance 把这两件事都当成参考生成来做：视频作为参考素材，提示词用固定的句式开头。
+// 延长或编辑一条已经存到本机的视频。Seedance 把这两件事都当成参考生成来做：视频作为参考素材，提示词用固定的句式开头。
 // 这里把视频传进素材库、切到参考生成、填好开头和结尾的约束，用户只要在中间写上内容。
 const sourceAssets = new Map<string, Asset>();
 export async function useVideoAsSource(item: HistoryItem, task: VideoTask) {
   // OpenRouter 的参考视频只收公网链接，本机的视频发不过去（2026-10-09 实测），所以这两件事只在 Flatkey 上做。
-  if (isOpenRouter()) throw new Error('延长和修改只在 Flatkey 上可用');
+  if (isOpenRouter()) throw new Error('延长和编辑只在 Flatkey 上可用');
   // 只有 Seedance 能做。当前选的不是，就换成账号里的第一个 Seedance 型号。
   const model = [composer.form.model, item.model, ...state.models].find((id) => videoFamilyOf(id) === 'seedance' && state.models.includes(id));
-  if (!model) throw new Error('账号里没有 Seedance 模型，延长和修改用不了');
+  if (!model) throw new Error('账号里没有 Seedance 模型，延长和编辑用不了');
   // 同一条视频这次打开页面期间传过，就接着用那份素材，不重复上传。
   let asset = sourceAssets.get(item.id);
   if (!asset || !findAsset(asset.id)) {
@@ -353,7 +353,7 @@ export async function useVideoAsSource(item: HistoryItem, task: VideoTask) {
   // 画面比例和分辨率跟原视频一致，接起来或者对比着看才不会变样。
   if (able.ratios.includes(ratio)) next.ratio = ratio;
   if (able.resolutions.includes(p.resolution)) next.resolution = p.resolution;
-  // 修改出来的视频和原视频一样长。
+  // 编辑出来的视频和原视频一样长。
   if (task === 'edit') {
     const seconds = Math.round(p.duration > 0 ? p.duration : (await readVideo(item.mediaUrl!).catch(() => ({ duration: 0 }))).duration);
     if (able.durations.includes(seconds)) Object.assign(next, { duration: seconds, durationAuto: false });
