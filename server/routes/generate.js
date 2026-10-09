@@ -10,6 +10,7 @@ import { doubaoSpeech, doubaoAudio } from '../speech.js';
 import { UPLOAD_TYPES, localMediaFile, withLocalFiles } from '../media.js';
 import { MINIMAX_VIDEO_PATH, VIDEO_TASKS_PATH, applyTaskState, downloadResult, finishItem, historyView, isLegacy, isPending, isTimedOut, newId, newItem, pollTask, runDirect } from '../tasks.js';
 import { removeThumb } from '../thumbs.js';
+import { balanceOf, holdCredits, syncCredits } from '../credits.js';
 import { IMAGE_MODELS, imageProvider, videoProvider } from '../../shared/models.ts';
 import { doubaoVoices } from '../../shared/doubao-voices.ts';
 
@@ -17,7 +18,7 @@ import { doubaoVoices } from '../../shared/doubao-voices.ts';
 
 // 页面发来的提示词是 prompt 字符串，素材在 frame_images 和 input_references 里，可以只给素材不写提示词；
 // 发出去之前换成平台自己的 content 数组。模型在哪个平台上（火山方舟、MiniMax）登记在 shared/models.ts。
-route('POST', /^\/api\/videos$/, async ({ req, space }) => {
+route('POST', /^\/api\/videos$/, async ({ req, space, user }) => {
   const { payload, form } = await readJsonBody(req);
   const hasPrompt = typeof payload?.prompt === 'string' && payload.prompt.trim() !== '';
   const hasMedia = ['frame_images', 'input_references'].some((field) => Array.isArray(payload?.[field]) && payload[field].length > 0);
@@ -27,11 +28,20 @@ route('POST', /^\/api\/videos$/, async ({ req, space }) => {
   const provider = videoProvider(payload.model);
   if (!provider) throw new HttpError(400, 'invalid_request', `不支持视频模型 ${payload.model}`);
   const minimax = provider === 'minimax';
-  const { data } = minimax
-    ? await callMinimax('POST', MINIMAX_VIDEO_PATH, { json: minimaxVideoRequest(withLocalFiles(space, payload)) })
-    : await callArk('POST', VIDEO_TASKS_PATH, { json: arkVideoRequest(withLocalFiles(space, payload)) });
-  const id = data?.id || data?.task_id;
-  if (!id) throw new HttpError(502, 'bad_upstream_response', `${(minimax ? MINIMAX : ARK).label} 未返回任务 ID`, data);
+  // 先预扣积分再提交；没提交成功就退回。
+  const draft = { kind: 'video', model: payload.model, payload };
+  holdCredits(user, [draft]);
+  let data;
+  try {
+    ({ data } = minimax
+      ? await callMinimax('POST', MINIMAX_VIDEO_PATH, { json: minimaxVideoRequest(withLocalFiles(space, payload)) })
+      : await callArk('POST', VIDEO_TASKS_PATH, { json: arkVideoRequest(withLocalFiles(space, payload)) }));
+    if (!(data?.id || data?.task_id)) throw new HttpError(502, 'bad_upstream_response', `${(minimax ? MINIMAX : ARK).label} 未返回任务 ID`, data);
+  } catch (err) {
+    syncCredits(space, { ...draft, status: 'failed' });
+    throw err;
+  }
+  const id = data.id || data.task_id;
 
   const item = newItem({
     id: String(id),
@@ -44,8 +54,10 @@ route('POST', /^\/api\/videos$/, async ({ req, space }) => {
     form: form || null,
     status: 'queued',
     lastPolledAt: Date.now(),
+    ...(draft.credits ? { credits: draft.credits } : {}),
   });
   applyTaskState(item, data);
+  syncCredits(space, item);
   space.history.unshift(item);
   space.save('history');
   return historyView(item);
@@ -83,7 +95,8 @@ function minimaxVideoRequest(payload) {
 
 // ---------- 生成记录 ----------
 
-route('GET', /^\/api\/history$/, async ({ space }) => ({ items: space.history.map(historyView) }));
+// 多人模式下带上这个人剩多少积分：页面本来就一直在读记录，余额跟着它更新。
+route('GET', /^\/api\/history$/, async ({ space, user }) => ({ items: space.history.map(historyView), ...(user ? { credits: balanceOf(user.id) } : {}) }));
 
 route('POST', /^\/api\/history\/([^/]+)\/refresh$/, async ({ params, space }) => {
   const item = space.history.find((h) => h.id === params[0]);
@@ -113,7 +126,7 @@ route('DELETE', /^\/api\/history\/([^/]+)$/, async ({ params, space }) => {
 
 const IMAGE_EXT = { 'image/png': 'png', 'image/webp': 'webp', 'image/jpeg': 'jpg' };
 
-route('POST', /^\/api\/images$/, async ({ req, space }) => {
+route('POST', /^\/api\/images$/, async ({ req, space, user }) => {
   const { payload, form } = await readJsonBody(req);
   const model = String(payload?.model || '');
   const prompt = String(payload?.prompt || '').trim();
@@ -148,6 +161,7 @@ route('POST', /^\/api\/images$/, async ({ req, space }) => {
   const items = Array.from({ length: count }, () =>
     newItem({ id: newId('img'), provider, kind: 'image', model, prompt, payload: { model, prompt, aspect_ratio: request.aspect_ratio, ...(request.resolution ? { resolution: request.resolution } : {}), ...(request.quality ? { quality: request.quality } : {}), ...(refs.length ? { input_references: refs } : {}) }, form: form || null }),
   );
+  holdCredits(user, items);
   runDirect(space, items, async () => {
     const images = await (aihubmix ? aihubmixImages : arkImages)(spec, request);
     if (!images.length) throw new HttpError(502, 'bad_upstream_response', `${platform.label} 未返回图片`);
@@ -249,7 +263,7 @@ function requireSpeechKey() {
 // 豆包语音的音色是登记好的，不用去读。
 route('GET', /^\/api\/voices$/, async () => ({ items: doubaoVoices() }));
 
-route('POST', /^\/api\/audio\/speech$/, async ({ req, space }) => {
+route('POST', /^\/api\/audio\/speech$/, async ({ req, space, user }) => {
   const { text, voiceId, voiceName, form } = await readJsonBody(req);
   const script = String(text || '').trim();
   if (!script) throw new HttpError(400, 'invalid_request', '请输入朗读文本');
@@ -264,6 +278,7 @@ route('POST', /^\/api\/audio\/speech$/, async ({ req, space }) => {
     payload: { voice_id: voiceId, voice_name: String(voiceName || '') },
     form: form || null,
   });
+  holdCredits(user, [item]);
   runDirect(space, [item], async () => {
     const { audio, usage } = await doubaoSpeech(script, voiceId);
     finishItem(space, item, audio, 'mp3', usage ? { usage } : {});
@@ -284,9 +299,10 @@ function audioSeconds(value, required) {
   return seconds;
 }
 
-function submitAudio(space, { tool, prompt, request, payload, form }) {
+function submitAudio(space, user, { tool, prompt, request, payload, form }) {
   requireSpeechKey();
   const item = newItem({ id: newId('aud'), kind: 'audio', tool, model: DOUBAO_SPEECH.audioModel, prompt, payload, form: form || null });
+  holdCredits(user, [item]);
   runDirect(space, [item], async () => {
     const { audio, usage } = await doubaoAudio(request);
     finishItem(space, item, audio, 'mp3', usage ? { usage } : {});
@@ -294,25 +310,25 @@ function submitAudio(space, { tool, prompt, request, payload, form }) {
   return historyView(item);
 }
 
-route('POST', /^\/api\/audio\/sfx$/, async ({ req, space }) => {
+route('POST', /^\/api\/audio\/sfx$/, async ({ req, space, user }) => {
   const { text, duration, form } = await readJsonBody(req);
   const prompt = String(text || '').trim();
   if (!prompt) throw new HttpError(400, 'invalid_request', '请输入音效描述');
   // 不带时长时由模型自己决定。
   const seconds = audioSeconds(duration, false);
   const request = `音效：${prompt}。只要音效，不要人声，不要音乐。${seconds ? `时长 ${seconds} 秒。` : ''}`;
-  return submitAudio(space, { tool: 'sfx', prompt, request, payload: { text: prompt, ...(seconds ? { duration_seconds: seconds } : {}) }, form });
+  return submitAudio(space, user, { tool: 'sfx', prompt, request, payload: { text: prompt, ...(seconds ? { duration_seconds: seconds } : {}) }, form });
 });
 
 // 配乐：按文字描述生成一段没有人声的音乐。video 是这段音乐要配的那条本机视频，只记在记录里，详情里拿它和音乐一起放；模型看不到它。
-route('POST', /^\/api\/audio\/music$/, async ({ req, space }) => {
+route('POST', /^\/api\/audio\/music$/, async ({ req, space, user }) => {
   const { text, duration, video, form } = await readJsonBody(req);
   const prompt = String(text || '').trim();
   if (!prompt) throw new HttpError(400, 'invalid_request', '请输入配乐描述');
   const seconds = audioSeconds(duration, true);
   if (video && !/\.(mp4|mov|webm)$/i.test(localMediaFile(space, video))) throw new HttpError(400, 'invalid_request', '请选择视频');
   const request = `纯音乐，没有人声：${prompt}。时长 ${seconds} 秒。`;
-  return submitAudio(space, { tool: 'music', prompt, request, payload: { text: prompt, duration_seconds: seconds, ...(video ? { video } : {}) }, form });
+  return submitAudio(space, user, { tool: 'music', prompt, request, payload: { text: prompt, duration_seconds: seconds, ...(video ? { video } : {}) }, form });
 });
 
 // ---------- 上传 ----------

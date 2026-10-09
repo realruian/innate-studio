@@ -221,6 +221,69 @@ export function estimateCost(item: { model?: string; kind?: string; tool?: strin
   return (usage.completion_tokens / 1e6) * tier[hasVideo ? 1 : 0];
 }
 
+// ---------- 积分 ----------
+// 多人模式下成员看到的、花的都是积分：1 积分 = 0.01 元，按上面的成本 1:1 折算，不加价。
+export const CREDITS_PER_YUAN = 100;
+// AiHubMix 按美元扣费，折成元用的汇率。2026-10-09 是 6.70，往上取整。
+export const USD_CNY = 7;
+// 不足 1 积分的往上取整。减去的那一点是为了 0.3 × 100 这种算出来略大于 30 的数不被多收 1 积分。
+export const toCredits = (yuan: number) => Math.ceil(yuan * CREDITS_PER_YUAN - 1e-6);
+
+// AiHubMix 上的图片：美元/张。返回里没有用量，所以按张收，提交时算出来的就是最终的价。
+// GPT Image 2.5（两个型号同价）：1K 的低、中、高三档抄自 2026-10-09 的模型页 https://aihubmix.com/model/gpt-image-2.5-sunburst ，取三种比例里最贵的 1024x1024。
+// 超高、最高两档，以及 2K、4K，模型页没有列价：超高、最高按上一档翻倍，2K、4K 按像素是 1K 的 4 倍、8 倍来估。这几个数没核实过，要拿实际扣费对一下。
+const GPT_IMAGE_USD: Record<string, number> = { low: 0.006, medium: 0.053, high: 0.211, xhigh: 0.422, max: 0.844 };
+const GPT_IMAGE_TIER: Record<string, number> = { '1K': 1, '2K': 4, '4K': 8 };
+// Nano Banana 2.1：模型页 https://aihubmix.com/model/gemini-nano-banana-2.1 只有 token 单价（图片输出 $30/百万 token），没有每张多少 token。
+// 按上一代的用量（1K 1120、2K 1680、4K 2520 token）估，同样没核实过。
+const BANANA_USD: Record<string, number> = { '1K': 0.04, '2K': 0.06, '4K': 0.08 };
+// 参考图按输入 token 收，每张不到一美分，按一美分算。
+const AIHUBMIX_REF_USD = 0.01;
+// 火山方舟的视频按 token 收：token = 宽 × 高 ×（24 × 秒数 + 1）÷ 1024，拿以前的记录对过（720p 5 秒是 108900）。同一档分辨率下各种比例的像素数差不多，这里记的是 16:9 的。4k 那一档没对过。
+const VIDEO_PIXELS: Record<string, number> = { '480p': 409_920, '720p': 921_600, '1080p': 2_073_600, '4k': 8_294_400 };
+
+// 提交之前估这一条要花多少元，用来预扣积分；生成完再按 estimateCost 的实际用量结算。item 的形状和生成记录一样。估不出来是 null。
+export function quoteCost(item: { model?: string; kind?: string; tool?: string; prompt?: string; payload?: Record<string, any> | null }): number | null {
+  const payload = item.payload || {};
+  if (item.tool === 'speech') return (String(item.prompt || '').length / 10000) * DOUBAO_SPEECH_PRICE;
+  // 音效没指定时长时由模型自己定，先按 30 秒预扣。
+  if (item.tool === 'sfx' || item.tool === 'music') return ((Number(payload.duration_seconds) || 30) / 60) * DOUBAO_AUDIO_PRICE;
+  const model = item.model || '';
+  const refs: any[] = payload.input_references || [];
+  const resolution = String(payload.resolution || '');
+  const name = /^doubao-(.+)-\d{6}$/.exec(model)?.[1] || '';
+  if (item.kind === 'image') {
+    const spec = IMAGE_MODELS[model];
+    if (!spec) return null;
+    const tier = resolution || spec.size;
+    if (imageProvider(model) === 'aihubmix') {
+      const usd = spec.qualities ? GPT_IMAGE_USD[payload.quality || spec.quality || ''] * GPT_IMAGE_TIER[tier] : BANANA_USD[tier];
+      return usd > 0 ? (usd + refs.length * AIHUBMIX_REF_USD) * USD_CNY : null;
+    }
+    const price = ARK_IMAGE_PRICES[name];
+    const sizes = spec.sizes[tier];
+    if (!price || !sizes) return null;
+    const [width, height] = (sizes[payload.aspect_ratio] || sizes['1:1']).split('x').map(Number);
+    return price(width * height) + (name === 'seedream-5-0-pro' ? Math.max(0, refs.length - 1) * ARK_IMAGE_REF_PRICE : 0);
+  }
+  const seconds = Number(payload.duration);
+  if (!(seconds > 0)) return null;
+  const hasVideo = refs.some((ref) => ref?.video_url);
+  const minimax = MINIMAX_VIDEO_PRICES[model];
+  if (minimax) {
+    if (!minimax.output[resolution]) return null;
+    const images = (payload.frame_images || []).length + refs.filter((ref) => ref?.image_url).length;
+    // 参考视频有多长这时还不知道，先当它和成片一样长。
+    return seconds * minimax.output[resolution] + (hasVideo ? seconds * minimax.input[resolution] : 0) + Math.max(0, images - minimax.freeImages) * minimax.image;
+  }
+  const tier = ARK_VIDEO_PRICES[name]?.[resolution.toLowerCase()];
+  const pixels = VIDEO_PIXELS[resolution.toLowerCase()];
+  if (!tier || !pixels) return null;
+  // 带参考视频时输入的那段也算 token，同样先当它和成片一样长。
+  const tokens = ((pixels * (24 * seconds + 1)) / 1024) * (hasVideo ? 2 : 1);
+  return (tokens / 1e6) * tier[hasVideo ? 1 : 0];
+}
+
 export const ARK_TEXT_MODELS = ['doubao-seed-2-1-lite-260915', 'doubao-seed-2-1-turbo-260628', 'doubao-seed-2-1-pro-260915'];
 
 // ---------- 润色提示词的规则 ----------

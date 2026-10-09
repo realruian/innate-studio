@@ -12,6 +12,7 @@ import { openSpaces } from './store.js';
 import { apiKey, minimaxKey } from './keys.js';
 import { callArk, callMinimax, ERROR_HINTS } from './ark.js';
 import { makeThumb } from './thumbs.js';
+import { syncCredits } from './credits.js';
 
 const STATUS_ALIASES = {
   queued: 'queued', pending: 'queued', submitted: 'queued', created: 'queued',
@@ -102,6 +103,7 @@ export async function pollTask(space, item) {
       item.error = { message: '查询超时，请稍后重新查询。', code: 'poll_timeout' };
     }
     polling.delete(item.id);
+    syncCredits(space, item);
     space.save('history');
   }
   if (item.status === 'completed') downloadResult(space, item);
@@ -207,7 +209,10 @@ export function runDirect(space, items, work) {
         item.error = { message: err instanceof HttpError ? err.message : `本地服务出错：${err.message}`, code: err.code || '' };
       }
     })
-    .finally(() => space.save('history'));
+    .finally(() => {
+      for (const item of items) syncCredits(space, item);
+      space.save('history');
+    });
 }
 
 // 打开一份空间时把上次留下的记录理一遍：
@@ -221,6 +226,7 @@ export function settleHistory(space) {
     else if (isLegacy(item)) item.error = { message: '该平台已停用，无法查询该任务。', code: 'provider_removed' };
     else continue;
     item.status = 'failed';
+    syncCredits(space, item);
     changed = true;
   }
   if (changed) space.save('history');
