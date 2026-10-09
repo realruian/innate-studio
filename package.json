@@ -2,7 +2,7 @@
   "name": "seedance-studio",
   "version": "1.0.0",
   "private": true,
-  "description": "通过火山方舟或 Flatkey 生成视频、图片和音频的本地网页应用",
+  "description": "Innate Studio: 本地优先的 AIGC 多模态创作工作台（Seedance 2.5/2.0、Seedream 5.0、无限节点画布）",
   "license": "MIT",
   "scripts": {
     "start": "vite build && node server.js",
