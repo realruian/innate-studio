@@ -171,7 +171,6 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .small { font-size: var(--text-caption); }
 .mono { font-family: var(--mono); font-size: var(--text-caption); }
 .ok-text { color: var(--ok); }
-.warn-text { color: var(--warn); }
 .error-text { color: var(--danger); }
 .ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
@@ -349,7 +348,6 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 .switch input:checked::after { transform: translateX(14px); background: var(--bg); }
 
 /* 设置项列表：左名称右控件 */
-.form-section { display: flex; flex-direction: column; }
 /* 滑杆：一条 12 高的圆角槽，选过的一段颜色深一档，把手是一根比槽略高的白色竖条；槽里每个刻度一道短线，槽下面写着刻度的数 */
 .slider { flex: 1; min-width: 0; --thumb: 4px; --at: 0; }
 .slider-track { position: relative; height: 12px; border-radius: 4px; background: linear-gradient(to right, color-mix(in srgb, var(--text) 20%, var(--surface-2)) calc(var(--thumb) / 2 + (100% - var(--thumb)) * var(--fill)), var(--surface-2) 0); }
@@ -531,7 +529,6 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
    盖在图片、视频上的加 .on-media：半透明黑底白字。各处自己的类只管位置和什么时候出现。 */
 .icon-btn { display: grid; place-items: center; flex: none; width: var(--h-md); height: var(--h-md); padding: 0; border: 0; border-radius: var(--r-sm); background: none; color: var(--text-2); cursor: pointer; transition: background-color var(--t-fast) var(--ease), color var(--t-fast) var(--ease), opacity var(--t-fast) var(--ease), scale var(--t-quick) var(--ease-out); }
 .icon-btn-sm { width: var(--h-sm); height: var(--h-sm); border-radius: var(--r-xs); }
-.icon-btn-lg { width: var(--h-lg); height: var(--h-lg); }
 .icon-btn.active, .icon-btn[aria-expanded='true'] { background: var(--hover); color: var(--text); }
 @media (hover: hover) { .icon-btn:hover:not(:disabled) { background: var(--hover); color: var(--text); } }
 .icon-btn:disabled { opacity: 0.4; cursor: default; }
@@ -750,7 +747,6 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 .project-cover:active { scale: 0.98; }
 .project-new { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--sp-8); background: var(--surface-2); color: var(--text); font-size: var(--text-ui); font-weight: var(--fw-medium); }
 .project-name { margin-top: var(--sp-12); font-size: var(--text-body); font-weight: var(--fw-medium); }
-.project-hint { margin-top: var(--sp-12); color: var(--text-3); font-size: var(--text-caption); }
 .project-date { margin-top: var(--sp-4); color: var(--text-3); font-size: var(--text-caption); font-variant-numeric: tabular-nums; }
 /* 卡片右上角的「更多」：鼠标移上来才出现，盖在封面上所以用半透明黑底白字 */
 .project-more { position: absolute; top: var(--sp-8); right: var(--sp-8); opacity: 0; }

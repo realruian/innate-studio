@@ -72,7 +72,6 @@ export interface AudioData extends Generated {
   voiceId: string;
   voiceName: string;
 }
-export type NodeData = TextData | ImageData | VideoData | AudioData;
 
 export interface LinkData {
   // 连线起点是哪种节点。

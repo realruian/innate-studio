@@ -5,7 +5,7 @@
 
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { BaseEdge, Handle, NodeToolbar, Position, getBezierPath, useConnection, useEdges, useInternalNode, useReactFlow, useStore as useFlowStore, useUpdateNodeInternals, type ConnectionLineComponentProps, type EdgeProps, type Node, type NodeProps } from '@xyflow/react';
-import { api, state, useStore, loadVoices, isPendingTask, polishModel, KINDS as MEDIA } from '../store.ts';
+import { state, useStore, loadVoices, isPendingTask, polishModel, KINDS as MEDIA } from '../store.ts';
 import { RATIOS, capabilities, fitImageSize, imageRatios, imageRefLimit, imageSizes, traits, voiceName } from '../composer/state.ts';
 import { modelLabel, modelNote } from '../../../shared/models.ts';
 import { recordName, uploadLocalFile, uploadVirtualAsset } from '../media.ts';
@@ -17,7 +17,7 @@ import { openMenu, openModal, openPopover, toast } from '../ui/layers.tsx';
 import { VideoPlayer, AudioPlayer } from '../player.tsx';
 import { openDetail } from '../history.tsx';
 import type { Kind, Ref } from '../types.ts';
-import { BOX_HEIGHT, IMAGE_PRESETS, NODE_LABELS, OUTPAINT_PROMPT, ROLE_LABELS, canLink, nodeWidth, joinPrompt, linkLabel, PINS, PIN_LABELS, type AudioData, type FrameRole, type GroupData, type ImageData, type Pin, type Preset, type StackData, type LinkData, type NodeKind, type TextData, type VideoData } from './model.ts';
+import { BOX_HEIGHT, IMAGE_PRESETS, NODE_LABELS, OUTPAINT_PROMPT, ROLE_LABELS, canLink, nodeWidth, linkLabel, PINS, PIN_LABELS, type AudioData, type FrameRole, type GroupData, type ImageData, type Pin, type Preset, type StackData, type LinkData, type NodeKind, type TextData, type VideoData } from './model.ts';
 import { fitVideo, generate, nameOf, outputOf, recordOf, runAll } from './run.ts';
 import { Cropper, cropImage, grabFrame, padImage, splitGrid, type Made } from './edit.tsx';
 
@@ -606,7 +606,6 @@ const promptHint = (linked: boolean, own: string) => (linked ? '补充提示词�
 export function TextNode({ id, data: raw, selected, dragging }: NodeProps) {
   const data = raw as unknown as TextData;
   const flow = useReactFlow();
-  const inputs = useInputs(id);
   const [editing, setEditing] = useState(false);
   const area = useRef<HTMLTextAreaElement>(null);
   const draft = useDraft(data.text || '', (text) => flow.updateNodeData(id, { text }));
@@ -1046,7 +1045,6 @@ function Mini({ node }: { node: Node }) {
 // 选中它，下面展开一个画廊：点其中一个把它取回画布；右上角可以整叠摊开。
 export function StackNode({ id, data: raw, selected, dragging }: NodeProps) {
   const data = raw as unknown as StackData;
-  const flow = useReactFlow();
   const alone = useAlone(selected) && !dragging;
   const { unstack } = useContext(CanvasActions);
   // 成员是藏着的节点，它们变了这里也要跟着变。

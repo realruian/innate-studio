@@ -45,20 +45,6 @@ export function readVideo(source: File | string) {
   });
 }
 
-// 给一个已经在本机的图片或视频地址缩一张小图。缩不出来就返回 null。
-export async function thumbOf(url: string, kind: Kind) {
-  try {
-    if (kind === 'video') return (await readVideo(url)).thumb;
-    if (kind !== 'image') return null;
-    const bitmap = await createImageBitmap(await (await fetch(url)).blob());
-    const thumb = drawThumb(bitmap, bitmap.width, bitmap.height);
-    bitmap.close();
-    return thumb;
-  } catch {
-    return null;
-  }
-}
-
 export async function makeThumb(file: File, kind: Kind) {
   try {
     if (kind === 'image') return await imageThumb(file);

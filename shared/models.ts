@@ -339,8 +339,8 @@ const ELEVEN_SFX = `你在帮用户改写一条 ElevenLabs 音效模型的提示
 // 只写「生成视频1之后的内容」而不写这两句时，出来的是同一个场景的另一个镜头，接不上。
 // lead 是给用户填好的开头，用户接着写；keep 是放在后面的那句约束。
 export const VIDEO_TASKS = {
-  extend: { label: '延长', lead: '向后延长视频1：', keep: '镜头和景别保持不变。', hint: '写下接下来发生什么' },
-  edit: { label: '编辑', lead: '严格编辑视频1，', keep: '其他内容、动作和运镜保持不变。', hint: '写下要把什么改成什么' },
+  extend: { label: '延长', lead: '向后延长视频1：', keep: '镜头和景别保持不变。' },
+  edit: { label: '编辑', lead: '严格编辑视频1，', keep: '其他内容、动作和运镜保持不变。' },
 };
 export type VideoTask = keyof typeof VIDEO_TASKS;
 
