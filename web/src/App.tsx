@@ -16,18 +16,20 @@ import { Skills } from './skills.tsx';
 import { openSettings } from './settings.tsx';
 import type { ViewId } from './types.ts';
 
-// 七项是同一层的页签。「创作」是首页，在首页再点一次会回到顶部并把光标放回输入框。
+// 七项是同一层的页签。「创造」是首页，在首页再点一次会回到顶部并把光标放回输入框。
 // 素材库和真人档案是 Flatkey 才有的，feature 写着它们各自要平台支持哪一项，平台不支持就不显示。
+// 侧栏的图标线宽是 2，比别处的 1.5 粗一档。
 // Sparkle 在库里画得比别的图标小一圈（只占画布中间六成），所以放大到 22 显示，线条相应调细，看上去和其他几项一样大、一样粗。
 const VIEWS: { id: ViewId; label: string; icon: IconName; size?: number; stroke?: number; feature?: 'library' | 'persons' }[] = [
-  { id: 'create', label: '创作', icon: 'sparkle', size: 22, stroke: 1.1 },
+  { id: 'create', label: '创造', icon: 'sparkle', size: 22, stroke: 1.45 },
   { id: 'canvas', label: '画布', icon: 'workflow' },
   { id: 'records', label: '创作记录', icon: 'history' },
-  { id: 'characters', label: '角色', icon: 'mask' },
-  { id: 'skills', label: '技能', icon: 'wand' },
-  { id: 'library', label: '素材库', icon: 'folder', feature: 'library' },
-  { id: 'persons', label: '真人档案', icon: 'user', feature: 'persons' },
+  { id: 'characters', label: '角色', icon: 'userStory' },
+  { id: 'skills', label: '技能', icon: 'wandSparkles' },
+  { id: 'library', label: '素材库', icon: 'folderLibrary', feature: 'library' },
+  { id: 'persons', label: '真人档案', icon: 'userCircle', feature: 'persons' },
 ];
+const NAV_STROKE = 2;
 const NO_KEY = '还没有设置 API Key';
 
 export function App() {
@@ -64,7 +66,7 @@ export function App() {
             const current = view === v.id;
             return (
               <button key={v.id} className={`nav-item ${current ? 'active' : ''}`} type="button" aria-current={current ? 'page' : undefined} onClick={() => goTo(v.id)}>
-                <Icon name={v.icon} size={v.size} stroke={v.stroke} />
+                <Icon name={v.icon} size={v.size} stroke={v.stroke ?? NAV_STROKE} />
                 <span>{v.label}</span>
               </button>
             );
@@ -73,7 +75,7 @@ export function App() {
         <div className="sidebar-foot">
           {/* 设置入口只在缺少 API Key 时带一个提醒点；Key 的具体内容放在设置里看。 */}
           <button className="nav-item" type="button" onClick={openSettings}>
-            <Icon name="gear" />
+            <Icon name="gear" stroke={NAV_STROKE} />
             <span>设置</span>
             {!state.app.hasKey && <span className="dot dot-warn nav-dot" {...tip(NO_KEY)} aria-label={NO_KEY} />}
           </button>

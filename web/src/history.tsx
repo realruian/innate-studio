@@ -597,7 +597,7 @@ const TYPE_FILTERS = [{ value: 'all' as const, label: '全部' }, ...(Object.key
 
 // 记录页的来源切换：创作页生成的和画布里生成的分开看。
 const SOURCE_FILTERS = [
-  { value: 'create' as const, label: '创作' },
+  { value: 'create' as const, label: '创造' },
   { value: 'canvas' as const, label: '画布' },
 ];
 
@@ -683,7 +683,7 @@ export function Records() {
         empty={
           <div className="empty">
             <div className="empty-title">{!state.historyLoaded ? '正在读取记录…' : from.length ? '没有符合条件的记录' : source === 'canvas' ? '画布里还没有生成过内容' : '还没有生成过内容'}</div>
-            {state.historyLoaded && !from.length ? <div className="muted">点左边的「{source === 'canvas' ? '画布' : '创作'}」开始。生成的结果和参数都会保存在这里。</div> : null}
+            {state.historyLoaded && !from.length ? <div className="muted">点左边的「{source === 'canvas' ? '画布' : '创造'}」开始。生成的结果和参数都会保存在这里。</div> : null}
           </div>
         }
       />

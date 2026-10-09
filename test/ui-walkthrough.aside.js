@@ -420,7 +420,7 @@ if ((await text('.view-create .feed-head h2')).join('') !== '最近生成') prob
 if ((await count('.view-create h1')) !== 1) problems.push('创作页应该只有一个一级标题（首屏问句），「最近生成」是二级标题');
 const sideText = (await text('.sidebar')).join('');
 if ((await count('.side-list, .side-row')) || sideText.includes('最近生成')) problems.push('侧栏里不应该有「最近生成」列表');
-if ((await text('.sidebar .nav-item')).join('|') !== '创作|画布|创作记录|角色|技能|素材库|真人档案|设置') problems.push(`侧栏的入口不对：${(await text('.sidebar .nav-item')).join('|')}`);
+if ((await text('.sidebar .nav-item')).join('|') !== '创造|画布|创作记录|角色|技能|素材库|真人档案|设置') problems.push(`侧栏的入口不对：${(await text('.sidebar .nav-item')).join('|')}`);
 await audit('提交后');
 await shot('06-submitted');
 
@@ -676,7 +676,7 @@ if (await count('.view-create .feed-head .entry-action-btn:not([hidden])')) {
   await sleep(500);
   const landed = await pg.evaluate((v) => ({ active: document.querySelector(`${v} .filters .seg.active`)?.textContent, others: document.querySelectorAll(`${v} .card :is(.player, .audio-player)`).length }), V);
   if (landed.active !== '图片' || landed.others) problems.push(`从图片的「查看全部」进记录页，应该只看图片：${JSON.stringify(landed)}`);
-  await must('回到创作', clickText('.nav-item', '创作'));
+  await must('回到创作', clickText('.nav-item', '创造'));
   await sleep(300);
 }
 
@@ -824,7 +824,7 @@ for (const [label, lead, keep] of [['延长', '向后延长视频1：', '镜头�
   await sleep(400);
 }
 // 收拾一下，免得影响后面的检查：移除视频素材，换回文生视频，清空提示词
-await must('回到创作', clickText('.nav-item', '创作'));
+await must('回到创作', clickText('.nav-item', '创造'));
 await sleep(300);
 await must('移除视频素材', click('.ref-row .ref-remove'));
 await must('打开生成方式', click(control('mode')));
@@ -1006,7 +1006,7 @@ await escape();
 await sleep(200);
 
 // 10. 回到创作页；窄窗口下不溢出
-await must('回到创作', clickText('.nav-item', '创作'));
+await must('回到创作', clickText('.nav-item', '创造'));
 await sleep(300);
 if (!(await pg.evaluate(() => document.activeElement === document.querySelector('textarea.prompt')))) problems.push('点「创作」后光标没有回到输入框');
 const narrow = await pg.evaluate(async () => {
