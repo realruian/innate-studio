@@ -4,7 +4,7 @@
 // 跟着画布缩放的只有框和里面的内容；名字、加号、操作条、输入面板在屏幕上的大小不变，缩得再小也看得清、点得到。
 
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
-import { BaseEdge, EdgeLabelRenderer, Handle, NodeToolbar, Position, getBezierPath, useEdges, useInternalNode, useReactFlow, useStore as useFlowStore, type EdgeProps, type Node, type NodeProps } from '@xyflow/react';
+import { BaseEdge, Handle, NodeToolbar, Position, getBezierPath, useConnection, useEdges, useInternalNode, useReactFlow, useStore as useFlowStore, useUpdateNodeInternals, type EdgeProps, type Node, type NodeProps } from '@xyflow/react';
 import { api, state, useStore, loadVoices, isPendingTask, polishModel, KINDS as MEDIA } from '../store.ts';
 import { RATIOS, capabilities, imageRatios, imageRefLimit, traits, voiceName } from '../composer/state.ts';
 import { modelNote } from '../../../shared/models.ts';
@@ -16,7 +16,7 @@ import { openMenu, toast } from '../ui/layers.tsx';
 import { VideoPlayer, AudioPlayer } from '../player.tsx';
 import { openDetail } from '../history.tsx';
 import type { Kind } from '../types.ts';
-import { NODE_LABELS, ROLE_LABELS, joinPrompt, linkLabel, type AudioData, type FrameRole, type ImageData, type LinkData, type NodeKind, type TextData, type VideoData } from './model.ts';
+import { NODE_LABELS, ROLE_LABELS, canLink, joinPrompt, linkLabel, type AudioData, type FrameRole, type ImageData, type LinkData, type NodeKind, type TextData, type VideoData } from './model.ts';
 import { fitVideo, generate, outputOf, recordOf } from './run.ts';
 
 // 画布页交给节点用的几件事。snap：会改动画布结构的操作，动手之前调一下，撤销时回到这一刻。
@@ -51,8 +51,17 @@ function boxWidth(ratio?: string, aspect?: number) {
 function Frame({ id, kind, selected, width, tools, panel, children }: { id: string; kind: NodeKind; selected?: boolean; width: number; tools?: ReactNode; panel: ReactNode; children: ReactNode }) {
   const flow = useReactFlow();
   const alone = useAlone(selected);
+  // 正从别的节点拉一条线过来：这个节点接得住，就把整个框变成落点，不用对准小加号；接不住就暗下去。
+  // 从右边的加号拉出来的线要找下游，从左边的加号拉出来的要找上游。
+  const link = useConnection();
+  const other = link.inProgress && link.fromNode.id !== id ? (link.fromNode.type as NodeKind) : null;
+  const wants = other && link.fromHandle?.type === 'source' ? 'target' : 'source';
+  const fits = Boolean(other) && (wants === 'target' ? canLink(other!, kind) : canLink(kind, other!));
+  // 落点是拉线时才加进来的，要让 React Flow 重新量一遍这个节点，它才认得这个落点（线拖上来时才会把它标成可以连）。
+  const remeasure = useUpdateNodeInternals();
+  useEffect(() => remeasure(id), [fits, wants]);
   return (
-    <div className={`cnode cnode-${kind} ${selected ? 'selected' : ''}`} style={{ width }}>
+    <div className={`cnode cnode-${kind} ${selected ? 'selected' : ''} ${other && !fits ? 'is-dimmed' : ''}`} style={{ width }}>
       {/* 操作条和输入面板画在画布的缩放之外，所以大小不变；位置仍然贴着节点。 */}
       <NodeToolbar isVisible={alone} position={Position.Top} offset={8}>
         <div className="cnode-tools">
@@ -73,6 +82,7 @@ function Frame({ id, kind, selected, width, tools, panel, children }: { id: stri
       <Handle type="source" position={Position.Right} className="cnode-port">
         <Icon name="plus" size={12} />
       </Handle>
+      {fits && <Handle id="body" type={wants} position={wants === 'target' ? Position.Left : Position.Right} className="cnode-drop" isConnectableStart={false} />}
       <NodeToolbar isVisible={alone} position={Position.Bottom} offset={12}>
         <div className="cnode-panel nowheel">{panel}</div>
       </NodeToolbar>
@@ -109,7 +119,7 @@ function Bar({ working, action, onSend, children }: { working: boolean; action: 
 }
 
 // 图片、视频、音频节点的框里放什么：正在做什么、生成到哪了、结果或失败原因；什么都没有时是一个淡淡的图标。
-// onShape：图片读出来之后报告它实际的宽高比，节点的框跟着它定宽度。
+// onShape：图片、视频读出来之后报告它实际的宽高比，节点的框跟着它定宽度。
 function Result({ kind, data, onShape }: { kind: NodeKind; data: MediaData; onShape?: (aspect: number) => void }) {
   useStore('history');
   const record = recordOf(data);
@@ -134,13 +144,7 @@ function Result({ kind, data, onShape }: { kind: NodeKind; data: MediaData; onSh
     );
   }
   if (data.upload && kind === 'image') return <img className="cnode-pic" src={data.upload.url} alt={data.upload.name} draggable={false} onLoad={measure} />;
-  if (data.upload) {
-    return (
-      <div className={`cnode-clip ${INERT}`}>
-        <VideoPlayer src={data.upload.url} label={data.upload.name} />
-      </div>
-    );
-  }
+  if (data.upload) return <Clip src={data.upload.url} label={data.upload.name} onShape={onShape} />;
   if (!record) return blank(data.recordId && state.historyLoaded ? '这条生成记录已经删除' : <Icon name={NODE_ICONS[kind]} size={28} stroke={1.2} />);
   if (isPendingTask(record)) return waiting(record.status === 'queued' ? '排队中' : record.progress ? `生成中 ${Math.round(record.progress)}%` : '生成中');
   if (record.status === 'failed') {
@@ -154,16 +158,28 @@ function Result({ kind, data, onShape }: { kind: NodeKind; data: MediaData; onSh
   }
   if (!record.mediaUrl) return waiting('已生成，正在存到本机');
   if (kind === 'image') return <img className="cnode-pic" src={record.mediaUrl} alt={record.prompt || '生成的图片'} draggable={false} onLoad={measure} />;
-  if (kind === 'video') {
-    return (
-      <div className={`cnode-clip ${INERT}`}>
-        <VideoPlayer src={record.mediaUrl} label={record.prompt || '生成的视频'} />
-      </div>
-    );
-  }
+  if (kind === 'video') return <Clip src={record.mediaUrl} label={record.prompt || '生成的视频'} onShape={onShape} />;
   return (
     <div className={`cnode-sound ${INERT}`}>
       <AudioPlayer src={record.mediaUrl} kind={record.tool === 'sfx' ? '音效' : `语音 · ${record.payload?.voice_name || ''}`} text={record.prompt} />
+    </div>
+  );
+}
+
+// 视频读到尺寸之后报告它实际的宽高比。播放器是现成的组件，这里从它外面去听那个视频元素。
+function Clip({ src, label, onShape }: { src: string; label: string; onShape?: (aspect: number) => void }) {
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const video = box.current?.querySelector('video');
+    if (!video) return;
+    const measure = () => video.videoHeight > 0 && onShape?.(video.videoWidth / video.videoHeight);
+    measure();
+    video.addEventListener('loadedmetadata', measure);
+    return () => video.removeEventListener('loadedmetadata', measure);
+  }, [src]);
+  return (
+    <div ref={box} className={`cnode-clip ${INERT}`}>
+      <VideoPlayer src={src} label={label} />
     </div>
   );
 }
@@ -455,7 +471,7 @@ export function VideoNode({ id, data: raw, selected }: NodeProps) {
       id={id}
       kind="video"
       selected={selected}
-      width={boxWidth(data.ratio)}
+      width={boxWidth(data.ratio, data.aspect)}
       tools={<DetailTool data={data} />}
       panel={
         <>
@@ -471,7 +487,7 @@ export function VideoNode({ id, data: raw, selected }: NodeProps) {
         </>
       }
     >
-      <Result kind="video" data={data} />
+      <Result kind="video" data={data} onShape={(aspect) => Math.abs(aspect - (data.aspect || 0)) > 0.01 && set({ aspect })} />
     </Frame>
   );
 }
@@ -542,46 +558,14 @@ export function AudioNode({ id, data: raw, selected }: NodeProps) {
 
 // ---------- 连线 ----------
 
-// 图片连到视频的线上有个小标签，点它可以改这张图当参考图、首帧还是尾帧。
-export function LinkEdge({ id, source, target, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, data, selected }: EdgeProps) {
+// 一条细线，上面不放标签：图片当参考图、首帧还是尾帧，在视频节点的输入面板里看和改。
+// 线两头的节点有一个被选中时，这条线变亮，看得出它连着谁。
+export function LinkEdge({ id, source, target, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, selected }: EdgeProps) {
   const from = useInternalNode(source);
   const to = useInternalNode(target);
-  const flow = useReactFlow();
-  const { snap } = useContext(CanvasActions);
   // 线画到框的边上，不画到加号上：加号平时是藏着的，而且它在屏幕上大小不变，位置会随缩放挪动。
   const startX = from ? from.internals.positionAbsolute.x + (from.measured.width || 0) : sourceX;
   const endX = to ? to.internals.positionAbsolute.x : targetX;
-  const [path, labelX, labelY] = getBezierPath({ sourceX: startX, sourceY, targetX: endX, targetY, sourcePosition, targetPosition });
-  const link = data as unknown as LinkData;
-  const label = linkLabel(link);
-  return (
-    <>
-      <BaseEdge id={id} path={path} />
-      {label && (
-        <EdgeLabelRenderer>
-          <div className={`clink-label nodrag nopan ${selected ? 'selected' : ''}`} style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }}>
-            {link.kind === 'image' && flow.getNode(target)?.type === 'video' ? (
-              <button
-                className="clink-tag"
-                type="button"
-                aria-haspopup="listbox"
-                aria-expanded="false"
-                aria-label={`这张图怎么用：${label}`}
-                onClick={(e) =>
-                  pickRole(e.currentTarget, (flow.getNode(target)?.data as { model?: string } | undefined)?.model, link.role || 'reference', (role) => {
-                    snap();
-                    flow.updateEdgeData(id, { role });
-                  })
-                }
-              >
-                {label}
-              </button>
-            ) : (
-              <span className="clink-tag">{label}</span>
-            )}
-          </div>
-        </EdgeLabelRenderer>
-      )}
-    </>
-  );
+  const [path] = getBezierPath({ sourceX: startX, sourceY, targetX: endX, targetY, sourcePosition, targetPosition });
+  return <BaseEdge id={id} path={path} className={`clink ${selected || from?.selected || to?.selected ? 'is-lit' : ''}`} />;
 }

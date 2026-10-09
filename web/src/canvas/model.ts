@@ -39,6 +39,8 @@ export interface VideoData extends Generated {
   resolution: string;
   ratio: string;
   duration: number;
+  // 节点里那段视频实际的宽高比，读到之后记下，节点的框按它定宽度。
+  aspect?: number;
 }
 export interface AudioData extends Generated {
   tool: 'speech' | 'sfx';

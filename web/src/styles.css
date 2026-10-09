@@ -634,9 +634,9 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
   --xy-background-pattern-color: var(--border-strong);
   --xy-edge-stroke: var(--text-off);
   --xy-edge-stroke-selected: var(--text);
-  --xy-edge-stroke-width: 1.5;
+  --xy-edge-stroke-width: 1;
   --xy-connectionline-stroke: var(--text-2);
-  --xy-connectionline-stroke-width: 1.5;
+  --xy-connectionline-stroke-width: 1;
   --xy-handle-background-color: var(--surface-1);
   --xy-handle-border-color: var(--text-3);
   --xy-selection-background-color: color-mix(in srgb, var(--accent) 8%, transparent);
@@ -670,12 +670,12 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 .canvas-tools, .canvas-foot { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-4); background: var(--surface-float); border: 1px solid var(--border-float); border-radius: var(--r-md); box-shadow: var(--shadow-float); }
 .canvas-tools { flex-direction: column; gap: var(--sp-4); }
 .canvas-tools .icon-btn { position: relative; width: 36px; height: 36px; }
-/* 鼠标移到工具栏上，每个图标右边浮出它的名字；指着的那一个更亮。名字底下垫一层从底色淡出去的渐变，压在节点上也看得清 */
+/* 鼠标移到工具栏上，每个图标右边浮出它的名字；指着的那一个更亮。名字底下垫一团从工具栏右沿向四周散开的底色，没有边界，压在节点上也看得清 */
 .canvas-tools { position: relative; }
-.canvas-tools::after { content: ""; position: absolute; top: 0; bottom: 0; left: 100%; width: 132px; background: linear-gradient(to right, var(--bg), transparent); opacity: 0; pointer-events: none; transition: opacity 160ms var(--ease); }
+.canvas-tools::after { content: ""; position: absolute; top: calc(var(--sp-48) * -1); bottom: calc(var(--sp-48) * -1); left: 100%; width: 200px; background: radial-gradient(farthest-side at 0 50%, var(--bg) 20%, color-mix(in srgb, var(--bg) 70%, transparent) 55%, transparent); opacity: 0; pointer-events: none; transition: opacity 200ms var(--ease); }
 .canvas-tool-name { position: absolute; left: calc(100% + var(--sp-16)); top: 50%; z-index: 1; translate: calc(var(--sp-4) * -1) -50%; color: var(--text-3); font-size: var(--text-ui); white-space: nowrap; opacity: 0; pointer-events: none; transition: opacity 160ms var(--ease), translate 160ms var(--ease-out), color 120ms var(--ease); }
 @media (hover: hover) {
-  .canvas-tools:hover::after { opacity: 0.92; }
+  .canvas-tools:hover::after { opacity: 1; }
   .canvas-tools:hover .canvas-tool-name { opacity: 1; translate: 0 -50%; }
   .canvas-tools .icon-btn:hover .canvas-tool-name { color: var(--text); }
 }
@@ -699,15 +699,17 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 .cnode { position: relative; display: flex; flex-direction: column; gap: var(--sp-8); }
 /* 名字在屏幕上大小不变：以左下角为准把画布的缩放抵消掉 */
 .cnode-title { display: flex; align-items: center; align-self: flex-start; gap: var(--sp-4); padding: 0 var(--sp-2); color: var(--text-3); font-size: var(--text-caption); line-height: var(--lh-snug); white-space: nowrap; cursor: grab; transform-origin: left bottom; scale: var(--inv, 1); }
-.cnode-box { display: grid; height: 240px; overflow: hidden; background: var(--surface-1); border: 1px solid var(--border-float); border-radius: var(--r-md); transition: border-color 120ms var(--ease); }
+.cnode-box { display: grid; height: 240px; overflow: hidden; background: var(--surface-1); border: 1px solid var(--border-float); border-radius: var(--r-md); }
 @media (hover: hover) { .cnode:hover .cnode-box { border-color: var(--border-strong); } }
 .cnode.selected .cnode-box { border-color: var(--text-2); }
 /* 选中后浮在节点上方的一小条操作：上传、看详情、删除 */
-.cnode-tools { display: flex; gap: var(--sp-2); padding: var(--sp-4); background: var(--surface-float); border: 1px solid var(--border-float); border-radius: var(--r-md); box-shadow: var(--shadow-float); animation: fade 120ms var(--ease-out); }
+.cnode-tools { display: flex; gap: var(--sp-2); padding: var(--sp-4); background: var(--surface-float); border: 1px solid var(--border-float); border-radius: var(--r-md); box-shadow: var(--shadow-float); animation: cnode-drop 200ms var(--ease-out); }
 .cnode-btn { display: grid; place-items: center; flex: none; width: var(--h-sm); height: var(--h-sm); padding: 0; border: 0; border-radius: var(--r-xs); background: none; color: var(--text-2); cursor: pointer; transition: background-color 120ms var(--ease), color 120ms var(--ease); }
 @media (hover: hover) { .cnode-btn:hover { background: var(--hover); color: var(--text); } }
 /* 框里的内容都铺满这个框：图片、视频完整显示，音频是一行播放条 */
-.cnode-pic { display: block; width: 100%; height: 100%; min-height: 0; object-fit: contain; background: var(--surface-2); }
+/* 框的宽度是按内容的实际比例算的，四舍五入会差出一两个像素，所以内容用铺满的方式放，边上不留缝 */
+.cnode-pic { display: block; width: 100%; height: 100%; min-height: 0; object-fit: cover; background: var(--surface-2); animation: fade 320ms var(--ease-out); }
+.cnode-clip .player-video { object-fit: cover; }
 .cnode-clip { display: grid; width: 100%; height: 100%; min-height: 0; overflow: hidden; background: var(--surface-2); }
 .cnode-sound { height: 100%; min-height: 0; }
 /* 从素材库选的素材只有缩略图，左下角标一下来历 */
@@ -724,28 +726,52 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 .cnode-text-edit { border: 0; outline: 0; background: transparent; resize: none; cursor: text; }
 
 /* 输入面板：只在选中一个节点时出现在它正下方。它不跟着画布缩放，大小一直不变。和创作页的输入框是同一种卡片 */
-.cnode-panel { display: flex; flex-direction: column; width: 480px; background: var(--surface-1); border: 1px solid var(--border-float); border-radius: var(--r-lg); box-shadow: var(--shadow-float); cursor: default; animation: fade 120ms var(--ease-out); }
+.cnode-panel { display: flex; flex-direction: column; width: 680px; max-width: calc(100vw - var(--sp-48)); background: var(--surface-1); border: 1px solid var(--border-float); border-radius: var(--r-lg); box-shadow: var(--shadow-float); cursor: default; animation: cnode-rise 200ms var(--ease-out); }
 /* 参考素材：连进来的素材各一张小图，角上写着用途；最后一个加号是再加一份 */
-.cnode-refs { display: flex; flex-wrap: wrap; gap: var(--sp-8); padding: var(--sp-12) var(--sp-12) 0; }
-.cnode-ref { position: relative; display: grid; place-items: center; flex: none; width: 56px; height: 56px; padding: 0; overflow: hidden; border: 1px solid var(--border-float); border-radius: var(--r-sm); background: var(--surface-2); color: var(--text-3); }
+.cnode-refs { display: flex; flex-wrap: wrap; gap: var(--sp-8); padding: var(--sp-20) var(--sp-20) 0; }
+.cnode-ref { position: relative; display: grid; place-items: center; flex: none; width: 64px; height: 64px; padding: 0; overflow: hidden; border: 1px solid var(--border-float); border-radius: var(--r-sm); background: var(--surface-2); color: var(--text-3); }
 .cnode-ref > img { width: 100%; height: 100%; object-fit: cover; }
 button.cnode-ref { cursor: pointer; transition: border-color 120ms var(--ease), color 120ms var(--ease); }
 @media (hover: hover) { button.cnode-ref:hover { border-color: var(--border-hover); color: var(--text); } }
 button.cnode-ref[aria-expanded='true'] { border-color: var(--text-3); }
 .cnode-ref-tag { position: absolute; left: 0; right: 0; bottom: 0; padding: var(--sp-2) 0; background: rgba(0, 0, 0, 0.55); color: #fff; font-size: var(--text-micro); line-height: 1; text-align: center; }
-.cnode-prompt { display: block; width: 100%; min-height: 72px; max-height: 220px; padding: var(--sp-12) var(--sp-16) var(--sp-8); border: 0; outline: 0; background: transparent; color: var(--text); font-size: var(--text-body); line-height: var(--lh-body); resize: none; field-sizing: content; cursor: text; }
+.cnode-prompt { display: block; width: 100%; min-height: 104px; max-height: 280px; padding: var(--sp-20) var(--sp-20) var(--sp-8); border: 0; outline: 0; background: transparent; color: var(--text); font-size: var(--text-body); line-height: var(--lh-body); resize: none; field-sizing: content; cursor: text; }
 .cnode-prompt::placeholder { color: var(--text-3); }
-.cnode-error { padding: 0 var(--sp-16) var(--sp-4); color: var(--danger); font-size: var(--text-caption); overflow-wrap: anywhere; }
-.cnode-bar { display: flex; align-items: center; gap: var(--sp-8); padding: var(--sp-4) var(--sp-8) var(--sp-8); }
+.cnode-error { padding: 0 var(--sp-20) var(--sp-4); color: var(--danger); font-size: var(--text-caption); overflow-wrap: anywhere; }
+.cnode-bar { display: flex; align-items: center; gap: var(--sp-8); padding: var(--sp-8) var(--sp-12) var(--sp-12); }
+.cnode-bar .send-btn { width: 36px; height: 36px; }
 .cnode-params { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); flex: 1; min-width: 0; }
 .cnode-note { padding: 0 var(--sp-8); color: var(--text-3); font-size: var(--text-caption); }
 
-/* 连线上的标签：说明这份素材在下游当什么用。图片的可以点开改 */
-.clink-label { position: absolute; pointer-events: all; }
-.clink-tag { display: flex; align-items: center; height: var(--sp-20); padding: 0 var(--sp-8); border: 1px solid var(--border-float); border-radius: var(--sp-12); background: var(--surface-1); color: var(--text-2); font-size: var(--text-micro); line-height: 1; white-space: nowrap; }
-button.clink-tag { cursor: pointer; transition: border-color 120ms var(--ease), color 120ms var(--ease); }
-@media (hover: hover) { button.clink-tag:hover { border-color: var(--border-hover); color: var(--text); } }
-.clink-label.selected .clink-tag, button.clink-tag[aria-expanded='true'] { border-color: var(--text-3); color: var(--text); }
+/* 连线：一条细线，不带标签。两头的节点有一个被选中，或者线自己被选中时变亮 */
+.canvas .react-flow__edge-path.clink { transition: stroke 160ms var(--ease); animation: fade 240ms var(--ease-out); }
+.canvas .react-flow__edge-path.clink.is-lit { stroke: var(--text-2); }
+.canvas .react-flow__edge.selected .react-flow__edge-path.clink { stroke: var(--text); }
+/* 正在拉的那条线是流动的虚线 */
+.canvas .react-flow__connection-path { stroke-dasharray: 5 5; animation: clink-flow 480ms linear infinite; }
+@keyframes clink-flow { to { stroke-dashoffset: -10; } }
+
+/* ---------- 画布上的动效 ---------- */
+/* 节点出现：从略小、略透明长出来。输入面板从下面浮上来，操作条从上面落下来 */
+.cnode { animation: cnode-in 220ms var(--ease-out); }
+@keyframes cnode-in { from { opacity: 0; scale: 0.96; } }
+@keyframes cnode-rise { from { opacity: 0; translate: 0 8px; } }
+@keyframes cnode-drop { from { opacity: 0; translate: 0 -6px; } }
+/* 拖着节点走的时候它浮起来一点 */
+.cnode-box { position: relative; transition: border-color 120ms var(--ease), translate 200ms var(--ease-out), box-shadow 200ms var(--ease-out), opacity 160ms var(--ease); }
+.react-flow__node.dragging .cnode-box { box-shadow: 0 10px 28px rgba(0, 0, 0, 0.22); }
+/* 拉线的时候：接不住这条线的节点暗下去；线拖到接得住的节点上，那个节点浮起来、边线变亮，松手就连上 */
+.cnode.is-dimmed .cnode-box, .cnode.is-dimmed .cnode-title { opacity: 0.4; }
+.cnode-title { transition: opacity 160ms var(--ease); }
+/* 落点盖住整个框，看不见，只在拉线时才有 */
+.canvas .react-flow__handle.cnode-drop { top: auto; bottom: 0; left: 0; right: auto; width: 100%; height: 240px; min-width: 0; min-height: 0; border: 0; border-radius: var(--r-md); background: none; transform: none; opacity: 0; }
+.cnode:has(.cnode-drop.valid) .cnode-box { translate: 0 -6px; border-color: var(--text); box-shadow: 0 14px 32px rgba(0, 0, 0, 0.28); }
+/* 正在生成：框上扫过一道淡淡的光 */
+.cnode-box:has(.spinner)::after { content: ""; position: absolute; inset: 0; background: linear-gradient(100deg, transparent 30%, color-mix(in srgb, var(--text) 7%, transparent) 50%, transparent 70%); background-size: 220% 100%; animation: cnode-sheen 1.6s linear infinite; pointer-events: none; }
+@keyframes cnode-sheen { from { background-position: 120% 0; } to { background-position: -100% 0; } }
+/* 加号：指上去放大一点 */
+.canvas .react-flow__handle.cnode-port { transition: opacity 120ms var(--ease), scale 160ms var(--ease-out), border-color 120ms var(--ease), color 120ms var(--ease), background-color 120ms var(--ease); }
+@media (hover: hover) { .canvas .cnode-port:hover { scale: calc(var(--inv, 1) * 1.18); } }
 
 /* ---------- 窄屏 ---------- */
 
