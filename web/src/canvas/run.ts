@@ -8,7 +8,7 @@ import { buildRequest as buildVideoRequest, buildOpenRouterRequest, buildImageRe
 import { recordName, refFromAsset, uploadVirtualAsset } from '../media.ts';
 import { toast } from '../ui/layers.tsx';
 import type { HistoryItem, Kind, Ref } from '../types.ts';
-import { NODE_LABELS, joinPrompt, nodeWidth, numbered, placeResults, runOrder, stripNodeData, videoFormFrom, type AudioData, type ImageData, type LinkData, type MediaInput, type NodeKind, type TextData, type VideoData } from './model.ts';
+import { NODE_LABELS, joinPrompt, nodeWidth, numbered, placeResults, resolveMentions, runOrder, stripNodeData, videoFormFrom, type AudioData, type ImageData, type LinkData, type MediaInput, type NodeKind, type TextData, type VideoData } from './model.ts';
 
 type Flow = ReactFlowInstance<Node, Edge>;
 type AnyData = Partial<ImageData & VideoData & AudioData & TextData>;
@@ -117,6 +117,16 @@ async function submitAudio(node: Node, prompt: string) {
   return (await api<HistoryItem>('POST', '/api/audio/speech', { ...request.body, form: { type: 'speech', ...form } })).id;
 }
 
+// 一个节点显示出来的名字：图片 1。提示词里 @ 的就是它。
+export const nameOf = (node: Node) => `${NODE_LABELS[node.type as NodeKind]}${node.data.no ? ` ${node.data.no}` : ''}`;
+
+// 最后发给模型的提示词：先把 @ 引用换掉，再把没被 @ 到的上游文本节点整段拼在前面。
+function promptOf(sources: { link: LinkData; node: Node }[], own: string) {
+  const { prompt, inlined } = resolveMentions(own, sources.map((s) => ({ name: nameOf(s.node), kind: s.link.kind, text: (s.node.data as AnyData).text })));
+  const upstream = sources.filter((s) => s.link.kind === 'text' && !inlined.has(nameOf(s.node))).map((s) => (s.node.data as AnyData).text || '');
+  return joinPrompt(upstream, prompt);
+}
+
 // 节点里是不是已经有内容了：上传的、素材库里的、生成出来的（生成失败的、记录已经删掉的不算）。
 export function isFilled(data: AnyData) {
   const record = recordOf(data);
@@ -160,8 +170,7 @@ export async function generate(flow: Flow, id: string, snap: () => void = () => 
       .filter((edge) => edge.target === id)
       .map((edge) => ({ link: edge.data as unknown as LinkData, node: flow.getNode(edge.source)! }))
       .filter((s) => s.node);
-    const upstream = sources.filter((s) => s.link.kind === 'text').map((s) => (s.node.data as AnyData).text || '');
-    const prompt = joinPrompt(upstream, (node.data as AnyData).prompt || '');
+    const prompt = promptOf(sources, (node.data as AnyData).prompt || '');
     const kind = node.type as NodeKind;
     const count = Math.max(1, Number((node.data as AnyData).count) || 1);
     let ids: string[];
@@ -202,11 +211,15 @@ async function write(flow: Flow, id: string, snap: () => void) {
   if (!model) return toast('当前账号里没有可用的文本模型', 'info');
   flow.updateNodeData(id, { busy: '正在写', error: '' });
   try {
-    const upstream = flow
+    const sources = flow
       .getEdges()
       .filter((edge) => edge.target === id && (edge.data as unknown as LinkData)?.kind === 'text')
-      .map((edge) => (flow.getNode(edge.source)?.data as AnyData | undefined)?.text || '');
-    const result = await api<{ text: string }>('POST', '/api/text', { prompt, context: joinPrompt(upstream, data.text || ''), model });
+      .map((edge) => ({ link: edge.data as unknown as LinkData, node: flow.getNode(edge.source)! }))
+      .filter((s) => s.node);
+    // 要求里 @ 到的文本节点，内容直接写进要求；其余连进来的文本和框里已有的内容当参考。
+    const { prompt: ask, inlined } = resolveMentions(prompt, sources.map((s) => ({ name: nameOf(s.node), kind: 'text' as const, text: (s.node.data as AnyData).text })));
+    const upstream = sources.filter((s) => !inlined.has(nameOf(s.node))).map((s) => (s.node.data as AnyData).text || '');
+    const result = await api<{ text: string }>('POST', '/api/text', { prompt: ask, context: joinPrompt(upstream, data.text || ''), model });
     deliver(flow, id, [{ text: result.text }], snap);
   } catch (err) {
     flow.updateNodeData(id, { error: (err as Error).message });

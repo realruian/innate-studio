@@ -17,19 +17,22 @@ import { VideoPlayer, AudioPlayer } from '../player.tsx';
 import { openDetail } from '../history.tsx';
 import type { Kind } from '../types.ts';
 import { BOX_HEIGHT, NODE_LABELS, ROLE_LABELS, canLink, nodeWidth, joinPrompt, linkLabel, PINS, PIN_LABELS, type AudioData, type FrameRole, type GroupData, type ImageData, type Pin, type StackData, type LinkData, type NodeKind, type TextData, type VideoData } from './model.ts';
-import { fitVideo, generate, outputOf, recordOf, runAll } from './run.ts';
+import { fitVideo, generate, nameOf, outputOf, recordOf, runAll } from './run.ts';
+import { Cropper, cropImage, grabFrame, splitGrid, type Made } from './edit.tsx';
 
 // 画布页交给节点用的几件事。snap：会改动画布结构的操作，动手之前调一下，撤销时回到这一刻。
 // addInput：在某个节点左边加一个节点并连进它，extra 是新节点一出来就带着的内容（上传的文件、素材库里的素材）。
 // ungroup：解散一个分组（只去掉框，里面的节点留着）。saveWorkflow：把一个分组存成工作流。
 // unstack：把一叠摊开；只给一个成员就只取回它。
-export const CanvasActions = createContext<{ snap: () => void; addInput: (targetId: string, kind: NodeKind, extra?: Record<string, unknown>) => void; ungroup: (groupId: string) => void; saveWorkflow: (groupId: string) => void; unstack: (stackId: string, memberId?: string) => void }>({
-  snap() {},
-  addInput() {},
-  ungroup() {},
-  saveWorkflow() {},
-  unstack() {},
-});
+// addBeside：把几张做好的图（裁剪、切分、截帧的结果）各变成一个图片节点，摆在某个节点右边；columns 是一行摆几个。
+export const CanvasActions = createContext<{
+  snap: () => void;
+  addInput: (targetId: string, kind: NodeKind, extra?: Record<string, unknown>) => void;
+  ungroup: (groupId: string) => void;
+  saveWorkflow: (groupId: string) => void;
+  unstack: (stackId: string, memberId?: string) => void;
+  addBeside: (sourceId: string, made: Made[], columns?: number) => void;
+}>({ snap() {}, addInput() {}, ungroup() {}, saveWorkflow() {}, unstack() {}, addBeside() {} });
 
 export const NODE_ICONS: Record<NodeKind, IconName> = { text: 'type', image: 'image', video: 'video', audio: 'music' };
 
@@ -140,6 +143,11 @@ function useDraft(value: string, commit: (next: string) => void) {
   }, [value]);
   return {
     value: draft,
+    // 不经过输入事件、直接换成一段新的字（插入 @ 引用时用）。
+    set: (next: string) => {
+      setDraft(next);
+      commit(next);
+    },
     onChange: (e: { target: { value: string } }) => {
       setDraft(e.target.value);
       commit(e.target.value);
@@ -153,10 +161,54 @@ function useDraft(value: string, commit: (next: string) => void) {
   };
 }
 
+// 提示词输入框。打一个 @，会列出连进这个节点的节点，选一个就插进一段「@图片 1」；生成时它会被换成模型看得懂的说法。
+// 面板右下角的 @ 按钮是同一件事，插在光标的位置。
 function Prompt({ id, value, placeholder }: { id: string; value: string; placeholder: string }) {
   const flow = useReactFlow();
-  const draft = useDraft(value, (prompt) => flow.updateNodeData(id, { prompt }));
-  return <textarea className="cnode-prompt" placeholder={placeholder} {...draft} />;
+  const inputs = useInputs(id);
+  const area = useRef<HTMLTextAreaElement>(null);
+  const { set, ...draft } = useDraft(value, (prompt) => flow.updateNodeData(id, { prompt }));
+
+  // typed：菜单是打 @ 打出来的，选了之后要把那个 @ 一起换掉。
+  function mention(typed: boolean) {
+    const el = area.current!;
+    if (!inputs.length) return typed ? undefined : toast('还没有节点连进来。先把文本、图片这些节点连到它上面，再 @ 它们', 'info');
+    const at = el.selectionStart ?? el.value.length;
+    openMenu(el, {
+      label: '引用连进来的节点',
+      items: inputs.map((input) => ({ value: nameOf(input.node), label: nameOf(input.node), note: input.link.kind === 'text' ? ((input.node.data as unknown as TextData).text || '').slice(0, 12) : linkLabel(input.link) })),
+      onSelect: (name) => {
+        const text = el.value;
+        const from = typed && text[at - 1] === '@' ? at - 1 : at;
+        const insert = `@${name} `;
+        set(text.slice(0, from) + insert + text.slice(at));
+        requestAnimationFrame(() => {
+          el.focus();
+          el.setSelectionRange(from + insert.length, from + insert.length);
+        });
+      },
+    });
+  }
+
+  return (
+    <>
+      <textarea
+        ref={area}
+        className="cnode-prompt"
+        placeholder={placeholder}
+        {...draft}
+        onChange={(e) => {
+          draft.onChange(e);
+          // 刚打出来的是 @（输入法拼字的时候不算）。
+          const typed = (e.nativeEvent as InputEvent).data === '@' && !(e.nativeEvent as InputEvent).isComposing;
+          if (typed) requestAnimationFrame(() => mention(true));
+        }}
+      />
+      <button className="cnode-at" type="button" data-mention {...tip('引用连进来的节点')} aria-label="引用连进来的节点" aria-haspopup="menu" onClick={() => mention(false)}>
+        @
+      </button>
+    </>
+  );
 }
 
 // 输入面板最下面一行：左边是模型和参数，右边是生成键。ready：有没有东西可以发（写了提示词，或者连了能用的节点），没有就是灰的。
@@ -304,6 +356,7 @@ function Clip({ src, label, onShape }: { src: string; label: string; onShape?: (
 // onUpload：图片节点可以上传一张图放进来；节点还空着的时候只有这一个按钮。
 function NodeTools({ id, kind, data, onUpload }: { id: string; kind: Kind; data: MediaData; onUpload?: () => void }) {
   const flow = useReactFlow();
+  const { addBeside } = useContext(CanvasActions);
   useStore('history', 'app');
   const record = recordOf(data);
   // 这个节点里现在放着的东西：生成的结果、上传的文件，或者素材库里的素材。
@@ -345,8 +398,55 @@ function NodeTools({ id, kind, data, onUpload }: { id: string; kind: Kind; data:
     }
   }
 
-  const items = [...(file ? [{ value: 'download', label: '下载' }] : []), ...(canSave ? [{ value: 'save', label: '存到素材库' }] : []), ...(onUpload ? [{ value: 'upload', label: file || data.asset ? '换一张图' : '上传图片' }] : [])];
-  const act = (value: string) => (value === 'download' ? download() : value === 'save' ? save() : onUpload?.());
+  // 裁剪、切分、截帧都在浏览器里做，要读得到文件本身，所以只对存在本机的内容开放。结果是新的图片节点，摆在这个节点右边。
+
+  async function make(what: string, job: () => Promise<Made[]>, columns = 1) {
+    toast(`正在${what}…`, 'info', 1800);
+    try {
+      addBeside(id, await job(), columns);
+    } catch (err) {
+      toast((err as Error).message, 'error', 6000);
+    }
+  }
+  function crop() {
+    const modal = openModal({
+      title: '裁剪',
+      size: 'lg',
+      content: (
+        <Cropper
+          url={file!.url}
+          onCancel={() => modal.close()}
+          onDone={(area) => {
+            modal.close();
+            make('裁剪', async () => [await cropImage(file!.url, area, `${file!.name}-裁剪`)]);
+          }}
+        />
+      ),
+    });
+  }
+  const playhead = () => document.querySelector<HTMLVideoElement>(`.react-flow__node[data-id="${id}"] video`)?.currentTime || 0;
+  const local = Boolean(file?.local);
+  const items = [
+    ...(local && kind === 'image' ? [{ value: 'crop', label: '裁剪' }, { value: 'grid2', label: '切成 2×2' }, { value: 'grid3', label: '切成 3×3' }, { value: 'grid4', label: '切成 4×4' }] : []),
+    ...(local && kind === 'video' ? [{ value: 'frame', label: '截取当前帧' }, { value: 'first', label: '截取首帧' }, { value: 'last', label: '截取尾帧' }] : []),
+    ...(file ? [{ value: 'download', label: '下载' }] : []),
+    ...(canSave ? [{ value: 'save', label: '存到素材库' }] : []),
+    ...(onUpload ? [{ value: 'upload', label: file || data.asset ? '换一张图' : '上传图片' }] : []),
+  ];
+  const acts: Record<string, () => void> = {
+    crop,
+    grid2: () => make('切分', () => splitGrid(file!.url, 2, file!.name), 2),
+    grid3: () => make('切分', () => splitGrid(file!.url, 3, file!.name), 3),
+    grid4: () => make('切分', () => splitGrid(file!.url, 4, file!.name), 4),
+    frame: () => make('截帧', async () => [await grabFrame(file!.url, playhead(), `${file!.name}-截帧`)]),
+    first: () => make('截帧', async () => [await grabFrame(file!.url, 0, `${file!.name}-首帧`)]),
+    last: () => make('截帧', async () => [await grabFrame(file!.url, 'last', `${file!.name}-尾帧`)]),
+    download,
+    save,
+    upload: () => onUpload?.(),
+  };
+  const act = (value: string) => acts[value]?.();
+
   const hasContent = Boolean(done || data.upload || data.asset);
   if (!hasContent && !onUpload) return null;
   return (

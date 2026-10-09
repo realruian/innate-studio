@@ -104,6 +104,36 @@ export function linkLabel(link: LinkData) {
 // 上游文本节点的内容在前，节点自己写的在后，各占一段。
 export const joinPrompt = (upstream: string[], own: string) => [...upstream, own].map((t) => t.trim()).filter(Boolean).join('\n');
 
+// ---------- 提示词里的 @ 引用 ----------
+
+// 提示词里可以用「@图片 1」这样的写法指名一个连进来的节点。发请求之前把它换成模型看得懂的说法：
+// 图片、视频、音频换成它在这次请求里排第几个（图1、视频2），因为模型只知道参考素材的先后顺序；
+// 文本节点直接换成它里面的字，这个文本节点就不再整段拼到提示词前面了（inlined 里记着是哪几个）。
+// 指的节点没连进来，就原样留着。
+export interface Mentionable {
+  // 节点的名字，例如「图片 1」。
+  name: string;
+  kind: NodeKind;
+  text?: string;
+}
+const MENTION = /@(文本|图片|视频|音频) ?(\d+)/g;
+const ORDER_NAMES: Record<NodeKind, string> = { text: '文本', image: '图', video: '视频', audio: '音频' };
+export function resolveMentions(prompt: string, inputs: Mentionable[]): { prompt: string; inlined: Set<string> } {
+  const inlined = new Set<string>();
+  const seen: Partial<Record<NodeKind, number>> = {};
+  const order = new Map<string, number>();
+  for (const input of inputs) order.set(input.name, (seen[input.kind] = (seen[input.kind] || 0) + 1));
+  const resolved = prompt.replace(MENTION, (whole, label: string, no: string) => {
+    const name = `${label} ${no}`;
+    const input = inputs.find((item) => item.name === name);
+    if (!input) return whole;
+    if (input.kind !== 'text') return `${ORDER_NAMES[input.kind]}${order.get(name)}`;
+    inlined.add(name);
+    return (input.text || '').trim();
+  });
+  return { prompt: resolved, inlined };
+}
+
 export interface MediaInput {
   kind: Kind;
   role: FrameRole;

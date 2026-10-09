@@ -776,6 +776,19 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 .chist-item > img, .chist-item > video { width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
 @media (hover: hover) { .chist-item:hover { border-color: var(--border-hover); } }
 .chist-cap { position: absolute; left: 0; right: 0; bottom: 0; padding: var(--sp-2) var(--sp-4); background: rgba(0, 0, 0, 0.55); color: #fff; font-size: var(--text-micro); line-height: var(--lh-snug); text-align: center; }
+/* 裁剪：图片上压一个可以拖的框，框外面压暗；下面一行是比例、尺寸和按钮 */
+.ccrop { display: flex; flex-direction: column; gap: var(--sp-16); min-height: 0; }
+.ccrop-stage { display: grid; place-items: center; min-height: 0; }
+.ccrop-frame { position: relative; overflow: hidden; border-radius: var(--r-sm); user-select: none; touch-action: none; }
+.ccrop-frame > img { display: block; max-width: 100%; max-height: 62vh; }
+.ccrop-box { position: absolute; border: 1px solid #fff; box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.55); cursor: move; }
+.ccrop-handle { position: absolute; width: 14px; height: 14px; border: 2px solid #fff; background: rgba(0, 0, 0, 0.35); }
+.ccrop-handle.is-nw { left: -2px; top: -2px; border-right: 0; border-bottom: 0; cursor: nwse-resize; }
+.ccrop-handle.is-ne { right: -2px; top: -2px; border-left: 0; border-bottom: 0; cursor: nesw-resize; }
+.ccrop-handle.is-sw { left: -2px; bottom: -2px; border-right: 0; border-top: 0; cursor: nesw-resize; }
+.ccrop-handle.is-se { right: -2px; bottom: -2px; border-left: 0; border-top: 0; cursor: nwse-resize; }
+.ccrop-bar { display: flex; align-items: center; gap: var(--sp-8); }
+.ccrop-size { flex: 1; color: var(--text-3); font-size: var(--text-caption); font-variant-numeric: tabular-nums; text-align: right; }
 /* 全屏查看上传的文件 */
 .cnode-view { display: grid; place-items: center; min-height: 0; }
 .cnode-view > img { max-width: 100%; max-height: 76vh; border-radius: var(--r-sm); }
@@ -825,6 +838,10 @@ button.cnode-ref[aria-expanded='true'] { border-color: var(--text-3); }
 .cnode-ref.is-text { border-color: transparent; background: color-mix(in srgb, var(--accent) 14%, var(--surface-2)); color: var(--accent); }
 .cnode-ref-tag { position: absolute; left: 0; right: 0; bottom: 0; padding: var(--sp-2) 0; background: rgba(0, 0, 0, 0.55); color: #fff; font-size: var(--text-micro); line-height: 1; text-align: center; }
 .cnode-prompt { display: block; width: 100%; min-height: 104px; max-height: 280px; padding: var(--sp-20) var(--sp-20) var(--sp-8); border: 0; outline: 0; background: transparent; color: var(--text); font-size: var(--text-body); line-height: var(--lh-body); resize: none; field-sizing: content; cursor: text; }
+/* 引用连进来的节点：提示词右下角的一个 @ */
+.cnode-panel { position: relative; }
+.cnode-at { position: absolute; right: 60px; bottom: var(--sp-12); display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 0; border-radius: var(--r-sm); background: none; color: var(--text-3); font-size: var(--text-body); cursor: pointer; transition: background-color 120ms var(--ease), color 120ms var(--ease); }
+@media (hover: hover) { .cnode-at:hover { background: var(--hover); color: var(--text); } }
 .cnode-prompt::placeholder { color: var(--text-3); }
 .cnode-error { padding: 0 var(--sp-20) var(--sp-4); color: var(--danger); font-size: var(--text-caption); overflow-wrap: anywhere; }
 .cnode-bar { display: flex; align-items: center; gap: var(--sp-8); padding: var(--sp-8) var(--sp-12) var(--sp-12); }

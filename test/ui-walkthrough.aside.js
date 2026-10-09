@@ -358,10 +358,11 @@ await must('打开生成方式菜单', click(control('mode')));
 await sleep(200);
 await must('选全能参考', clickText('.menu .menu-item', '全能参考'));
 await sleep(250);
+// 加号直接打开选素材的弹窗，不用先选类型
 await must('点添加参考', click('.ref-row .ref-add', 0));
-await sleep(250);
-await must('选图片', clickText('.menu .menu-item', '图片'));
 await sleep(350);
+if (await count('.menu')) problems.push('点添加参考不应该先出一个选类型的菜单');
+if ((await text('.modal .modal-head h2')).join('') !== '添加参考素材') problems.push(`选素材弹窗的标题不对：${(await text('.modal .modal-head h2')).join('')}`);
 await audit('选素材弹窗');
 await must('切到真人素材', click('.modal .tabs .seg', 3));
 await sleep(900);

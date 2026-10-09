@@ -2,7 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { canLink, targetsOf, sourcesOf, linkLabel, joinPrompt, videoFormFrom, stripNodeData, nodeWidth, clipOf, pasteClip, snapTo, tidy, placeResults, groupFrame, runOrder } from '../web/src/canvas/model.ts';
+import { canLink, targetsOf, sourcesOf, linkLabel, joinPrompt, videoFormFrom, stripNodeData, nodeWidth, clipOf, pasteClip, snapTo, tidy, placeResults, groupFrame, runOrder, resolveMentions } from '../web/src/canvas/model.ts';
 import { buildRequest } from '../web/src/request.ts';
 
 const base = {
@@ -190,4 +190,17 @@ test('分组：框按成员占的范围算，四周各留 24；执行顺序是�
   const pasted = pasteClip(clip, { at: { x: 1000, y: 1000 } }, () => `n${++n}`);
   assert.deepEqual(pasted.nodes[0].data.members, ['n2', 'n3']);
   assert.deepEqual(pasted.nodes[1].position, { x: 1000, y: 1000 });
+});
+
+test('@ 引用：图片、视频换成它在这次请求里排第几个；文本换成它的内容并记下来；没连进来的原样留着', () => {
+  const inputs = [
+    { name: '文本 2', kind: 'text', text: ' 赛博朋克风格 ' },
+    { name: '图片 5', kind: 'image' },
+    { name: '视频 1', kind: 'video' },
+    { name: '图片 2', kind: 'image' },
+  ];
+  const out = resolveMentions('让@图片 2里的人走进@图片5的街道，动作参考@视频 1，整体是@文本 2。别管@图片 9', inputs);
+  assert.equal(out.prompt, '让图2里的人走进图1的街道，动作参考视频1，整体是赛博朋克风格。别管@图片 9');
+  assert.deepEqual([...out.inlined], ['文本 2']);
+  assert.deepEqual(resolveMentions('没有引用', inputs), { prompt: '没有引用', inlined: new Set() });
 });

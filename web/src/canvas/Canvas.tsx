@@ -446,6 +446,31 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
     [flow, setNodes, snap],
   );
 
+  // 把几张做好的图各变成一个图片节点，摆在来源节点的右边，columns 个一行；那里有节点就再往右让。
+  const addBeside = useCallback(
+    (sourceId: string, made: { url: string; name: string }[], columns = 1) => {
+      const source = flow.getNode(sourceId);
+      if (!source || !made.length) return;
+      const stepX = BOX_HEIGHT + 40;
+      const stepY = TITLE_ROOM + BOX_HEIGHT + 40;
+      const rows = Math.ceil(made.length / columns);
+      const taken = flow.getNodes().filter((node) => !isGroup(node) && !node.hidden);
+      let x = source.position.x + boxOf(source).width + 80;
+      const y = source.position.y;
+      const blocked = () => taken.some((node) => node.position.x < x + columns * stepX && node.position.x + boxOf(node).width + 40 > x && node.position.y < y + rows * stepY && node.position.y + TITLE_ROOM + BOX_HEIGHT + 40 > y);
+      while (blocked()) x += stepX;
+      snap();
+      const seed = { form: composer.form, image: composer.studio.image, speech: composer.studio.speech };
+      const fresh = numbered(
+        made.map((item, index) => ({ id: crypto.randomUUID(), type: 'image', position: { x: x + (index % columns) * stepX, y: y + Math.floor(index / columns) * stepY }, data: { ...newNodeData('image', seed), upload: item }, selected: index === 0 }) as Node),
+        flow.getNodes(),
+      );
+      setNodes((items) => [...items.map((node) => (node.selected ? { ...node, selected: false } : node)), ...fresh]);
+      reveal(fresh[0].position, BOX_HEIGHT);
+    },
+    [flow, reveal, setNodes, snap],
+  );
+
   // ---------- 堆叠 ----------
 
   // 把选中的节点收成一叠（至少两个）。选中的里面已经有一叠，就并进同一叠。分组的框不收。
@@ -859,7 +884,7 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
     });
   }
 
-  const actions = useMemo(() => ({ snap, addInput, ungroup, saveWorkflow, unstack }), [snap, addInput, ungroup, saveWorkflow, unstack]);
+  const actions = useMemo(() => ({ snap, addInput, ungroup, saveWorkflow, unstack, addBeside }), [snap, addInput, ungroup, saveWorkflow, unstack, addBeside]);
   const shown = useMemo(() => framed(nodes), [nodes]);
   // 每种颜色标了哪些节点。收在一叠里的不算。
   const pinned = useMemo(() => {

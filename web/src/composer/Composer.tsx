@@ -2,21 +2,22 @@
 // 状态和动作在 state.ts。
 
 import { useEffect, useLayoutEffect, useRef, type ReactNode } from 'react';
-import { state, useStore, KINDS, polishModel } from '../store.ts';
+import { state, useStore, KINDS, polishModel, goTo, loadCharacters, loadTemplates } from '../store.ts';
 import { RES_RANK } from '../request.ts';
 import { modelNote, referenceModeLabel } from '../../../shared/models.ts';
 import { Icon, type IconName } from '../ui/Icon.tsx';
 import { Segmented, Toggle, Dropdown, FormRow, tip, clipTip } from '../ui/controls.tsx';
-import { openPopover, openMenu } from '../ui/layers.tsx';
+import { openPopover, openMenu, toast } from '../ui/layers.tsx';
 import { enter, enterEach, reducedMotion, useOnChange, EASE_OUT } from '../ui/motion.ts';
 import { Thumb, openAssetPicker } from '../assets.tsx';
 import { openSettings } from '../settings.tsx';
+import { applyTemplate, saveCurrent } from '../templates.tsx';
 import type { Kind, Ref, VideoForm } from '../types.ts';
 import {
   composer, RESOLUTIONS, RATIOS, SR_RESOLUTIONS,
   typeOf, draftPrompt, isGrok, isOpenRouter, traits, availableTypes, capabilities, imageRatios, imageRefLimit, usedAssetIds, refStatus, currentRequest,
   update, setMode, swapFrames, updateSr, updateStudio, setType, typePrompt, polish, undoPolish, submit, registerPrompt,
-  voiceName, voiceNote, togglePreview, setVoiceFilter, pickVoice, stopPreview,
+  voiceName, voiceNote, togglePreview, setVoiceFilter, pickVoice, stopPreview, useCharacter,
 } from './state.ts';
 
 const SR_SCENES = [
@@ -145,23 +146,16 @@ function MediaBlock() {
     const allowed = traits().refKinds;
     const kinds = (Object.keys(KINDS) as Kind[]).filter((kind) => allowed.includes(kind) || form.refs[kind].length > 0);
     const setList = (kind: Kind, next: Ref[]) => update({ refs: { ...composer.form.refs, [kind]: next } });
-    // 三种素材共用一个「+」：先选类型，再选来源。
+    // 三种素材共用一个「+」，不用先选类型：上传的、选中的是什么就放进哪一类。
     const full = kinds.every((kind) => form.refs[kind].length >= KINDS[kind].max);
-    const addRef = (anchor: HTMLElement) =>
-      openMenu(anchor, {
-        label: '添加参考素材',
-        items: kinds.map((kind) => ({ value: kind, label: KINDS[kind].label, note: `${form.refs[kind].length} / ${KINDS[kind].max}`, disabled: form.refs[kind].length >= KINDS[kind].max || !allowed.includes(kind) })),
-        onSelect: (value) => {
-          const kind = value as Kind;
-          openAssetPicker({
-            kind,
-            remaining: KINDS[kind].max - composer.form.refs[kind].length,
-            usedIds: usedAssetIds(),
-            // OpenRouter：图片用本机的文件；视频和音频它只收公网链接，所以只留「粘贴链接」。
-            ...(isOpenRouter() ? { local: true, ...(kind === 'image' ? {} : { sources: ['url' as const] }) } : {}),
-            onPick: (ref) => setList(kind, [...composer.form.refs[kind], ref].slice(0, KINDS[kind].max)),
-          });
-        },
+    const addRef = () =>
+      openAssetPicker({
+        limits: Object.fromEntries(allowed.map((kind) => [kind, KINDS[kind].max - form.refs[kind].length])),
+        subtitle: allowed.map((kind) => `${KINDS[kind].label} ${form.refs[kind].length} / ${KINDS[kind].max}`).join(' · '),
+        usedIds: usedAssetIds(),
+        // OpenRouter：图片用本机的文件；视频和音频它只收公网链接。
+        ...(isOpenRouter() ? { local: true, fileKinds: ['image' as const] } : {}),
+        onPick: (ref) => setList(ref.kind, [...composer.form.refs[ref.kind], ref].slice(0, KINDS[ref.kind].max)),
       });
     content = (
       <div className="ref-row">
@@ -169,7 +163,7 @@ function MediaBlock() {
           form.refs[kind].map((ref, i) => <RefTile key={ref.uid} item={ref} label={`${REF_PREFIX[kind]}${i + 1}`} onRemove={() => setList(kind, composer.form.refs[kind].filter((r) => r.uid !== ref.uid))} />),
         )}
         {!full && (
-          <button className="ref-tile ref-add" type="button" aria-label="添加参考素材" aria-haspopup="menu" aria-expanded="false" onClick={(e) => addRef(e.currentTarget)}>
+          <button className="ref-tile ref-add" type="button" aria-label="添加参考素材" {...tip('添加参考素材：图片、视频、音频')} onClick={addRef}>
             <Icon name="plus" size={18} />
           </button>
         )}
@@ -526,6 +520,49 @@ function VoicePanel({ close }: { close: () => void }) {
 }
 
 // 右下角：润色（有提示词的类型才有）和发送键。发送键不能提交时变淡，鼠标停上去或点一下都会说明原因。
+// 输入框右下角的「角色」和「模板」：点开是一张清单，选中就带进输入框。清单每次点开时现读，在别的页面刚存的也在里面。
+const MANAGE = '__manage';
+const SAVE = '__save';
+
+async function pickCharacter(button: HTMLElement, type: 'image' | 'video') {
+  const list = await loadCharacters().catch(() => []);
+  const usable = list.filter((c) => c.images.length);
+  openMenu(button, {
+    label: '角色',
+    align: 'end',
+    items: [...usable.map((c) => ({ value: c.id, label: c.name, note: `${c.images.length} 张图` })), { value: MANAGE, label: usable.length ? '管理角色' : '新建角色' }],
+    onSelect: (value) => {
+      const character = usable.find((c) => c.id === value);
+      if (!character) return goTo('characters');
+      try {
+        useCharacter(character, type);
+        toast(`已带上「${character.name}」的参考图`, 'success');
+      } catch (err) {
+        toast((err as Error).message, 'error', 6000);
+      }
+    },
+  });
+}
+
+async function pickTemplate(button: HTMLElement) {
+  const list = await loadTemplates().catch(() => []);
+  openMenu(button, {
+    label: '模板',
+    align: 'end',
+    items: [
+      ...list.map((t) => ({ value: t.id, label: t.name, note: typeOf(t.type).label })),
+      ...(composer.studio.type === 'music' ? [] : [{ value: SAVE, label: '把当前内容存为模板' }]),
+      ...(list.length ? [{ value: MANAGE, label: '管理模板' }] : []),
+    ],
+    onSelect: (value) => {
+      const template = list.find((t) => t.id === value);
+      if (template) applyTemplate(template);
+      else if (value === SAVE) saveCurrent();
+      else goTo('templates');
+    },
+  });
+}
+
 function SendArea() {
   if (!state.app.hasKey) {
     return (
@@ -539,6 +576,16 @@ function SendArea() {
   const { beforePolish, polishing, submitting, submitError } = composer;
   return (
     <>
+      {(type.value === 'image' || type.value === 'video') && (
+        <button key="character" className="entry-action-btn" type="button" data-control="character" aria-haspopup="menu" aria-expanded="false" {...tip('带上角色库里一个角色的参考图')} onClick={(e) => pickCharacter(e.currentTarget, type.value as 'image' | 'video')}>
+          角色
+        </button>
+      )}
+      {type.value !== 'music' && (
+        <button key="template" className="entry-action-btn" type="button" data-control="template" aria-haspopup="menu" aria-expanded="false" {...tip('套用存好的提示词和参数')} onClick={(e) => pickTemplate(e.currentTarget)}>
+          模板
+        </button>
+      )}
       {type.polish &&
         state.catalog.polish.length > 0 &&
         (beforePolish !== null ? (

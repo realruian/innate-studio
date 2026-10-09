@@ -130,8 +130,13 @@ type Source = 'upload' | 'url' | 'library' | 'person' | 'records' | 'character';
 const SOURCE_LABELS: Record<Source, string> = { upload: '本地上传', url: '粘贴链接', library: '素材库', person: '真人素材', records: '生成记录', character: '角色' };
 
 interface PickerOptions {
-  kind: Kind;
+  // 只选一种素材时给 kind 和 remaining。几种都能选时给 limits（每种还能加几个）：不用先选类型，上传的、选中的是什么就算什么。
+  kind?: Kind;
   remaining?: number;
+  limits?: Partial<Record<Kind, number>>;
+  // 哪几种能用文件（本地上传、生成记录），不写就是全部。OpenRouter 的参考视频和音频只收公网链接，那时只有图片。
+  fileKinds?: Kind[];
+  subtitle?: string;
   usedIds?: string[];
   onPick: (ref: Ref) => void;
   // 为 true 时选的是只存在本机的素材（见 media.ts 里"只存在本机的素材"），不经过 Flatkey 的素材库。
@@ -142,15 +147,16 @@ interface PickerOptions {
 
 const isHttps = (url: string) => /^https:\/\/\S+$/i.test(url);
 
-function AssetGrid({ list, kind, used, emptyText, onPick }: { list: Asset[]; kind: Kind; used: Set<string>; emptyText: string; onPick: (asset: Asset) => void }) {
-  const usable = list.filter((a) => kindOfType(a.asset_type) === kind && a.status !== 'Deleted');
+function AssetGrid({ list, kinds, used, emptyText, onPick }: { list: Asset[]; kinds: Kind[]; used: Set<string>; emptyText: string; onPick: (asset: Asset, kind: Kind) => void }) {
+  const usable = list.filter((a) => kinds.includes(kindOfType(a.asset_type)) && a.status !== 'Deleted');
   if (!usable.length) return <div className="empty small-empty">{emptyText}</div>;
   return (
     <div className="pick-grid">
       {usable.map((asset) => {
+        const kind = kindOfType(asset.asset_type);
         const r = used.has(asset.id) ? { tone: 'ok', label: '已添加' } : assetReadiness(asset);
         return (
-          <button key={asset.id} className="pick-card" type="button" disabled={used.has(asset.id)} {...tip(asset.name || asset.id)} onClick={() => onPick(asset)}>
+          <button key={asset.id} className="pick-card" type="button" disabled={used.has(asset.id)} {...tip(asset.name || asset.id)} onClick={() => onPick(asset, kind)}>
             <div className="pick-thumb">
               <Thumb thumb={asset.thumb} kind={kind} />
             </div>
@@ -163,16 +169,18 @@ function AssetGrid({ list, kind, used, emptyText, onPick }: { list: Asset[]; kin
   );
 }
 
+const labelsOf = (kinds: Kind[]) => kinds.map((kind) => KINDS[kind].label).join('、');
+
 // 生成记录里已经存到本机的结果。选中后：本机素材直接引用这个文件；要进素材库的先传上去。
-function RecordGrid({ kind, local, onPick }: { kind: Kind; local: boolean; onPick: (ref: Ref) => void }) {
+function RecordGrid({ kinds, local, onPick }: { kinds: Kind[]; local: boolean; onPick: (ref: Ref) => void }) {
   const [busy, setBusy] = useState('');
-  const list = state.history.filter((i) => i.kind === kind && i.status === 'completed' && i.savedLocally).slice(0, 60);
-  if (!list.length) return <div className="empty small-empty">还没有生成过{KINDS[kind].label}。</div>;
+  const list = state.history.filter((i) => kinds.includes(i.kind) && i.status === 'completed' && i.savedLocally).slice(0, 60);
+  if (!list.length) return <div className="empty small-empty">还没有生成过{labelsOf(kinds)}。</div>;
 
   async function choose(item: HistoryItem) {
     setBusy(item.id);
     try {
-      onPick(local ? await refFromRecord(item) : refFromAsset(await assetFromRecord(item), kind));
+      onPick(local ? await refFromRecord(item) : refFromAsset(await assetFromRecord(item), item.kind));
     } catch (err) {
       toast(message(err), 'error', 6000);
       setBusy('');
@@ -183,7 +191,7 @@ function RecordGrid({ kind, local, onPick }: { kind: Kind; local: boolean; onPic
     <div className="pick-grid">
       {list.map((item) => (
         <button key={item.id} className="pick-card" type="button" disabled={Boolean(busy)} {...tip(item.prompt)} onClick={() => choose(item)}>
-          <div className="pick-thumb">{kind === 'video' ? <video className="thumb-img" src={item.mediaUrl} preload="metadata" muted playsInline /> : <Thumb thumb={kind === 'image' ? item.mediaUrl : null} kind={kind} />}</div>
+          <div className="pick-thumb">{item.kind === 'video' ? <video className="thumb-img" src={item.mediaUrl} preload="metadata" muted playsInline /> : <Thumb thumb={item.kind === 'image' ? item.mediaUrl : null} kind={item.kind} />}</div>
           <div className="pick-name ellipsis">{recordName(item)}</div>
           <span className="badge badge-pending">{busy === item.id ? (local ? '读取中' : '上传中') : fmtTime(item.createdAt)}</span>
         </button>
@@ -215,7 +223,7 @@ function CharacterGrid({ remaining, onPick }: { remaining: number; onPick: (refs
   );
 }
 
-function PersonAssets({ kind, used, onPick }: { kind: Kind; used: Set<string>; onPick: (asset: Asset) => void }) {
+function PersonAssets({ kinds, used, onPick }: { kinds: Kind[]; used: Set<string>; onPick: (asset: Asset, kind: Kind) => void }) {
   useStore('persons', 'assets');
   const [chosen, setChosen] = useState('');
   const [error, setError] = useState('');
@@ -253,19 +261,31 @@ function PersonAssets({ kind, used, onPick }: { kind: Kind; used: Set<string>; o
         ) : !list ? (
           <div className="empty small-empty">正在读取素材…</div>
         ) : (
-          <AssetGrid list={list} kind={kind} used={used} emptyText={`这个档案下还没有${KINDS[kind].label}素材。`} onPick={onPick} />
+          <AssetGrid list={list} kinds={kinds} used={used} emptyText={`这个档案下还没有${labelsOf(kinds)}素材。`} onPick={onPick} />
         )}
       </div>
     </>
   );
 }
 
-function UrlSource({ kind, local, onPick }: { kind: Kind; local: boolean; onPick: (ref: Ref) => void }) {
+// 链接看不出是什么类型时按图片算；后缀认得出来就自动换过去，认不出来可以自己选。
+const URL_KINDS: [Kind, RegExp][] = [
+  ['video', /\.(mp4|mov|webm|m4v)([?#]|$)/i],
+  ['audio', /\.(mp3|wav|m4a|aac|ogg|flac)([?#]|$)/i],
+  ['image', /\.(jpe?g|png|webp|gif|avif)([?#]|$)/i],
+];
+
+function UrlSource({ kinds, local, onPick }: { kinds: Kind[]; local: boolean; onPick: (ref: Ref) => void }) {
   const input = useRef<HTMLInputElement>(null);
+  const [kind, setKind] = useState(kinds[0]);
   useEffect(() => {
     const timer = setTimeout(() => input.current?.focus(), 0);
     return () => clearTimeout(timer);
   }, []);
+  const guess = (url: string) => {
+    const found = URL_KINDS.find(([, pattern]) => pattern.test(url))?.[0];
+    if (found && kinds.includes(found)) setKind(found);
+  };
   const submit = () => {
     const url = input.current!.value.trim();
     if (!isHttps(url)) return toast('请填写 https:// 开头的公网地址', 'error');
@@ -279,32 +299,51 @@ function UrlSource({ kind, local, onPick }: { kind: Kind; local: boolean; onPick
   };
   return (
     <>
-      <label className="field-label">{KINDS[kind].label}地址</label>
+      <label className="field-label">{kinds.length > 1 ? '素材' : KINDS[kind].label}地址</label>
       <div className="row">
-        <input ref={input} className="input" type="url" placeholder="https://example.com/reference.png" autoComplete="off" onKeyDown={(e) => e.key === 'Enter' && submit()} />
+        <input ref={input} className="input" type="url" placeholder="https://example.com/reference.png" autoComplete="off" onInput={(e) => guess(e.currentTarget.value.trim())} onKeyDown={(e) => e.key === 'Enter' && submit()} />
         <button className="btn btn-primary" onClick={submit}>
           添加
         </button>
       </div>
+      {kinds.length > 1 && (
+        <div className="row">
+          <span className="muted small">这是一份</span>
+          <Segmented options={kinds.map((value) => ({ value, label: KINDS[value].label }))} value={kind} onChange={setKind} />
+        </div>
+      )}
       <p className="muted small">{local ? '链接会原样发给模型，需要是公网能直接访问的 https 地址。' : '链接会原样发给 Seedance，需要是公网能直接访问的 https 地址。想反复使用，可以到「素材库」里用链接创建素材。'}</p>
     </>
   );
 }
 
-function AssetPicker({ kind, remaining = 1, usedIds = [], onPick, local = false, sources, close }: PickerOptions & { sources: Source[]; close: () => void }) {
+function AssetPicker({ kind, remaining = 1, limits, fileKinds, usedIds = [], onPick, local = false, sources, close }: PickerOptions & { sources: Source[]; close: () => void }) {
   useStore('assets');
   const [tab, setTab] = useState(sources[0]);
-  const left = useRef(remaining);
+  // 每种素材还能加几个。选一个少一个。
+  const left = useRef<Partial<Record<Kind, number>>>(limits ?? { [kind!]: remaining }).current;
+  const open = (k: Kind) => (left[k] || 0) > 0;
+  const kinds = (Object.keys(KINDS) as Kind[]).filter(open);
+  const files = kinds.filter((k) => !fileKinds || fileKinds.includes(k));
+  const room = files.reduce((sum, k) => sum + left[k]!, 0);
   const used = useRef(new Set(usedIds)).current;
   const pick = (ref: Ref) => {
     onPick(ref);
-    left.current -= 1;
+    left[ref.kind] = (left[ref.kind] || 0) - 1;
   };
   const pickAndClose = (ref: Ref) => {
     pick(ref);
     close();
   };
-  const pickAsset = (asset: Asset) => pickAndClose(refFromAsset(asset, kind));
+  const pickAsset = (asset: Asset, k: Kind) => pickAndClose(refFromAsset(asset, k));
+  // 上传的文件是什么类型就算什么。这次不能用文件的类型、已经加满的类型，在那一行说明原因。
+  const upload = async (file: File, k: Kind, onProgress: Progress): Promise<Ref | Asset> => {
+    if (!(k in left)) throw new Error(`这里用不了${KINDS[k].label}`);
+    if (!open(k)) throw new Error(`${KINDS[k].label}已经加满了`);
+    if (!files.includes(k)) throw new Error(`${KINDS[k].label}要用公网链接，请切到「粘贴链接」添加`);
+    return local ? uploadLocalFile(file, k, onProgress) : uploadVirtualAsset(file, k, onProgress);
+  };
+  const several = Object.keys(left).length > 1;
 
   return (
     <>
@@ -314,21 +353,27 @@ function AssetPicker({ kind, remaining = 1, usedIds = [], onPick, local = false,
       <div className="tab-pane">
         {tab === 'upload' && (
           <UploadPane<Ref | Asset>
-            kind={kind}
-            limit={left.current}
-            upload={local ? uploadLocalFile : uploadVirtualAsset}
-            onUploaded={(result) => pick(local ? (result as Ref) : refFromAsset(result as Asset, kind))}
+            kind={several ? null : kinds[0] || kind || null}
+            limit={room}
+            upload={upload}
+            onUploaded={(result, k) => pick(local ? (result as Ref) : refFromAsset(result as Asset, k))}
             onAllDone={close}
-            note={local ? '文件只保存在这台电脑上' : `文件会先上传到你的 Flatkey 素材库，处理完成后才能用于生成${left.current > 1 ? `；最多还能添加 ${left.current} 个` : ''}`}
+            note={
+              local
+                ? several && fileKinds
+                  ? `这里可以传${labelsOf(fileKinds)}，文件只保存在这台电脑上。其他类型要用公网链接，请切到「粘贴链接」`
+                  : '文件只保存在这台电脑上'
+                : `文件会先上传到你的 Flatkey 素材库，处理完成后才能用于生成${room > 1 ? `；最多还能添加 ${room} 个` : ''}`
+            }
           />
         )}
-        {tab === 'url' && <UrlSource kind={kind} local={local} onPick={pickAndClose} />}
-        {tab === 'library' && <AssetGrid list={state.assets} kind={kind} used={used} emptyText={`素材库里还没有${KINDS[kind].label}素材。可以切到「本地上传」添加。`} onPick={pickAsset} />}
-        {tab === 'records' && <RecordGrid kind={kind} local={local} onPick={pickAndClose} />}
-        {tab === 'person' && <PersonAssets kind={kind} used={used} onPick={pickAsset} />}
+        {tab === 'url' && <UrlSource kinds={kinds} local={local} onPick={pickAndClose} />}
+        {tab === 'library' && <AssetGrid list={state.assets} kinds={kinds} used={used} emptyText={`素材库里还没有${labelsOf(kinds)}素材。可以切到「本地上传」添加。`} onPick={pickAsset} />}
+        {tab === 'records' && <RecordGrid kinds={files} local={local} onPick={pickAndClose} />}
+        {tab === 'person' && <PersonAssets kinds={kinds} used={used} onPick={pickAsset} />}
         {tab === 'character' && (
           <CharacterGrid
-            remaining={left.current}
+            remaining={left.image || 0}
             onPick={(refs) => {
               refs.forEach(pick);
               close();
@@ -341,11 +386,11 @@ function AssetPicker({ kind, remaining = 1, usedIds = [], onPick, local = false,
 }
 
 export function openAssetPicker(options: PickerOptions) {
+  const kinds = options.limits ? (Object.keys(options.limits) as Kind[]) : [options.kind!];
   // 角色的参考图是本机的图片，所以只在选本机图片时出现。
-  const sources: Source[] = options.sources ?? (options.local ? ['upload', 'url', 'records', ...(options.kind === 'image' ? (['character'] as const) : [])] : ['upload', 'url', 'library', 'person', 'records']);
-  const modal = openModal({ title: `添加${KINDS[options.kind].label}`, size: 'md', content: <AssetPicker {...options} sources={sources} close={() => modal.close()} /> });
+  const sources: Source[] = options.sources ?? (options.local ? ['upload', 'url', 'records', ...(kinds.includes('image') ? (['character'] as const) : [])] : ['upload', 'url', 'library', 'person', 'records']);
+  const modal = openModal({ title: kinds.length > 1 ? '添加参考素材' : `添加${KINDS[kinds[0]].label}`, subtitle: options.subtitle, size: 'md', content: <AssetPicker {...options} sources={sources} close={() => modal.close()} /> });
 }
-
 // ---------- 素材库页面 ----------
 
 const KIND_OPTIONS = (Object.keys(KINDS) as Kind[]).map((value) => ({ value, label: KINDS[value].label }));

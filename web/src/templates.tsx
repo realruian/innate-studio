@@ -69,13 +69,13 @@ export function openSaveTemplate({ type, form, cover = null }: { type: TemplateT
 }
 
 // 把创作面板里正在编辑的内容存成模板。配乐没有提示词和参数，存不了。
-function saveCurrent() {
+export function saveCurrent() {
   const { type } = composer.studio;
   if (type === 'music') return toast('配乐没有可以存的参数，换到别的类型再存', 'info');
   openSaveTemplate({ type, form: type === 'video' ? composer.form : composer.studio[type] });
 }
 
-function apply(template: Template) {
+export function applyTemplate(template: Template) {
   if (template.type === 'video') setForm(template.form);
   else setStudio(template.type, template.form);
   goTo('create');
@@ -153,7 +153,7 @@ export function Templates() {
         {shown.map((template) => (
           <article key={template.id} className="project">
             <div className="project-media">
-              <button className="project-cover" type="button" aria-label={`套用「${template.name}」`} {...tip(template.form?.prompt)} onClick={() => apply(template)}>
+              <button className="project-cover" type="button" aria-label={`套用「${template.name}」`} {...tip(template.form?.prompt)} onClick={() => applyTemplate(template)}>
                 {template.cover ? <img src={template.cover} alt="" loading="lazy" draggable={false} /> : <Icon name={TYPE_ICONS[template.type]} size={32} stroke={1.2} />}
               </button>
               <button className="project-more" type="button" {...tip('更多')} aria-label="更多操作" aria-haspopup="menu" aria-expanded="false" onClick={(e) => more(e.currentTarget, template)}>

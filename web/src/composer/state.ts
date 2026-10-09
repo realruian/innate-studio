@@ -335,21 +335,23 @@ export async function useImageForVideo(item: HistoryItem) {
 // 把角色的参考图变成一组本机的参考素材。
 export const refsFromCharacter = (character: Character): Ref[] => character.images.map((url) => ({ uid: crypto.randomUUID(), kind: 'image', source: 'local', url, name: character.name, thumb: url }));
 
-// 拿一个角色去生成图片或视频：把它的参考图放进输入框；提示词空着的话，先填上角色的描述。
+// 拿一个角色去生成图片或视频：把它的参考图加进输入框，已经加好的素材留着；提示词空着的话，先填上角色的描述。
 // 图片：当参考图（图生图），当前模型不收参考图就换成第一个收的。
 // 视频：OpenRouter 上当参考图；Flatkey 上的 Grok 只能给一张首帧；Flatkey 上的 Seedance 只认素材库，本机的图用不了。
 export function useCharacter(character: Character, type: 'image' | 'video') {
   const refs = refsFromCharacter(character);
   if (!refs.length) throw new Error('这个角色还没有参考图，先给它加一张');
   const { form, studio } = composer;
+  // 角色的图排在已有参考图的后面，同一张不重复加。
+  const merged = (current: Ref[]) => [...current, ...refs.filter((ref) => !current.some((r) => r.url === ref.url))];
   if (type === 'image') {
     const model = [studio.image.model, ...state.catalog.image].find((id) => imageRefLimit(id) > 0);
     if (!model) throw new Error(isOpenRouter() ? '账号里没有能带参考图的图片模型' : '带参考图生成图片只在 OpenRouter 上可用');
-    Object.assign(studio.image, { model, refs: refs.slice(0, imageRefLimit(model)) });
+    Object.assign(studio.image, { model, refs: merged(studio.image.refs || []).slice(0, imageRefLimit(model)) });
     if (!studio.image.prompt.trim()) studio.image.prompt = character.description;
     fitImage();
   } else {
-    if (isOpenRouter()) Object.assign(form, { mode: 'reference', refs: { image: refs.slice(0, KINDS.image.max), video: [], audio: [] } });
+    if (isOpenRouter()) Object.assign(form, { mode: 'reference', refs: { ...form.refs, image: merged(form.refs.image).slice(0, KINDS.image.max) } });
     else if (isGrok()) Object.assign(form, { mode: 'frames', frames: { first: refs[0], last: null } });
     else throw new Error('Flatkey 上的 Seedance 只认素材库里的素材，角色的图用不了。换到 OpenRouter，或者换成 Grok 的视频模型');
     if (!form.prompt.trim()) form.prompt = character.description;
