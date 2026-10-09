@@ -93,7 +93,8 @@ export interface DropdownOption {
 
 // 下拉选择器：按钮上显示当前值，点开是自绘的菜单。
 // variant：'tool' 是输入框工具栏里的（图标加文字，无边框）；'field' 是表单里带边框的。
-export function Dropdown({ label, value, options, onChange, variant = 'field', icon, control }: { label: string; value: string; options: DropdownOption[]; onChange: (value: string) => void; variant?: 'field' | 'tool'; icon?: IconName; control?: string }) {
+// chevron：工具栏里的下拉默认不带箭头，画布的输入面板里要带。
+export function Dropdown({ label, value, options, onChange, variant = 'field', icon, control, chevron }: { label: string; value: string; options: DropdownOption[]; onChange: (value: string) => void; variant?: 'field' | 'tool'; icon?: IconName; control?: string; chevron?: boolean }) {
   const ref = useRef<HTMLButtonElement>(null);
   const current = options.find((o) => String(o.value) === String(value)) || options[0];
   const tool = variant === 'tool';
@@ -113,7 +114,7 @@ export function Dropdown({ label, value, options, onChange, variant = 'field', i
         {current.display || current.label}
         {!tool && current.note && <span className="dropdown-note">{current.note}</span>}
       </span>
-      {!tool && <Icon name="chevron" size={12} />}
+      {(!tool || chevron) && <Icon name="chevron" size={12} />}
     </button>
   );
 }

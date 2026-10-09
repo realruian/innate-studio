@@ -698,16 +698,20 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 /* 在鼠标位置弹菜单时用的定位点，看不见 */
 .canvas-anchor { position: fixed; width: 0; height: 0; pointer-events: none; }
 
-/* 节点：上面一行名字，下面一个框放内容。所有节点的框一样高，宽度由内容的比例定（写在节点上）。框的底色和输入框一样，选中时边线变亮 */
+/* 节点：上面一行名字，下面一个框放内容。所有节点的框一样高，宽度由内容的比例定（写在节点上）。框没有描边，靠底色从画布上分出来；选中时框外隔开一点再套一圈线 */
 .cnode { position: relative; display: flex; flex-direction: column; gap: var(--sp-8); }
-/* 名字在屏幕上大小不变：以左下角为准把画布的缩放抵消掉 */
-.cnode-title { display: flex; align-items: center; align-self: flex-start; gap: var(--sp-4); padding: 0 var(--sp-2); color: var(--text-3); font-size: var(--text-caption); line-height: var(--lh-snug); white-space: nowrap; cursor: grab; transform-origin: left bottom; scale: var(--inv, 1); translate: 0 calc(var(--sp-8) * (1 - var(--inv, 1))); }
-.cnode-box { display: grid; height: 240px; overflow: hidden; background: var(--surface-1); border: 1px solid var(--border-float); border-radius: var(--r-md); }
-@media (hover: hover) { .cnode:hover .cnode-box { border-color: var(--border-strong); } }
-.cnode.selected .cnode-box { border-color: var(--text-2); }
-/* 选中后浮在节点上方的一小条操作：上传、看详情、删除 */
-.cnode-tools { display: flex; gap: var(--sp-2); padding: var(--sp-4); background: var(--surface-float); border: 1px solid var(--border-float); border-radius: var(--r-md); box-shadow: var(--shadow-float); animation: cnode-drop 200ms var(--ease-out); }
-.cnode-btn { display: grid; place-items: center; flex: none; width: var(--h-sm); height: var(--h-sm); padding: 0; border: 0; border-radius: var(--r-xs); background: none; color: var(--text-2); cursor: pointer; transition: background-color 120ms var(--ease), color 120ms var(--ease); }
+/* 名字那一行在屏幕上大小不变：以左下角为准把画布的缩放抵消掉。它占的位置固定是 16 高加 8 的空隙（TITLE_ROOM），实际离框 12 像素（屏幕上）。
+   宽度先乘上缩放，抵消之后正好和框一样宽，右端的操作才对得齐框的右边。 */
+.cnode-title { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-8); width: calc(100% * var(--zoom, 1)); height: var(--sp-16); padding: 0 var(--sp-2); color: var(--text-3); font-size: var(--text-ui); line-height: var(--lh-snug); white-space: nowrap; cursor: grab; transform-origin: left bottom; scale: var(--inv, 1); translate: 0 calc(var(--sp-8) - var(--sp-12) * var(--inv, 1)); }
+.cnode-name { display: flex; align-items: center; gap: var(--sp-4); min-width: 0; }
+.cnode-acts { display: flex; align-items: center; gap: var(--sp-2); flex: none; cursor: default; animation: fade 160ms var(--ease-out); }
+.cnode-box { display: grid; height: 240px; overflow: hidden; background: var(--surface-1); border-radius: var(--r-lg); box-shadow: 0 0 0 1px var(--border); outline: calc(1.5px * var(--inv, 1)) solid transparent; outline-offset: calc(3px * var(--inv, 1)); }
+@media (hover: hover) { .cnode:not(.selected):hover .cnode-box { box-shadow: 0 0 0 1px var(--border-strong); } }
+/* 选中：框外隔 3 像素套一圈 1.5 像素的线，粗细和间隔在屏幕上不变 */
+.cnode.selected .cnode-box { outline-color: var(--text-2); }
+/* 名字行右端的小按钮：上传、看详情 */
+
+.cnode-btn { display: grid; place-items: center; flex: none; width: 24px; height: 24px; padding: 0; border: 0; border-radius: var(--r-xs); background: none; color: var(--text-3); cursor: pointer; transition: background-color 120ms var(--ease), color 120ms var(--ease); }
 @media (hover: hover) { .cnode-btn:hover { background: var(--hover); color: var(--text); } }
 /* 框里的内容都铺满这个框：图片、视频完整显示，音频是一行播放条 */
 /* 框的宽度是按内容的实际比例算的，四舍五入会差出一两个像素，所以内容用铺满的方式放，边上不留缝 */
@@ -737,6 +741,7 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 button.cnode-ref { cursor: pointer; transition: border-color 120ms var(--ease), color 120ms var(--ease); }
 @media (hover: hover) { button.cnode-ref:hover { border-color: var(--border-hover); color: var(--text); } }
 button.cnode-ref[aria-expanded='true'] { border-color: var(--text-3); }
+.cnode-ref.is-text { border-color: transparent; background: color-mix(in srgb, var(--accent) 14%, var(--surface-2)); color: var(--accent); }
 .cnode-ref-tag { position: absolute; left: 0; right: 0; bottom: 0; padding: var(--sp-2) 0; background: rgba(0, 0, 0, 0.55); color: #fff; font-size: var(--text-micro); line-height: 1; text-align: center; }
 .cnode-prompt { display: block; width: 100%; min-height: 104px; max-height: 280px; padding: var(--sp-20) var(--sp-20) var(--sp-8); border: 0; outline: 0; background: transparent; color: var(--text); font-size: var(--text-body); line-height: var(--lh-body); resize: none; field-sizing: content; cursor: text; }
 .cnode-prompt::placeholder { color: var(--text-3); }
@@ -744,6 +749,15 @@ button.cnode-ref[aria-expanded='true'] { border-color: var(--text-3); }
 .cnode-bar { display: flex; align-items: center; gap: var(--sp-8); padding: var(--sp-8) var(--sp-12) var(--sp-12); }
 .cnode-bar .send-btn { width: 36px; height: 36px; }
 .cnode-params { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); flex: 1; min-width: 0; }
+/* 合成一项的参数：几个值之间用小圆点隔开 */
+.cnode-param .dropdown-value { gap: 0; }
+.cnode-param .dropdown-value > span + span::before { content: "·"; margin: 0 var(--sp-8); color: var(--text-off); }
+.cnode-bar .dropdown-tool > .icon:last-child { color: var(--text-3); }
+.cnode-sheet { gap: var(--sp-12); width: 300px; padding: var(--sp-4); }
+.cnode-opts { display: flex; flex-wrap: wrap; gap: var(--sp-4); }
+.cnode-opt { height: var(--h-sm); padding: 0 var(--sp-12); border: 0; border-radius: var(--r-xs); background: var(--surface-2); color: var(--text-2); font-size: var(--text-ui); font-variant-numeric: tabular-nums; cursor: pointer; transition: background-color 120ms var(--ease), color 120ms var(--ease); }
+@media (hover: hover) { .cnode-opt:hover { color: var(--text); } }
+.cnode-opt.active { background: var(--text); color: var(--bg); }
 .cnode-note { padding: 0 var(--sp-8); color: var(--text-3); font-size: var(--text-caption); }
 
 /* 连线：一条细线，不带标签。两头的节点有一个被选中，或者线自己被选中时变亮 */
@@ -759,16 +773,16 @@ button.cnode-ref[aria-expanded='true'] { border-color: var(--text-3); }
 .cnode { animation: cnode-in 220ms var(--ease-out); }
 @keyframes cnode-in { from { opacity: 0; scale: 0.96; } }
 @keyframes cnode-rise { from { opacity: 0; translate: 0 8px; } }
-@keyframes cnode-drop { from { opacity: 0; translate: 0 -6px; } }
+
 /* 拖着节点走的时候它浮起来一点 */
-.cnode-box { position: relative; transition: border-color 120ms var(--ease), translate 200ms var(--ease-out), box-shadow 200ms var(--ease-out), opacity 160ms var(--ease); }
+.cnode-box { position: relative; transition: outline-color 120ms var(--ease), translate 200ms var(--ease-out), box-shadow 200ms var(--ease-out), opacity 160ms var(--ease); }
 .react-flow__node.dragging .cnode-box { box-shadow: var(--shadow-lift); }
 /* 拉线的时候：接不住这条线的节点暗下去；线拖到接得住的节点上，那个节点浮起来、边线变亮，松手就连上 */
 .cnode.is-dimmed .cnode-box, .cnode.is-dimmed .cnode-title { opacity: 0.4; }
 .cnode-title { transition: opacity 160ms var(--ease); }
 /* 落点盖住整个框，看不见，只在拉线时才有 */
-.canvas .react-flow__handle.cnode-drop { top: auto; bottom: 0; left: 0; right: auto; width: 100%; height: 240px; min-width: 0; min-height: 0; border: 0; border-radius: var(--r-md); background: none; transform: none; opacity: 0; }
-.cnode:has(.cnode-drop.valid) .cnode-box { translate: 0 -6px; border-color: var(--text-2); box-shadow: var(--shadow-lift); }
+.canvas .react-flow__handle.cnode-drop { top: auto; bottom: 0; left: 0; right: auto; width: 100%; height: 240px; min-width: 0; min-height: 0; border: 0; border-radius: var(--r-lg); background: none; transform: none; opacity: 0; }
+.cnode:has(.cnode-drop.valid) .cnode-box { translate: 0 -6px; outline-color: var(--text-2); box-shadow: var(--shadow-lift); }
 /* 拖动节点时的对齐参考线：画在画布坐标里，线宽和虚线的疏密不跟着缩放变。 */
 .canvas-guides { position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: visible; pointer-events: none; }
 .canvas-guides line { stroke: var(--accent); stroke-width: 1; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; }

@@ -8,6 +8,8 @@ export type FrameRole = 'reference' | 'first' | 'last';
 
 // 文本节点：text 是节点里的内容，可以自己写，也可以让文本模型写；prompt 是给模型的要求，model 是用哪个文本模型。
 export interface TextData {
+  // 名字后面的编号。
+  no?: number;
   text: string;
   prompt?: string;
   model?: string;
@@ -18,6 +20,8 @@ export interface TextData {
 // assetId 是生成的结果或上传的文件传进素材库之后的素材，assetOf 记着传的是哪个文件。
 // busy、error 只在页面打开期间有，不存进画布。
 export interface Generated {
+  // 名字后面的编号。
+  no?: number;
   recordId?: string;
   upload?: { url: string; name: string };
   asset?: Ref;
@@ -288,6 +292,21 @@ export function tidy(nodes: { id: string; position: { x: number; y: number }; wi
     x += byId.get(id)!.width + LOOSE_GAP;
   });
   return placed;
+}
+
+// ---------- 节点的编号 ----------
+
+// 节点的名字带编号（图片 1、图片 2），每种节点各排各的。编号定下来就不变，删掉前面的也不往前补。
+// 这里给还没有编号的节点排上号，接在这一种已有的最大编号后面。
+export function numbered<T extends { type?: string; data: Record<string, unknown> }>(nodes: T[], existing: { type?: string; data: Record<string, unknown> }[] = []): T[] {
+  const last = new Map<string, number>();
+  for (const node of [...existing, ...nodes]) last.set(node.type || '', Math.max(last.get(node.type || '') || 0, Number(node.data.no) || 0));
+  return nodes.map((node) => {
+    if (Number(node.data.no) > 0) return node;
+    const no = (last.get(node.type || '') || 0) + 1;
+    last.set(node.type || '', no);
+    return { ...node, data: { ...node.data, no } };
+  });
 }
 
 // ---------- 复制、粘贴 ----------

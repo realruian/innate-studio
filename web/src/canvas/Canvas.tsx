@@ -12,7 +12,7 @@ import { tip } from '../ui/controls.tsx';
 import { openMenu, toast } from '../ui/layers.tsx';
 import { reducedMotion } from '../ui/motion.ts';
 import type { Kind } from '../types.ts';
-import { BOX_HEIGHT, NODE_LABELS, TITLE_ROOM, canLink, clipOf, nodeWidth, pasteClip, snapTo, sourcesOf, stripNodeData, targetsOf, tidy, type Clip, type Guide, type LinkData, type NodeKind, type Rect } from './model.ts';
+import { BOX_HEIGHT, NODE_LABELS, TITLE_ROOM, canLink, clipOf, nodeWidth, numbered, pasteClip, snapTo, sourcesOf, stripNodeData, targetsOf, tidy, type Clip, type Guide, type LinkData, type NodeKind, type Rect } from './model.ts';
 import { coverOf, newNodeData } from './run.ts';
 import { AudioNode, CanvasActions, DragLine, ImageNode, LinkEdge, NODE_ICONS, TextNode, VideoNode } from './nodes.tsx';
 
@@ -106,7 +106,8 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
     started.current = true;
     api<Doc>('GET', `/api/canvases/${id}`)
       .then((doc) => {
-        setNodes(doc.nodes || []);
+        // 以前存的节点没有编号，打开时补上。
+        setNodes(numbered(doc.nodes || []));
         setEdges((doc.edges || []).map((edge) => ({ ...edge, type: 'link' })));
         setName(doc.name);
         setReady(true);
@@ -231,7 +232,7 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
           }
         }
       }
-      const node: Node = { id: crypto.randomUUID(), type: kind, position, data, selected: true };
+      const [node] = numbered([{ id: crypto.randomUUID(), type: kind, position, data, selected: true } as Node], flow.getNodes());
       setNodes((items) => [...items.map((n) => (n.selected ? { ...n, selected: false } : n)), node]);
       reveal(position, width);
       if (link?.from) setEdges((items) => [...items, makeEdge(link.from!, node)]);
@@ -340,11 +341,13 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
     (clip: Clip, where: { at?: { x: number; y: number }; by?: { x: number; y: number } }) => {
       if (!clip.nodes.length) return;
       snap();
-      const fresh = pasteClip(clip, where, () => crypto.randomUUID());
+      // 粘贴出来的是新节点，编号重新排。
+      const pasted = pasteClip(clip, where, () => crypto.randomUUID());
+      const fresh = { edges: pasted.edges, nodes: numbered(pasted.nodes.map((node) => ({ ...node, data: { ...node.data, no: undefined } })), flow.getNodes()) };
       setNodes((items) => [...items.map((n) => (n.selected ? { ...n, selected: false } : n)), ...fresh.nodes.map((node) => ({ ...node, selected: true }) as Node)]);
       setEdges((items) => [...items.map((e) => (e.selected ? { ...e, selected: false } : e)), ...fresh.edges.map((edge) => ({ ...edge, type: 'link' }) as Edge)]);
     },
-    [setEdges, setNodes, snap],
+    [flow, setEdges, setNodes, snap],
   );
 
   // 粘贴落在鼠标的位置；鼠标不在画布上就落在视野中间。
@@ -557,7 +560,7 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
         ref={wrap}
         className="canvas"
         // 节点的名字和加号要在屏幕上保持大小不变，样式里用这个倒数把画布的缩放抵消掉。
-        style={{ '--inv': 1 / zoom } as CSSProperties}
+        style={{ '--inv': 1 / zoom, '--zoom': zoom } as CSSProperties}
         onDoubleClick={(e) => (e.target as Element).classList.contains('react-flow__pane') && menuAt(e.clientX, e.clientY, KINDS)}
         onClick={(e) => {
           // 直接点一下加号（没有拖动）：菜单出在加号外侧。

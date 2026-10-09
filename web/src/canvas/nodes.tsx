@@ -12,11 +12,11 @@ import { kindOfFile, uploadLocalFile } from '../media.ts';
 import { openAssetPicker } from '../assets.tsx';
 import { Icon, type IconName } from '../ui/Icon.tsx';
 import { Dropdown, tip } from '../ui/controls.tsx';
-import { openMenu, toast } from '../ui/layers.tsx';
+import { openMenu, openPopover, toast } from '../ui/layers.tsx';
 import { VideoPlayer, AudioPlayer } from '../player.tsx';
 import { openDetail } from '../history.tsx';
 import type { Kind } from '../types.ts';
-import { BOX_HEIGHT, NODE_LABELS, ROLE_LABELS, TITLE_ROOM, canLink, nodeWidth, joinPrompt, linkLabel, type AudioData, type FrameRole, type ImageData, type LinkData, type NodeKind, type TextData, type VideoData } from './model.ts';
+import { BOX_HEIGHT, NODE_LABELS, ROLE_LABELS, canLink, nodeWidth, joinPrompt, linkLabel, type AudioData, type FrameRole, type ImageData, type LinkData, type NodeKind, type TextData, type VideoData } from './model.ts';
 import { fitVideo, generate, outputOf, recordOf } from './run.ts';
 
 // 画布页交给节点用的几件事。snap：会改动画布结构的操作，动手之前调一下，撤销时回到这一刻。
@@ -40,11 +40,8 @@ function useAlone(selected?: boolean) {
   return Boolean(selected) && count === 1;
 }
 
-function Frame({ id, kind, selected, width, tools, panel, children }: { id: string; kind: NodeKind; selected?: boolean; width: number; tools?: ReactNode; panel: ReactNode; children: ReactNode }) {
-  const flow = useReactFlow();
+function Frame({ id, kind, no, selected, width, tools, panel, children }: { id: string; kind: NodeKind; no?: number; selected?: boolean; width: number; tools?: ReactNode; panel: ReactNode; children: ReactNode }) {
   const alone = useAlone(selected);
-  // 名字那一行在屏幕上高度不变，节点给它留的位置却跟着缩放变。操作条按屏幕上的高度让开，缩小时才不会压住名字。
-  const zoom = useFlowStore((s) => s.transform[2]);
   // 正从别的节点拉一条线过来：这个节点接得住，就把整个框变成落点，不用对准小加号；接不住就暗下去。
   // 从右边的加号拉出来的线要找下游，从左边的加号拉出来的要找上游。
   const link = useConnection();
@@ -56,18 +53,13 @@ function Frame({ id, kind, selected, width, tools, panel, children }: { id: stri
   useEffect(() => remeasure(id), [fits, wants]);
   return (
     <div className={`cnode cnode-${kind} ${selected ? 'selected' : ''} ${other && !fits ? 'is-dimmed' : ''}`} style={{ width }}>
-      {/* 操作条和输入面板画在画布的缩放之外，所以大小不变；位置仍然贴着节点。 */}
-      <NodeToolbar isVisible={alone} position={Position.Top} offset={8 + TITLE_ROOM * (1 - zoom)}>
-        <div className="cnode-tools">
-          {tools}
-          <button className="cnode-btn" type="button" {...tip('删除节点')} aria-label="删除节点" onClick={() => flow.deleteElements({ nodes: [{ id }] })}>
-            <Icon name="trash" />
-          </button>
-        </div>
-      </NodeToolbar>
+      {/* 名字在左，只选中这一个节点时右端是它的几个操作（上传、看详情）。删除用键盘或右键菜单。 */}
       <div className="cnode-title">
-        <Icon name={NODE_ICONS[kind]} size={14} />
-        <span>{NODE_LABELS[kind]}</span>
+        <span className="cnode-name">
+          <Icon name={NODE_ICONS[kind]} size={14} />
+          <span>{no ? `${NODE_LABELS[kind]} ${no}` : NODE_LABELS[kind]}</span>
+        </span>
+        {alone && tools && <span className="cnode-acts nodrag">{tools}</span>}
       </div>
       <div className="cnode-box">{children}</div>
       <Handle type="target" position={Position.Left} className="cnode-port">
@@ -77,7 +69,8 @@ function Frame({ id, kind, selected, width, tools, panel, children }: { id: stri
         <Icon name="plus" size={12} />
       </Handle>
       {fits && <Handle id="body" type={wants} position={wants === 'target' ? Position.Left : Position.Right} className="cnode-drop" isConnectableStart={false} />}
-      <NodeToolbar isVisible={alone} position={Position.Bottom} offset={12}>
+      {/* 输入面板画在画布的缩放之外，所以大小不变；位置仍然贴着节点。 */}
+      <NodeToolbar isVisible={alone} position={Position.Bottom} offset={20}>
         <div className="cnode-panel nowheel">{panel}</div>
       </NodeToolbar>
     </div>
@@ -95,20 +88,102 @@ function useInputs(id: string) {
   return found;
 }
 
-function Prompt({ id, value, placeholder }: { id: string; value: string; placeholder: string }) {
-  const flow = useReactFlow();
-  return <textarea className="cnode-prompt" value={value} placeholder={placeholder} onChange={(e) => flow.updateNodeData(id, { prompt: e.target.value })} />;
+// 输入框自己留一份正在打的字，再抄一份给节点。
+// 不能直接拿节点里存的字当输入框的内容：节点的数据要过一拍才更新，这一拍里 React 会把输入框改回旧的内容，
+// 输入法正在拼的那段就被打断了，结果是候选框出不来、只能打上英文字母。
+// 光标在输入框里的时候不从节点往回抄，免得把正在打的字冲掉；不在的时候跟着节点走（比如模型写好了新内容）。
+function useDraft(value: string, commit: (next: string) => void) {
+  const [draft, setDraft] = useState(value);
+  const focused = useRef(false);
+  useEffect(() => {
+    if (!focused.current) setDraft(value);
+  }, [value]);
+  return {
+    value: draft,
+    onChange: (e: { target: { value: string } }) => {
+      setDraft(e.target.value);
+      commit(e.target.value);
+    },
+    onFocus: () => {
+      focused.current = true;
+    },
+    onBlur: () => {
+      focused.current = false;
+    },
+  };
 }
 
-// 输入面板最下面一行：左边是模型和参数，右边是生成键。
-function Bar({ working, action, onSend, children }: { working: boolean; action: string; onSend: () => void; children: ReactNode }) {
+function Prompt({ id, value, placeholder }: { id: string; value: string; placeholder: string }) {
+  const flow = useReactFlow();
+  const draft = useDraft(value, (prompt) => flow.updateNodeData(id, { prompt }));
+  return <textarea className="cnode-prompt" placeholder={placeholder} {...draft} />;
+}
+
+// 输入面板最下面一行：左边是模型和参数，右边是生成键。ready：有没有东西可以发（写了提示词，或者连了能用的节点），没有就是灰的。
+function Bar({ working, ready, action, onSend, children }: { working: boolean; ready: boolean; action: string; onSend: () => void; children: ReactNode }) {
   return (
     <div className="cnode-bar">
       <div className="cnode-params">{children}</div>
-      <button className="send-btn" type="button" {...tip(working ? '正在生成' : action)} aria-label={action} disabled={working} onClick={onSend}>
+      <button className="send-btn" type="button" {...tip(working ? '正在生成' : action)} aria-label={action} disabled={working || !ready} onClick={onSend}>
         {working ? <span className="spinner" /> : <Icon name="arrowUp" size={18} />}
       </button>
     </div>
+  );
+}
+
+interface ParamGroup {
+  label: string;
+  value: string;
+  options: { value: string; label: string }[];
+  onChange: (value: string) => void;
+}
+
+// 点开之后的那一页：每组参数一行小方块。它画在画布外面的浮层里，所以自己记着选了什么。
+function ParamSheet({ groups }: { groups: ParamGroup[] }) {
+  const [picked, setPicked] = useState(() => groups.map((group) => group.value));
+  return (
+    <div className="popover-body cnode-sheet">
+      {groups.map((group, index) => (
+        <div key={group.label} className="cnode-sheet-group" role="radiogroup" aria-label={group.label}>
+          <div className="popover-title">{group.label}</div>
+          <div className="cnode-opts">
+            {group.options.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                role="radio"
+                aria-checked={picked[index] === option.value}
+                className={`cnode-opt ${picked[index] === option.value ? 'active' : ''}`}
+                onClick={() => {
+                  setPicked((now) => now.map((value, n) => (n === index ? option.value : value)));
+                  group.onChange(option.value);
+                }}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// 几个参数合成一项：按钮上把当前的值用圆点隔开写成一行（9:16 · 720p · 5 秒），点开一起改。
+function Params({ label, groups }: { label: string; groups: ParamGroup[] }) {
+  const ref = useRef<HTMLButtonElement>(null);
+  const shown = groups.filter((group) => group.options.length > 0);
+  if (!shown.length) return null;
+  const summary = shown.map((group) => group.options.find((option) => option.value === group.value)?.label || group.value);
+  return (
+    <button ref={ref} type="button" className="dropdown dropdown-tool cnode-param" aria-haspopup="dialog" aria-expanded="false" aria-label={`${label}：${summary.join('，')}`} onClick={() => openPopover(ref.current!, <ParamSheet groups={shown} />, { label })}>
+      <span className="dropdown-value">
+        {summary.map((text, index) => (
+          <span key={index}>{text}</span>
+        ))}
+      </span>
+      <Icon name="chevron" size={12} />
+    </button>
   );
 }
 
@@ -185,7 +260,7 @@ function DetailTool({ data }: { data: MediaData }) {
   if (record?.status !== 'completed') return null;
   return (
     <button className="cnode-btn" type="button" {...tip('查看详情')} aria-label="查看详情" onClick={() => openDetail(record.id)}>
-      <Icon name="expand" />
+      <Icon name="expand" size={16} />
     </button>
   );
 }
@@ -207,6 +282,7 @@ export function TextNode({ id, data: raw, selected }: NodeProps) {
   const inputs = useInputs(id);
   const [editing, setEditing] = useState(false);
   const area = useRef<HTMLTextAreaElement>(null);
+  const draft = useDraft(data.text || '', (text) => flow.updateNodeData(id, { text }));
   useStore('models', 'app');
   const models = state.catalog.polish;
   const model = models.includes(data.model || '') ? data.model! : polishModel();
@@ -240,15 +316,17 @@ export function TextNode({ id, data: raw, selected }: NodeProps) {
     <Frame
       id={id}
       kind="text"
+      no={data.no}
       selected={selected}
       width={BOX_HEIGHT}
       panel={
         <>
+          <Refs id={id} kind="text" />
           <Prompt id={id} value={data.prompt || ''} placeholder={data.text ? '想怎么改？例如：改成三个分镜，每个一句话' : '想让模型写什么？例如：写一段 15 秒短视频的分镜'} />
           {data.error && !data.busy && <p className="cnode-error">{data.error}</p>}
-          <Bar working={Boolean(data.busy)} action="让模型写" onSend={write}>
+          <Bar working={Boolean(data.busy)} ready={Boolean((data.prompt || '').trim())} action="让模型写" onSend={write}>
             {models.length > 0 ? (
-              <Dropdown variant="tool" icon="sparkle" label="文本模型" value={model} options={models.map((m) => ({ value: m, label: m }))} onChange={(next) => flow.updateNodeData(id, { model: next })} />
+              <Dropdown variant="tool" chevron label="文本模型" value={model} options={models.map((m) => ({ value: m, label: m }))} onChange={(next) => flow.updateNodeData(id, { model: next })} />
             ) : (
               <span className="cnode-note">还没读到可用的文本模型</span>
             )}
@@ -262,7 +340,15 @@ export function TextNode({ id, data: raw, selected }: NodeProps) {
           {data.busy}
         </div>
       ) : editing ? (
-        <textarea ref={area} className={`cnode-text-edit ${INERT}`} value={data.text} onChange={(e) => flow.updateNodeData(id, { text: e.target.value })} onBlur={() => setEditing(false)} />
+        <textarea
+          ref={area}
+          className={`cnode-text-edit ${INERT}`}
+          {...draft}
+          onBlur={() => {
+            draft.onBlur();
+            setEditing(false);
+          }}
+        />
       ) : (
         <div className={`cnode-text-view nowheel ${data.text ? '' : 'is-empty'}`} onDoubleClick={() => setEditing(true)}>
           {data.text || '双击开始编辑，或者选中后让模型写'}
@@ -305,24 +391,25 @@ export function ImageNode({ id, data: raw, selected }: NodeProps) {
     <Frame
       id={id}
       kind="image"
+      no={data.no}
       selected={selected}
       width={nodeWidth('image', data)}
       tools={
         <>
           <button className="cnode-btn" type="button" {...tip('上传一张图片放进这个节点')} aria-label="上传图片" onClick={() => file.current!.click()}>
-            <Icon name="upload" />
+            <Icon name="upload" size={16} />
           </button>
           <DetailTool data={data} />
         </>
       }
       panel={
         <>
-          {(refLimit > 0 || hasRefs) && <Refs id={id} model={data.model} limit={refLimit} />}
+          <Refs id={id} kind="image" model={data.model} limit={refLimit} />
           <Prompt id={id} value={data.prompt} placeholder={promptHint(linked, hasRefs ? '想怎么改这张图？例如：把背景改成雪夜' : '描述想生成的图片：主体、环境、构图、光线和风格')} />
           {data.error && !data.busy && <p className="cnode-error">{data.error}</p>}
-          <Bar working={working} action="生成图片" onSend={() => generate(flow, id)}>
-            <Dropdown variant="tool" icon="cube" label="模型" value={data.model} options={models.map((m) => ({ value: m, label: m }))} onChange={(model) => flow.updateNodeData(id, { model, ratio: imageRatios(model).includes(data.ratio) ? data.ratio : imageRatios(model)[0] || data.ratio })} />
-            {ratios.length > 0 && <Dropdown variant="tool" label="比例" value={data.ratio} options={ratios.map((r) => ({ value: r, label: r }))} onChange={(ratio) => flow.updateNodeData(id, { ratio })} />}
+          <Bar working={working} ready={Boolean(data.prompt.trim()) || linked} action="生成图片" onSend={() => generate(flow, id)}>
+            <Dropdown variant="tool" chevron label="模型" value={data.model} options={models.map((m) => ({ value: m, label: m }))} onChange={(model) => flow.updateNodeData(id, { model, ratio: imageRatios(model).includes(data.ratio) ? data.ratio : imageRatios(model)[0] || data.ratio })} />
+            <Params label="参数" groups={[{ label: '比例', value: data.ratio, options: ratios.map((r) => ({ value: r, label: r })), onChange: (ratio) => flow.updateNodeData(id, { ratio }) }]} />
           </Bar>
         </>
       }
@@ -358,15 +445,20 @@ function pickRole(anchor: HTMLElement, model: string | undefined, current: Frame
   });
 }
 
-// 面板最上面一排：连进来的素材各一张小图，写着它当什么用；最后一个加号是再加一份参考素材。
-// 视频节点收图片、视频、音频，图片可以点开改用途；图片节点只收图片（图生图），limit 是它的模型最多收几张。
-function Refs({ id, model, limit }: { id: string; model: string; limit?: number }) {
-  const forImage = limit !== undefined;
+// 面板最上面一排：连进来的节点各一个小方块，写着它当什么用；最后一个加号是再加一份参考素材。
+// 连进来的文本节点也在这里（它的内容会拼进提示词）。视频节点收图片、视频、音频，图片可以点开改用途；
+// 图片节点只收图片（图生图），limit 是它的模型最多收几张；文本、音频节点只收文本，没有加号。什么都没有就不占地方。
+function Refs({ id, kind, model = '', limit = 0 }: { id: string; kind: NodeKind; model?: string; limit?: number }) {
+  const forImage = kind === 'image';
   const flow = useReactFlow();
   const { snap, addInput } = useContext(CanvasActions);
   const file = useRef<HTMLInputElement>(null);
   useStore('history', 'app');
-  const media = useInputs(id).filter((i) => (forImage ? i.link.kind === 'image' : i.link.kind !== 'text'));
+  const inputs = useInputs(id);
+  // 文本排在前面。这个节点的模型不收的素材也照样显示，方便看出问题在哪。
+  const media = [...inputs.filter((i) => i.link.kind === 'text'), ...inputs.filter((i) => i.link.kind !== 'text')];
+  const used = inputs.filter((i) => i.link.kind === 'image').length;
+  const canAdd = kind === 'video' || (forImage && used < limit);
   const hasLibrary = !forImage && (state.app.features.library || state.app.features.persons);
 
   async function upload(picked: File) {
@@ -396,9 +488,19 @@ function Refs({ id, model, limit }: { id: string; model: string; limit?: number 
     });
   }
 
+  if (!media.length && !canAdd) return null;
   return (
     <div className="cnode-refs">
       {media.map(({ edgeId, link, node }) => {
+        if (link.kind === 'text') {
+          const text = ((node.data as unknown as TextData).text || '').trim();
+          return (
+            <span key={edgeId} className="cnode-ref is-text" {...tip(text ? (text.length > 80 ? `${text.slice(0, 80)}…` : text) : '连进来的文本节点还是空的')}>
+              <Icon name="type" size={18} />
+              <span className="cnode-ref-tag">文本</span>
+            </span>
+          );
+        }
         const output = outputOf(node);
         const thumb = output?.asset ? output.asset.thumb : link.kind === 'image' ? output?.url : null;
         const label = linkLabel(link);
@@ -431,7 +533,7 @@ function Refs({ id, model, limit }: { id: string; model: string; limit?: number 
           </span>
         );
       })}
-      {(!forImage || media.length < limit) && (
+      {canAdd && (
         <button className="cnode-ref cnode-ref-add" type="button" {...tip(forImage ? '添加参考图，按提示词改这张图' : '添加参考素材')} aria-label={forImage ? '添加参考图' : '添加参考素材'} aria-haspopup={forImage ? undefined : 'menu'} aria-expanded={forImage ? undefined : 'false'} onClick={(e) => add(e.currentTarget)}>
           <Icon name="plus" size={18} />
         </button>
@@ -453,7 +555,8 @@ function Refs({ id, model, limit }: { id: string; model: string; limit?: number 
 export function VideoNode({ id, data: raw, selected }: NodeProps) {
   const data = raw as unknown as VideoData;
   const flow = useReactFlow();
-  const linked = useInputs(id).some((i) => i.link.kind === 'text');
+  const inputs = useInputs(id);
+  const linked = inputs.some((i) => i.link.kind === 'text');
   const working = useWorking(data);
   useStore('models', 'app');
   const models = state.models.includes(data.model) ? state.models : [data.model, ...state.models];
@@ -464,19 +567,25 @@ export function VideoNode({ id, data: raw, selected }: NodeProps) {
     <Frame
       id={id}
       kind="video"
+      no={data.no}
       selected={selected}
       width={nodeWidth('video', data)}
       tools={<DetailTool data={data} />}
       panel={
         <>
-          <Refs id={id} model={data.model} />
+          <Refs id={id} kind="video" model={data.model} />
           <Prompt id={id} value={data.prompt} placeholder={promptHint(linked, '描述想生成的视频：主体、动作、场景、镜头运动、光线和风格')} />
           {data.error && !data.busy && <p className="cnode-error">{data.error}</p>}
-          <Bar working={working} action="生成视频" onSend={() => generate(flow, id)}>
-            <Dropdown variant="tool" icon="cube" label="模型" value={data.model} options={models.map((m) => ({ value: m, label: m, note: modelNote(m) || undefined }))} onChange={(model) => set(fitVideo({ ...data, model }))} />
-            {able.resolutions.length > 0 && <Dropdown variant="tool" label="分辨率" value={data.resolution} options={able.resolutions.map((r) => ({ value: r, label: r }))} onChange={(resolution) => set({ resolution })} />}
-            {able.ratios.length > 0 && <Dropdown variant="tool" label="比例" value={data.ratio} options={able.ratios.map((r) => ({ value: r, label: ratioLabel(r) }))} onChange={(ratio) => set({ ratio })} />}
-            {able.durations.length > 0 && <Dropdown variant="tool" label="时长" value={String(data.duration)} options={able.durations.map((d) => ({ value: String(d), label: `${d} 秒` }))} onChange={(duration) => set({ duration: Number(duration) })} />}
+          <Bar working={working} ready={Boolean(data.prompt.trim()) || inputs.length > 0} action="生成视频" onSend={() => generate(flow, id)}>
+            <Dropdown variant="tool" chevron label="模型" value={data.model} options={models.map((m) => ({ value: m, label: m, note: modelNote(m) || undefined }))} onChange={(model) => set(fitVideo({ ...data, model }))} />
+            <Params
+              label="参数"
+              groups={[
+                { label: '比例', value: data.ratio, options: able.ratios.map((r) => ({ value: r, label: ratioLabel(r) })), onChange: (ratio) => set({ ratio }) },
+                { label: '分辨率', value: data.resolution, options: able.resolutions.map((r) => ({ value: r, label: r })), onChange: (resolution) => set({ resolution }) },
+                { label: '时长', value: String(data.duration), options: able.durations.map((d) => ({ value: String(d), label: `${d} 秒` })), onChange: (duration) => set({ duration: Number(duration) }) },
+              ]}
+            />
           </Bar>
         </>
       }
@@ -522,19 +631,21 @@ export function AudioNode({ id, data: raw, selected }: NodeProps) {
     <Frame
       id={id}
       kind="audio"
+      no={data.no}
       selected={selected}
       width={nodeWidth('audio')}
       tools={<DetailTool data={data} />}
       panel={
         <>
+          <Refs id={id} kind="audio" />
           <Prompt id={id} value={data.prompt} placeholder={promptHint(linked, speech ? '输入要朗读的文字' : '描述想要的声音：来源、材质、动作')} />
           {data.error && !data.busy && <p className="cnode-error">{data.error}</p>}
-          <Bar working={working} action={speech ? '生成语音' : '生成音效'} onSend={() => generate(flow, id)}>
-            {tools.length > 1 && <Dropdown variant="tool" label="类型" value={data.tool} options={tools} onChange={(tool) => flow.updateNodeData(id, { tool })} />}
+          <Bar working={working} ready={Boolean(data.prompt.trim()) || linked} action={speech ? '生成语音' : '生成音效'} onSend={() => generate(flow, id)}>
+            {tools.length > 1 && <Dropdown variant="tool" chevron label="类型" value={data.tool} options={tools} onChange={(tool) => flow.updateNodeData(id, { tool })} />}
             {speech && voices.length > 0 && (
               <Dropdown
                 variant="tool"
-                icon="volume"
+                chevron
                 label="音色"
                 value={data.voiceId}
                 options={voices.map((v) => ({ value: v.id, label: voiceName(v) }))}
