@@ -65,7 +65,7 @@ export const state = {
   recordsType: 'all' as CreateType | 'all',
   // 记录页看的是创作页生成的，还是画布里生成的。
   recordsSource: 'create' as 'create' | 'canvas',
-  app: { hasKey: false, keyHint: '', keySource: '', baseUrl: '', provider: 'flatkey', features: PROVIDERS.flatkey.features, providers: [], speech: { hasKey: false, keyHint: '', keySource: '', baseUrl: '' } } as AppInfo,
+  app: { hasKey: false, keyHint: '', keySource: '', baseUrl: '', provider: 'flatkey', features: PROVIDERS.flatkey.features, providers: [], speech: { hasKey: false, keyHint: '', keySource: '', baseUrl: '' }, billing: { hasKey: false, keyHint: '', keySource: '', baseUrl: '' } } as AppInfo,
   models: ['seedance-2.0', 'seedance-2.0-fast'] as string[],
   // 火山方舟的模型各自支持什么（分辨率、比例、时长、首尾帧）。Flatkey 的模型登记在 shared/models.ts，这里是空的。
   videoSpecs: {} as Record<string, VideoSpec>,
@@ -87,9 +87,11 @@ export const state = {
   personAssets: {} as Record<string, Asset[]>,
   watchedPersons: new Set<string>(),
   watchedPersonView: '',
+  // 账户余额（元），查不到是 null。
+  balance: null as number | null,
 };
 
-export type StoreEvent = 'boot' | 'view' | 'app' | 'models' | 'history' | 'assets' | 'persons' | 'createType' | 'recordsType' | 'recordsSource' | 'composer' | 'immersive' | 'characters' | 'skills';
+export type StoreEvent = 'boot' | 'view' | 'app' | 'models' | 'history' | 'assets' | 'persons' | 'createType' | 'recordsType' | 'recordsSource' | 'composer' | 'immersive' | 'characters' | 'skills' | 'balance';
 
 const listeners: Partial<Record<StoreEvent, Set<() => void>>> = {};
 const versions: Partial<Record<StoreEvent, number>> = {};
@@ -136,6 +138,22 @@ export async function loadApp() {
   // 本地服务还是改之前的版本时，返回里没有平台那几项，这时保留默认的（Flatkey）。
   state.app = { ...state.app, ...(await api('GET', '/api/state')) };
   emit('app');
+}
+
+// 账户余额（元）。只有火山引擎配了 Access Key 才查得到，查不到是 null。每生成完一条就该再查一次。
+export async function loadBalance() {
+  let balance: number | null = null;
+  if (state.app.provider === 'ark' && state.app.billing.hasKey) {
+    try {
+      const { remaining, unavailable } = await api('GET', '/api/credits');
+      balance = unavailable ? null : remaining;
+    } catch {
+      balance = state.balance;
+    }
+  }
+  if (balance === state.balance) return;
+  state.balance = balance;
+  emit('balance');
 }
 
 export async function loadModels() {

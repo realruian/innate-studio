@@ -28,6 +28,7 @@ const UPSTREAMS = {
   ark: { baseUrl: trimSlash(process.env.ARK_BASE_URL || 'https://ark.cn-beijing.volces.com/api/v3'), envKey: 'ARK_API_KEY', configKey: 'arkKey' },
 };
 // 豆包语音：火山方舟这条线上的语音用它。它是另一个产品，地址和 Key 都和方舟不是一套。seed-tts-2.0 是「豆包语音合成模型 2.0」。
+const VOLC_BILLING = { baseUrl: trimSlash(process.env.VOLC_BILLING_BASE_URL || 'https://billing.volcengineapi.com'), envId: 'VOLC_ACCESS_KEY_ID', envSecret: 'VOLC_SECRET_ACCESS_KEY', configId: 'volcAccessKeyId', configSecret: 'volcSecretAccessKey' };
 const DOUBAO_SPEECH = { baseUrl: trimSlash(process.env.DOUBAO_SPEECH_BASE_URL || 'https://openspeech.bytedance.com'), envKey: 'DOUBAO_SPEECH_API_KEY', configKey: 'doubaoSpeechKey', model: 'seed-tts-2.0' };
 const DATA_DIR = path.resolve(process.env.SEEDANCE_DATA_DIR || path.join(__dirname, 'data'));
 // 生成结果按类型分目录存；uploads 放的是从本机选来当输入的文件（Grok 的首帧、要配乐的视频）。
@@ -121,6 +122,16 @@ function keyInfo({ envKey, configKey, baseUrl }) {
 }
 const providerState = (provider) => keyInfo(UPSTREAMS[provider]);
 const speechKey = () => process.env[DOUBAO_SPEECH.envKey] || config[DOUBAO_SPEECH.configKey] || '';
+// 火山引擎账号的 Access Key（一对：ID 和 Secret），只用来到费用中心查余额。两项都有才算配好了。
+const billingKeys = () => {
+  const id = process.env[VOLC_BILLING.envId] || config[VOLC_BILLING.configId] || '';
+  const secret = process.env[VOLC_BILLING.envSecret] || config[VOLC_BILLING.configSecret] || '';
+  return id && secret ? { id, secret } : null;
+};
+const billingState = () => {
+  const keys = billingKeys();
+  return { hasKey: Boolean(keys), keyHint: keys ? `${keys.id.slice(0, 6)}…${keys.id.slice(-4)}` : '', keySource: !keys ? '' : process.env[VOLC_BILLING.envId] ? 'env' : 'file', baseUrl: VOLC_BILLING.baseUrl };
+};
 
 // 最外面几项说的是当前平台；providers 里是每个平台各自的 Key 状态，speech 是豆包语音那个 Key 的状态，设置页用。
 function keyState() {
@@ -131,6 +142,7 @@ function keyState() {
     features: PROVIDERS[provider].features,
     providers: Object.keys(UPSTREAMS).map((id) => ({ id, label: labelOf(id), ...providerState(id) })),
     speech: keyInfo(DOUBAO_SPEECH),
+    billing: billingState(),
   };
 }
 
@@ -457,12 +469,14 @@ function localMediaFile(url) {
 
 // 只存在本机的图片要直接放进请求：Flatkey 上 Grok 的首帧（image），火山方舟的首尾帧（frame_images）和参考图（input_references）。
 // 页面传来的是本机地址，发给上游前换成 data URL；记录里存的仍是原来的短地址。
+// 火山方舟的参考音频也能这样内嵌（文档：音频 URL、Base64 编码、素材 ID 都收，单个不超过 15 MB），类型写文件格式本身：audio/mp3、audio/wav。
 function withLocalImages(payload) {
-  const inline = (holder) => {
+  const inline = (holder, audio = false) => {
     const url = holder?.url;
     if (typeof url !== 'string' || !url.startsWith('/media/')) return holder;
     const file = localMediaFile(url);
-    const type = MIME[path.extname(file).toLowerCase()] || 'image/jpeg';
+    const ext = path.extname(file).toLowerCase();
+    const type = audio ? `audio/${ext.slice(1)}` : MIME[ext] || 'image/jpeg';
     return { ...holder, url: `data:${type};base64,${fs.readFileSync(file).toString('base64')}` };
   };
   const next = { ...payload };
@@ -470,11 +484,15 @@ function withLocalImages(payload) {
   for (const field of ['frame_images', 'input_references']) {
     if (!Array.isArray(payload[field])) continue;
     next[field] = payload[field].map((entry) => {
-      // 参考视频和音频只收公网的 https 链接：火山方舟的参考视频不能内嵌，这里音频也按同样的规矩办。
-      if (entry?.video_url || entry?.audio_url) {
-        const url = (entry.video_url || entry.audio_url).url;
-        if (!/^https:\/\//i.test(url || '')) throw new HttpError(400, 'invalid_request', '参考视频和音频须为可公开访问的 https 链接');
+      // 参考视频只收公网的 https 链接：火山方舟的参考视频不能内嵌。
+      if (entry?.video_url) {
+        if (!/^https:\/\//i.test(entry.video_url.url || '')) throw new HttpError(400, 'invalid_request', '参考视频须为可公开访问的 https 链接');
         return entry;
+      }
+      if (entry?.audio_url) {
+        const url = String(entry.audio_url.url || '');
+        if (!url.startsWith('/media/') && !/^https:\/\//i.test(url)) throw new HttpError(400, 'invalid_request', '参考音频须为本机文件或可公开访问的 https 链接');
+        return { ...entry, audio_url: inline(entry.audio_url, true) };
       }
       return entry?.image_url ? { ...entry, image_url: inline(entry.image_url) } : entry;
     });
@@ -672,9 +690,21 @@ function providerIn(value) {
   return value;
 }
 
-// service 是 speech 时存的是豆包语音的 Key，其余是某个平台的 Key。
+// service 是 speech 时存的是豆包语音的 Key，是 billing 时存的是查余额用的那对 Access Key，其余是某个平台的 Key。
 route('PUT', /^\/api\/key$/, async ({ req }) => {
-  const { apiKey: key, provider: wanted, service } = await readJsonBody(req);
+  const { apiKey: key, provider: wanted, service, accessKeyId, secretAccessKey } = await readJsonBody(req);
+  if (service === 'billing') {
+    const id = String(accessKeyId || '').trim();
+    const secret = String(secretAccessKey || '').trim();
+    if (!id || !secret) throw new HttpError(400, 'invalid_key', 'Access Key ID 和 Secret Access Key 都要填');
+    if (!isUsableKey(id) || !isUsableKey(secret)) throw new HttpError(400, 'invalid_key', 'Access Key 格式不正确：包含中文、空格或其他非法字符。请从火山引擎控制台重新复制。');
+    // 先查一次，查得到才存，免得存下一对用不了的。
+    await queryBalance({ id, secret });
+    config[VOLC_BILLING.configId] = id;
+    config[VOLC_BILLING.configSecret] = secret;
+    saveConfig();
+    return keyState();
+  }
   const speech = service === 'speech';
   const provider = speech ? null : providerIn(wanted);
   const value = String(key || '').trim();
@@ -687,6 +717,12 @@ route('PUT', /^\/api\/key$/, async ({ req }) => {
 });
 
 route('DELETE', /^\/api\/key$/, async ({ query }) => {
+  if (query.get('service') === 'billing') {
+    delete config[VOLC_BILLING.configId];
+    delete config[VOLC_BILLING.configSecret];
+    saveConfig();
+    return keyState();
+  }
   delete config[query.get('service') === 'speech' ? DOUBAO_SPEECH.configKey : UPSTREAMS[providerIn(query.get('provider'))].configKey];
   saveConfig();
   forgetAccount();
@@ -754,9 +790,49 @@ route('GET', /^\/api\/models$/, async () => {
   }
 });
 
+// 火山引擎费用中心的《QueryBalanceAcct - 查询用户账户余额信息》：返回可用余额、现金余额、欠费金额，单位是元。
+// 这类接口不认 API Key，要用账号的 Access Key 给请求签名（火山引擎 OpenAPI 签名，HMAC-SHA256）：
+// 把请求方法、路径、查询串、要签的头和正文的哈希拼成一段，再用 Secret 依次和日期、地域、服务名、request 算出的密钥去签。
+const hmac = (key, text) => crypto.createHmac('sha256', key).update(text).digest();
+const sha256 = (text) => crypto.createHash('sha256').update(text).digest('hex');
+function volcSignedHeaders({ id, secret }, { method, host, query, service, region }) {
+  const date = new Date().toISOString().replace(/[-:]|\.\d{3}/g, '');
+  const day = date.slice(0, 8);
+  const bodyHash = sha256('');
+  const signed = 'host;x-content-sha256;x-date';
+  const canonical = [method, '/', query, `host:${host}`, `x-content-sha256:${bodyHash}`, `x-date:${date}`, '', signed, bodyHash].join('\n');
+  const scope = `${day}/${region}/${service}/request`;
+  const signingKey = [day, region, service, 'request'].reduce(hmac, secret);
+  const signature = hmac(signingKey, ['HMAC-SHA256', date, scope, sha256(canonical)].join('\n')).toString('hex');
+  return { 'X-Date': date, 'X-Content-Sha256': bodyHash, Authorization: `HMAC-SHA256 Credential=${id}/${scope}, SignedHeaders=${signed}, Signature=${signature}` };
+}
+
+async function queryBalance(keys) {
+  const url = new URL(VOLC_BILLING.baseUrl);
+  // 查询串要按参数名排好序再签。
+  const query = 'Action=QueryBalanceAcct&Version=2022-01-01';
+  let res;
+  try {
+    res = await fetch(`${url.origin}/?${query}`, { headers: volcSignedHeaders(keys, { method: 'GET', host: url.host, query, service: 'billing', region: 'cn-north-1' }), signal: AbortSignal.timeout(20000) });
+  } catch (err) {
+    throw new HttpError(502, 'upstream_unreachable', `连接火山引擎费用中心失败：${err.name === 'TimeoutError' ? '请求超时' : err.cause?.code || err.message}`);
+  }
+  const data = await res.json().catch(() => null);
+  const failure = data?.ResponseMetadata?.Error;
+  if (!res.ok || failure || !data?.Result) {
+    const denied = res.status === 401 || res.status === 403;
+    throw new HttpError(denied ? 401 : 502, String(failure?.Code || `http_${res.status}`), `${denied ? 'Access Key 无效，或没有查看费用中心的权限。' : ''}火山引擎费用中心返回（${res.status}）：${failure?.Message || '没有余额数据'}`);
+  }
+  const yuan = (value) => Number(value) || 0;
+  return { remaining: yuan(data.Result.AvailableBalance), cash: yuan(data.Result.CashBalance), arrears: yuan(data.Result.ArrearsBalance) };
+}
+
 route('GET', /^\/api\/credits$/, async () => {
-  // 火山方舟没有能用 API Key 查余额的接口，余额要到火山引擎控制台的费用中心看。
-  if (currentProvider() === 'ark') return { unavailable: true };
+  // 火山方舟没有能用 API Key 查余额的接口，要用账号的 Access Key 到费用中心查；没配就查不了。
+  if (currentProvider() === 'ark') {
+    const keys = billingKeys();
+    return keys ? { currency: 'CNY', ...(await queryBalance(keys)) } : { unavailable: true };
+  }
   const { data } = await callUpstream('GET', '/v1/credits', { timeoutMs: 20000 });
   return { remaining: Number(data?.remaining) || 0, used: Number(data?.used) || 0 };
 });
@@ -875,8 +951,8 @@ route('POST', /^\/api\/images$/, async ({ req }) => {
   runDirect(items, async () => {
     const { images, cost } = await { flatkey: flatkeyImages, ark: arkImages }[provider](request);
     if (!images.length) throw new HttpError(502, 'bad_upstream_response', `${labelOf(provider)} 未返回图片`);
-    // 费用按张平摊。
-    const usage = cost ? { cost_usd: cost / images.length } : null;
+    // 费用按张平摊。火山方舟不给金额，每张图带着自己的用量。
+    const shared = cost ? { cost_usd: cost / images.length } : null;
     items.forEach((item, index) => {
       const image = images[index];
       if (!image) {
@@ -892,7 +968,7 @@ route('POST', /^\/api\/images$/, async ({ req }) => {
         item.error = { message: `不支持模型返回的格式（${type}）`, code: 'unsupported_image' };
         return;
       }
-      finishItem(item, Buffer.from(image.b64_json, 'base64'), ext, { usage });
+      finishItem(item, Buffer.from(image.b64_json, 'base64'), ext, { usage: image.usage || shared });
     });
   });
   return { items: items.map(historyView) };
@@ -908,7 +984,7 @@ async function flatkeyImages(request) {
 
 // 火山方舟的生图接口（Seedream）。5.0 pro 和 5.0 flash 一次只出一张，所以要几张就发几次、同时进行，各出一张；有一次失败了，其余成功的照样留下。
 // 图片大小写成「宽x高」，按分辨率档位和画面比例查登记好的像素值，没指定档位就用这个模型默认的那一档；参考图放在 image 数组里，本机的图已经换成内嵌数据。
-// 返回的用量只有张数和 token，没有金额，所以不记费用。
+// 返回的用量只有张数和 token，没有金额。每张图记下 token 和实际大小，费用按张、按像素档位估算（shared/models.ts 的 estimateCost）。
 async function arkImages({ model, prompt, n, aspect_ratio, resolution, input_references }) {
   const spec = ARK_IMAGE_MODELS[model];
   if (!spec) throw new HttpError(400, 'invalid_request', `火山方舟不支持图片模型 ${model}`);
@@ -919,7 +995,12 @@ async function arkImages({ model, prompt, n, aspect_ratio, resolution, input_ref
   const results = await Promise.allSettled(Array.from({ length: n }, () => callUpstream('POST', '/images/generations', { json: request, timeoutMs: 5 * 60 * 1000, provider: 'ark' })));
   const done = results.filter((r) => r.status === 'fulfilled').map((r) => r.value.data);
   if (!done.length) throw results[0].reason;
-  return { images: done.flatMap((data) => listOf(data).filter((image) => image?.b64_json)), cost: 0 };
+  const images = done.flatMap((data) => {
+    const made = listOf(data).filter((image) => image?.b64_json);
+    const tokens = Number(data?.usage?.total_tokens) || 0;
+    return made.map((image) => ({ ...image, usage: { generated_images: 1, ...(tokens ? { total_tokens: Math.round(tokens / made.length) } : {}), size: image.size || request.size } }));
+  });
+  return { images, cost: 0 };
 }
 
 // ---------- 音频 ----------
@@ -964,8 +1045,8 @@ route('POST', /^\/api\/audio\/speech$/, async ({ req }) => {
     form: form || null,
   });
   runDirect([item], async () => {
-    const data = doubao ? await doubaoSpeech(script, voiceId) : (await callUpstream('POST', `/v1/text-to-speech/${voiceId}`, { json: { text: script, model_id: SPEECH_MODEL }, binary: true, timeoutMs: 3 * 60 * 1000, provider })).data;
-    finishItem(item, data, 'mp3');
+    const { audio: data, usage } = doubao ? await doubaoSpeech(script, voiceId) : { audio: (await callUpstream('POST', `/v1/text-to-speech/${voiceId}`, { json: { text: script, model_id: SPEECH_MODEL }, binary: true, timeoutMs: 3 * 60 * 1000, provider })).data };
+    finishItem(item, data, 'mp3', usage ? { usage } : {});
   });
   return historyView(item);
 });
@@ -973,13 +1054,14 @@ route('POST', /^\/api\/audio\/speech$/, async ({ req }) => {
 // 豆包语音合成（官方文档《单向流式语音合成(HTTP)》）。一次把文字发过去，音频分成很多段返回：
 // 响应体是一个接一个的 JSON，每个里面的 data 是一段 base64 的 MP3，按顺序拼起来就是整段音频。
 // code 是 0 表示这一段正常，20000000 是结束的标记，其余都是出错。
+// 请求头 X-Control-Require-Usage-Tokens-Return 让结束的那一段带上 usage.text_words（计费字符数），费用按它估算。
 const DOUBAO_OK = new Set([0, 20000000]);
 async function doubaoSpeech(text, speaker) {
   let res;
   try {
     res = await fetch(`${DOUBAO_SPEECH.baseUrl}/api/v3/tts/unidirectional`, {
       method: 'POST',
-      headers: { 'X-Api-Key': speechKey(), 'X-Api-Resource-Id': DOUBAO_SPEECH.model, 'X-Api-Request-Id': crypto.randomUUID(), 'Content-Type': 'application/json' },
+      headers: { 'X-Api-Key': speechKey(), 'X-Api-Resource-Id': DOUBAO_SPEECH.model, 'X-Api-Request-Id': crypto.randomUUID(), 'X-Control-Require-Usage-Tokens-Return': 'text_words', 'Content-Type': 'application/json' },
       body: JSON.stringify({ req_params: { text, speaker, audio_params: { format: 'mp3', sample_rate: 24000 } } }),
       signal: AbortSignal.timeout(3 * 60 * 1000),
     });
@@ -995,7 +1077,8 @@ async function doubaoSpeech(text, speaker) {
   }
   const audio = Buffer.concat(parts.filter((part) => typeof part?.data === 'string' && part.data).map((part) => Buffer.from(part.data, 'base64')));
   if (!audio.length) throw new HttpError(502, 'bad_upstream_response', '豆包语音未返回音频');
-  return audio;
+  const words = Number(parts.find((part) => part?.usage?.text_words != null)?.usage.text_words);
+  return { audio, usage: words > 0 ? { text_words: words } : null };
 }
 
 // 把一串首尾相接的 JSON 拆开。它们之间可能有换行，也可能没有，所以按花括号配对来切，字符串里的花括号不算。
@@ -1212,12 +1295,18 @@ function ownSkill(id) {
   if (skill.official) throw new HttpError(400, 'invalid_request', '官方技能不可修改');
   return skill;
 }
+// 标签：去掉空的和重复的，每个最多 10 个字，最多留 3 个。
+function skillTags(value) {
+  if (!Array.isArray(value)) throw new HttpError(400, 'invalid_request', '标签格式不正确');
+  return [...new Set(value.map((tag) => String(tag ?? '').trim().slice(0, 10)).filter(Boolean))].slice(0, 3);
+}
 // 名称、说明、规则都要有；规则太短等于没有规则。
 function skillFields(body, current = {}) {
   const next = {
     name: body.name === undefined ? current.name : String(body.name || '').trim().slice(0, 30),
     description: body.description === undefined ? current.description : String(body.description || '').trim().slice(0, 120),
     type: body.type === undefined ? current.type : body.type,
+    tags: body.tags === undefined ? current.tags || [] : skillTags(body.tags),
     rules: body.rules === undefined ? current.rules : String(body.rules || '').trim(),
   };
   if (!next.name) throw new HttpError(400, 'invalid_request', '请输入技能名称');
@@ -1324,7 +1413,7 @@ route('POST', /^\/api\/polish$/, async ({ req }) => {
   if (!draft) throw new HttpError(400, 'invalid_request', '请先输入提示词');
   if (draft.length > 4000) throw new HttpError(400, 'invalid_request', '提示词太长，润色最多支持 4000 字');
   if (!POLISH_KINDS.includes(kind)) throw new HttpError(400, 'invalid_request', '该类型不支持润色');
-  const guide = polishGuide({ kind, model: target.model, mode: target.mode, refs: target.refs });
+  const guide = polishGuide({ kind, model: target.model, mode: target.mode, refs: target.refs, duration: Number(target.duration) || undefined });
   const known = POLISH_MODELS[currentProvider()];
   if (!known.includes(model)) throw new HttpError(400, 'invalid_request', '该模型不支持润色');
 

@@ -20,3 +20,8 @@ export function fmtBytes(n?: number) {
   if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
   return `${(n / 1024 / 1024 / 1024).toFixed(1)} GB`;
 }
+
+// 金额。不到一毛的多留一位小数，不然语音这种几厘钱的会显示成 0.00。
+export const fmtYuan = (yuan: number) => `¥${yuan.toFixed(yuan > 0 && yuan < 0.1 ? 3 : 2)}`;
+// 估算的费用，算不出来就不显示。
+export const fmtCost = (yuan: number | null) => (yuan == null ? null : `约 ${fmtYuan(yuan)}`);

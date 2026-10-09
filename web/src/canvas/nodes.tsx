@@ -8,14 +8,15 @@ import { BaseEdge, Handle, NodeToolbar, Position, getBezierPath, useConnection, 
 import { api, state, useStore, loadVoices, isPendingTask, polishModel, KINDS as MEDIA } from '../store.ts';
 import { RATIOS, capabilities, fitImageSize, imageRatios, imageRefLimit, imageSizes, traits, voiceName } from '../composer/state.ts';
 import { modelLabel, modelNote } from '../../../shared/models.ts';
-import { kindOfFile, recordName, uploadLocalFile, uploadVirtualAsset } from '../media.ts';
+import { recordName, uploadLocalFile, uploadVirtualAsset } from '../media.ts';
 import { openAssetPicker } from '../assets.tsx';
 import { Icon, type IconName } from '../ui/Icon.tsx';
 import { Dropdown, tip } from '../ui/controls.tsx';
+import { MediaTile, AddTile } from '../ui/tiles.tsx';
 import { openMenu, openModal, openPopover, toast } from '../ui/layers.tsx';
 import { VideoPlayer, AudioPlayer } from '../player.tsx';
 import { openDetail } from '../history.tsx';
-import type { Kind } from '../types.ts';
+import type { Kind, Ref } from '../types.ts';
 import { BOX_HEIGHT, IMAGE_PRESETS, NODE_LABELS, OUTPAINT_PROMPT, ROLE_LABELS, canLink, nodeWidth, joinPrompt, linkLabel, PINS, PIN_LABELS, type AudioData, type FrameRole, type GroupData, type ImageData, type Pin, type Preset, type StackData, type LinkData, type NodeKind, type TextData, type VideoData } from './model.ts';
 import { fitVideo, generate, nameOf, outputOf, recordOf, runAll } from './run.ts';
 import { Cropper, cropImage, grabFrame, padImage, splitGrid, type Made } from './edit.tsx';
@@ -342,13 +343,11 @@ function Result({ kind, data, onShape }: { kind: NodeKind; data: MediaData; onSh
   const record = recordOf(data);
   const measure = (e: { currentTarget: HTMLImageElement }) => e.currentTarget.naturalHeight > 0 && onShape?.(e.currentTarget.naturalWidth / e.currentTarget.naturalHeight);
   const blank = (content: ReactNode, failed = false) => <div className={`cnode-state ${failed ? 'is-failed' : ''}`}>{content}</div>;
-  const waiting = (text: string) =>
-    blank(
-      <>
-        <span className="spinner" />
-        {text}
-      </>,
-    );
+  const waiting = (text: string) => (
+    <div className="cnode-state is-pending">
+      <span className="state-chip">{text}</span>
+    </div>
+  );
   if (data.busy) return waiting(data.busy);
   if (data.asset) {
     return data.asset.thumb ? (
@@ -651,9 +650,8 @@ export function TextNode({ id, data: raw, selected, dragging }: NodeProps) {
       }
     >
       {data.busy ? (
-        <div className="cnode-state">
-          <span className="spinner" />
-          {data.busy}
+        <div className="cnode-state is-pending">
+          <span className="state-chip">{data.busy}</span>
         </div>
       ) : editing ? (
         <textarea
@@ -774,7 +772,6 @@ function Refs({ id, kind, model = '', limit = 0 }: { id: string; kind: NodeKind;
   const forImage = kind === 'image';
   const flow = useReactFlow();
   const { snap, addInput } = useContext(CanvasActions);
-  const file = useRef<HTMLInputElement>(null);
   useStore('history', 'app');
   const inputs = useInputs(id);
   // 文本排在前面。这个节点的模型不收的素材也照样显示，方便看出问题在哪。
@@ -783,31 +780,29 @@ function Refs({ id, kind, model = '', limit = 0 }: { id: string; kind: NodeKind;
   const canUpload = kind === 'video' || (forImage && used < limit);
   const hasLibrary = kind === 'video' && (state.app.features.library || state.app.features.persons);
   const only = !canUpload && !hasLibrary;
-
-  async function upload(picked: File) {
-    const kind = kindOfFile(picked);
-    if (!kind || (forImage && kind !== 'image')) return toast(forImage ? '仅支持上传图片' : '仅支持上传图片、视频和音频', 'info');
-    toast(`正在上传${MEDIA[kind].label}…`, 'info', 1800);
-    try {
-      const ref = await uploadLocalFile(picked, kind);
-      addInput(id, kind, { upload: { url: ref.url, name: ref.name } });
-    } catch (err) {
-      toast((err as Error).message, 'error', 6000);
-    }
-  }
+  // 移除一份素材就是断开那条线，上游的节点留在画布上。
+  const unlink = (edgeId: string) => {
+    snap();
+    flow.deleteElements({ edges: [{ id: edgeId }] });
+  };
 
   // 加号：这个节点还能接什么就列什么。文本哪种节点都能接；图片节点还能接参考图，视频节点还能接图片、视频、音频。只有一样时不弹菜单。
+  // 本机的文件走创作页的同一个选素材弹窗：上传、生成记录、角色都能选，选中的变成一个连进来的节点。
   function add(button: HTMLElement) {
     const sources = [...(state.app.features.library ? (['library'] as const) : []), ...(state.app.features.persons ? (['person'] as const) : [])];
     const kinds = Object.keys(MEDIA) as Kind[];
     const items = [
-      ...(canUpload ? [{ value: 'upload', label: forImage ? '上传参考图' : '上传图片、视频或音频' }] : []),
+      ...(canUpload ? [{ value: 'local', label: forImage ? '参考图' : '图片、视频或音频' }] : []),
       ...(hasLibrary ? kinds.map((item) => ({ value: item, label: `从素材库选择${MEDIA[item].label}` })) : []),
       { value: 'text', label: '文本节点' },
     ];
     const pick = (value: string) => {
-      if (value === 'upload') return file.current!.click();
       if (value === 'text') return addInput(id, 'text');
+      if (value === 'local') {
+        const onPick = (ref: Ref) => addInput(id, ref.kind, { upload: { url: ref.url, name: ref.name } });
+        if (forImage) return openAssetPicker({ title: '添加参考图', kind: 'image', remaining: limit - used, local: true, onPick });
+        return openAssetPicker({ title: '添加参考素材', limits: Object.fromEntries(kinds.map((item) => [item, MEDIA[item].max])), local: true, onPick });
+      }
       openAssetPicker({ kind: value as Kind, remaining: 1, sources: [...sources], onPick: (asset) => addInput(id, value as NodeKind, { asset }) });
     };
     if (items.length === 1) return pick(items[0].value);
@@ -820,57 +815,35 @@ function Refs({ id, kind, model = '', limit = 0 }: { id: string; kind: NodeKind;
         if (link.kind === 'text') {
           const text = ((node.data as unknown as TextData).text || '').trim();
           return (
-            <span key={edgeId} className="cnode-ref is-text" {...tip(text ? (text.length > 80 ? `${text.slice(0, 80)}…` : text) : '上游文本节点为空')}>
+            <MediaTile key={edgeId} className="is-text" tag="文本" tipText={text ? (text.length > 80 ? `${text.slice(0, 80)}…` : text) : '上游文本节点为空'} onRemove={() => unlink(edgeId)}>
               <Icon name="type" size={18} />
-              <span className="cnode-ref-tag">文本</span>
-            </span>
+            </MediaTile>
           );
         }
         const output = outputOf(node);
         const thumb = output?.asset ? output.asset.thumb : link.kind === 'image' ? output?.url : null;
         const label = linkLabel(link);
-        const face = (
-          <>
-            {thumb ? <img src={thumb} alt="" draggable={false} /> : <Icon name={NODE_ICONS[link.kind]} size={18} />}
-            <span className="cnode-ref-tag">{label}</span>
-          </>
-        );
-        return link.kind === 'image' && !forImage ? (
-          <button
-            key={edgeId}
-            className="cnode-ref"
-            type="button"
-            aria-haspopup="listbox"
-            aria-expanded="false"
-            aria-label={`图片用途：${label}`}
-            onClick={(e) =>
-              pickRole(e.currentTarget, model, link.role || 'reference', (role) => {
-                snap();
-                flow.updateEdgeData(edgeId, { role });
-              })
-            }
-          >
-            {face}
-          </button>
-        ) : (
-          <span key={edgeId} className="cnode-ref">
-            {face}
-          </span>
+        // 连到视频节点的图片可以点开改用途（参考图、首帧、尾帧）。
+        const face =
+          link.kind === 'image' && !forImage
+            ? {
+                'aria-haspopup': 'listbox' as const,
+                'aria-expanded': false,
+                'aria-label': `图片用途：${label}`,
+                onClick: (e: React.MouseEvent<HTMLButtonElement>) =>
+                  pickRole(e.currentTarget, model, link.role || 'reference', (role) => {
+                    snap();
+                    flow.updateEdgeData(edgeId, { role });
+                  }),
+              }
+            : undefined;
+        return (
+          <MediaTile key={edgeId} tag={label} face={face} onRemove={() => unlink(edgeId)}>
+            {thumb ? <img className="thumb-img" src={thumb} alt="" draggable={false} /> : <Icon name={NODE_ICONS[link.kind]} size={18} />}
+          </MediaTile>
         );
       })}
-      <button className="cnode-ref cnode-ref-add" type="button" {...tip(only ? '添加文本' : forImage ? '添加参考图或文本' : '添加参考素材或文本')} aria-label={only ? '添加文本节点' : '添加上游节点'} aria-haspopup={only ? undefined : 'menu'} aria-expanded={only ? undefined : 'false'} onClick={(e) => add(e.currentTarget)}>
-        <Icon name="plus" size={18} />
-      </button>
-      <input
-        ref={file}
-        type="file"
-        accept={forImage ? 'image/jpeg,image/png,image/webp' : 'image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm,audio/mpeg,audio/wav,.mp3,.wav'}
-        hidden
-        onChange={(e) => {
-          if (e.target.files?.[0]) upload(e.target.files[0]);
-          e.target.value = '';
-        }}
-      />
+      <AddTile label={only ? '添加文本节点' : '添加上游节点'} tipText={only ? '添加文本' : forImage ? '添加参考图或文本' : '添加参考素材或文本'} aria-haspopup={only ? undefined : 'menu'} aria-expanded={only ? undefined : false} onClick={(e) => add(e.currentTarget)} />
     </div>
   );
 }

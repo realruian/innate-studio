@@ -684,7 +684,7 @@ await must('打开图片卡片的更多', click('.view-create .card .card-more',
 await sleep(300);
 await must('点生成视频', clickText('.menu .menu-item', '生成视频'));
 for (let i = 0; i < 30 && !(await count('.view-create .ref-row .ref-tile:not(.ref-add)')); i += 1) await sleep(500);
-const fromImage = await pg.evaluate(() => ({ title: document.querySelector('.composer-title').textContent, mode: document.querySelector('[data-control=mode]')?.textContent.trim(), tiles: document.querySelectorAll('.ref-row .ref-tile:not(.ref-add)').length, index: document.querySelector('.ref-row .ref-index')?.textContent, frames: document.querySelectorAll('.frame-slot').length }));
+const fromImage = await pg.evaluate(() => ({ title: document.querySelector('.composer-title').textContent, mode: document.querySelector('[data-control=mode]')?.textContent.trim(), tiles: document.querySelectorAll('.ref-row .ref-tile:not(.ref-add)').length, index: document.querySelector('.ref-row .ref-tile[data-ref]')?.dataset.ref, frames: document.querySelectorAll('.frame-slot').length }));
 if (fromImage.title !== '想生成什么视频？' || fromImage.mode !== '全能参考' || fromImage.tiles !== 1 || fromImage.index !== '图片1' || fromImage.frames) problems.push(`图片点「生成视频」后应该是全能参考、带着这张图：${JSON.stringify(fromImage)}`);
 // 图片素材的汇总状态可能是失败，只要要用的模型能用就不该显示处理失败
 for (let i = 0; i < 30 && (await count('.ref-state')); i += 1) await sleep(500);
@@ -807,7 +807,7 @@ for (const [label, lead, keep] of [['延长', '向后延长视频1：', '镜头�
   await sleep(300);
   const reworked = await pg.evaluate(() => {
     const prompt = document.querySelector('textarea.prompt');
-    return { prompt: prompt.value, caret: prompt.selectionStart, focused: document.activeElement === prompt, mode: document.querySelector('[data-control=mode]')?.textContent.trim(), videos: document.querySelectorAll('.ref-row .ref-tile:not(.ref-add)').length, index: document.querySelector('.ref-row .ref-index')?.textContent };
+    return { prompt: prompt.value, caret: prompt.selectionStart, focused: document.activeElement === prompt, mode: document.querySelector('[data-control=mode]')?.textContent.trim(), videos: document.querySelectorAll('.ref-row .ref-tile:not(.ref-add)').length, index: document.querySelector('.ref-row .ref-tile[data-ref]')?.dataset.ref };
   });
   if (reworked.prompt !== `${lead}\n${keep}` || reworked.caret !== lead.length || !reworked.focused || reworked.mode !== '全能参考' || reworked.videos !== 1 || reworked.index !== '视频1') problems.push(`从视频卡片点「${label}」后输入框不对：${JSON.stringify(reworked)}`);
   // 视频素材的汇总状态是「失败」，但要用的模型在可用列表里：不能显示成处理失败，等它处理完就能提交

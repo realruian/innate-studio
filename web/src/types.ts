@@ -122,7 +122,8 @@ export interface HistoryItem {
   form?: Record<string, any>;
   createdAt?: number;
   completedAt?: number;
-  usage?: { total_tokens?: number; cost_usd?: number };
+  // 各平台返回的用量：视频是 token，图片是张数和大小，语音是计费字符数；旧平台直接给美元。
+  usage?: { total_tokens?: number; completion_tokens?: number; cost_usd?: number; generated_images?: number; size?: string; text_words?: number };
 }
 
 export interface Asset {
@@ -186,4 +187,6 @@ export interface AppInfo extends KeyInfo {
   providers: (KeyInfo & { id: ProviderId; label: string })[];
   // 豆包语音那个 Key 的状态（火山方舟这条线上的语音用）。
   speech: KeyInfo;
+  // 查余额用的火山引擎 Access Key 的状态，keyHint 是 Access Key ID 的头尾。
+  billing: KeyInfo;
 }

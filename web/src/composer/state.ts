@@ -3,7 +3,7 @@
 
 import { api, state, on, emit, KINDS, findAsset, assetReadiness, refreshAsset, startHistoryLoop, loadVoices, polishModel, goTo } from '../store.ts';
 import { exclusive } from '../playback.ts';
-import { refFromAsset, refFromRecord, assetFromRecord, readVideo } from '../media.ts';
+import { refFromAsset, refFromRecord, assetFromRecord, readVideo, kindOfFile, uploadLocalFile, uploadVirtualAsset } from '../media.ts';
 import { toast } from '../ui/layers.tsx';
 import { buildRequest as buildVideoRequest, buildSpecRequest, buildImageRequest, buildSpeechRequest, buildSfxRequest, buildMusicRequest, refsInUse, carryRefs, videoFamily, RES_RANK } from '../request.ts';
 import { ALL_RESOLUTIONS, PROVIDERS, VIDEO_TASKS, videoCapabilities, videoFamilyOf, type VideoCapabilities, type VideoSpec, type VideoTask } from '../../../shared/models.ts';
@@ -275,6 +275,87 @@ export function setMode(mode: VideoForm['mode']) {
   update({ mode, ...(isGrok() ? {} : carryRefs(composer.form, mode, KINDS.image.max)) });
 }
 
+// ---------- 添加素材 ----------
+// 选素材的弹窗、拖进输入框、粘贴，三条路加进来的素材都走这里，规则只有一份。
+
+const sameMedia = (a: Ref, b: Ref) => (a.assetId ? a.assetId === b.assetId : a.url === b.url);
+// 视频的参考素材里，现在能加的是哪几类。火山方舟上没有视频：参考视频只收公网链接，本机的文件发不过去；图片和音频可以内嵌进请求。
+export const addableKinds = (): Kind[] => (specDriven() ? traits().refKinds.filter((kind) => kind !== 'video') : traits().refKinds);
+
+// 当前类型和生成方式下，每种素材还能加几份。一种都不能加时是空的。
+export function mediaRoom(): Partial<Record<Kind, number>> {
+  const { form, studio } = composer;
+  if (studio.type === 'image') return imageRefLimit() ? { image: imageRefLimit() - (studio.image.refs?.length || 0) } : {};
+  if (studio.type === 'music') return { video: 1 };
+  if (studio.type !== 'video' || form.mode === 'text') return {};
+  if (form.mode === 'frames') return { image: [form.frames.first, traits().lastFrame ? form.frames.last : true].filter((slot) => !slot).length };
+  return Object.fromEntries(addableKinds().map((kind) => [kind, KINDS[kind].max - form.refs[kind].length]));
+}
+
+// 已经用上的本机文件的地址：选素材时同一份不让加第二次。
+export function usedMediaUrls() {
+  const { studio } = composer;
+  const refs = studio.type === 'image' ? studio.image.refs || [] : studio.type === 'music' ? [studio.music.video] : allRefs();
+  return refs.filter((ref): ref is Ref => Boolean(ref)).map((ref) => ref.url);
+}
+
+// 把一份素材加进当前的输入框。slot 是首尾帧里指定放哪一格；没指定就放进第一个空着的。加不进去时返回原因。
+export function addMedia(ref: Ref, slot?: 'first' | 'last'): string | null {
+  const { form, studio } = composer;
+  const label = KINDS[ref.kind].label;
+  if (studio.type === 'music') {
+    if (ref.kind !== 'video') return '请添加视频文件';
+    updateStudio('music', { video: ref });
+    return null;
+  }
+  const room = mediaRoom();
+  if (!(ref.kind in room)) return `当前不支持添加${label}`;
+  if (studio.type === 'image') {
+    const refs = studio.image.refs || [];
+    if (refs.some((r) => sameMedia(r, ref))) return null;
+    if (refs.length >= imageRefLimit()) return `${label}数量已达上限`;
+    updateStudio('image', { refs: [...refs, ref] });
+    return null;
+  }
+  if (form.mode === 'frames') {
+    const key = slot || (!form.frames.first ? 'first' : traits().lastFrame && !form.frames.last ? 'last' : null);
+    if (!key) return '首帧和尾帧均已添加';
+    update({ frames: { ...form.frames, [key]: ref } });
+    return null;
+  }
+  const list = form.refs[ref.kind];
+  if (list.some((r) => sameMedia(r, ref))) return null;
+  if (list.length >= KINDS[ref.kind].max) return `${label}数量已达上限`;
+  update({ refs: { ...form.refs, [ref.kind]: [...list, ref] } });
+  return null;
+}
+
+// 拖进来或粘贴进来的文件：先传上去，再按 addMedia 的规则加进输入框。素材走不走素材库，和选素材弹窗里的「本地上传」一样。
+export async function addFiles(files: File[]) {
+  if (!files.length) return;
+  if (!Object.keys(mediaRoom()).length) return toast('当前类型不支持添加素材', 'info');
+  const local = composer.studio.type !== 'video' || specDriven() || (composer.form.mode === 'frames' && traits().localFiles);
+  let uploading = false;
+  for (const file of files) {
+    const kind = kindOfFile(file);
+    const room = mediaRoom();
+    const problem = !kind ? `不支持的文件类型：${file.name}` : !(kind in room) ? `当前不支持添加${KINDS[kind].label}` : room[kind]! <= 0 ? `${KINDS[kind].label}数量已达上限` : null;
+    if (problem) {
+      toast(problem, 'info');
+      continue;
+    }
+    if (!uploading) toast('正在上传…', 'info', 1800);
+    uploading = true;
+    try {
+      const ref = local ? await uploadLocalFile(file, kind!) : refFromAsset(await uploadVirtualAsset(file, kind!), kind!);
+      const refused = addMedia(ref);
+      if (refused) toast(refused, 'info');
+    } catch (err) {
+      toast((err as Error).message, 'error', 6000);
+    }
+  }
+}
+
 // 首帧和尾帧对调。
 export function swapFrames() {
   const { first, last } = composer.form.frames;
@@ -538,9 +619,9 @@ export async function polish() {
     const { form, studio } = composer;
     const target =
       type === 'video'
-        ? { model: form.model, mode: form.mode, refs: { image: form.refs.image.length, video: form.refs.video.length, audio: form.refs.audio.length } }
+        ? { model: form.model, mode: form.mode, refs: { image: form.refs.image.length, video: form.refs.video.length, audio: form.refs.audio.length }, duration: form.durationAuto ? undefined : Number(form.duration) }
         : type === 'image'
-          ? { model: studio.image.model }
+          ? { model: studio.image.model, refs: { image: studio.image.refs?.length || 0 } }
           : {};
     const { text, model } = await api('POST', '/api/polish', { text: original, kind: type, model: wanted, target });
     // 等结果的时候用户换了类型或者又改了文字，就不去覆盖。

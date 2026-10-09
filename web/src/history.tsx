@@ -3,18 +3,18 @@
 
 import { memo, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { api, state, emit, useStore, loadHistory, isPendingTask, isTimedOutTask, goTo } from './store.ts';
-import { fmtTime, fmtDuration, fmtBytes } from './format.ts';
+import { fmtTime, fmtDuration, fmtBytes, fmtCost } from './format.ts';
 import { videoFamily } from './request.ts';
 import { stopPlaying } from './playback.ts';
 import { VideoPlayer, AudioPlayer } from './player.tsx';
 import { Thumb } from './assets.tsx';
 import { Icon } from './ui/Icon.tsx';
-import { Segmented, tip, clipTip } from './ui/controls.tsx';
+import { Segmented, SearchBox, tip, clipTip } from './ui/controls.tsx';
 import { toast, openModal, openMenu, confirmDialog, copyText } from './ui/layers.tsx';
 import { enter } from './ui/motion.ts';
 import { setForm, setStudio, useImageForVideo, useVideoForMusic, useVideoAsSource } from './composer/state.ts';
 import { openCharacterEditor } from './characters.tsx';
-import { VIDEO_TASKS, videoFamilyOf, referenceModeLabel, type VideoTask } from '../../shared/models.ts';
+import { VIDEO_TASKS, videoFamilyOf, referenceModeLabel, estimateCost, type VideoTask } from '../../shared/models.ts';
 import type { CreateType, HistoryItem, Ref } from './types.ts';
 
 const MODE_LABELS: Record<string, string> = { text: '文生视频', frames: '首尾帧' };
@@ -266,12 +266,7 @@ function MediaBox({ item, large = false }: { item: HistoryItem; large?: boolean 
   const progress = Math.max(0, Math.min(100, item.progress || 0));
   return (
     <div className="card-state is-pending">
-      <div className="state-title cursor-text">{item.status === 'queued' ? '排队中' : video ? `生成中 ${progress}%` : '生成中…'}</div>
-      {video && (
-        <div className="bar wide">
-          <div className="bar-fill" style={{ width: `${item.status === 'queued' ? 4 : Math.max(6, progress)}%` }} />
-        </div>
-      )}
+      <div className="state-chip cursor-text">{item.status === 'queued' ? '排队中' : video ? `生成中 ${progress}%` : '生成中'}</div>
       {item.pollError && <div className="small muted">状态查询失败：{item.pollError}</div>}
     </div>
   );
@@ -442,7 +437,8 @@ function Detail({ item, close, nav }: { item: HistoryItem; close: () => void; na
       ['提交时间', fmtTime(item.createdAt)],
       ['生成耗时', item.completedAt && item.createdAt ? fmtDuration(item.completedAt - item.createdAt) : null],
       ['Token 用量', item.usage?.total_tokens != null ? String(item.usage.total_tokens) : null],
-      ['费用', item.usage?.cost_usd != null ? `约 $${item.usage.cost_usd.toFixed(2)}` : null],
+      ['计费字符', item.usage?.text_words != null ? String(item.usage.text_words) : null],
+      ['费用', item.usage?.cost_usd != null ? `约 $${item.usage.cost_usd.toFixed(2)}` : fmtCost(estimateCost(item))],
       [`${kindLabel}文件`, item.status !== 'completed' ? null : item.savedLocally ? `已保存${item.fileSize ? `（${fmtBytes(item.fileSize)}）` : ''}` : item.downloadError ? `保存失败：${item.downloadError}` : '保存中…'],
     ] as Entry[]
   ).filter(present);
@@ -598,44 +594,6 @@ const SOURCE_FILTERS = [
   { value: 'canvas' as const, label: '画布' },
 ];
 
-// 搜索用得少，平时只是一个图标，点了才展开成输入框；清空并离开后收回去。
-function SearchBox({ onQuery }: { onQuery: (query: string) => void }) {
-  const [open, setOpen] = useState(false);
-  const field = useRef<HTMLDivElement>(null);
-  const input = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    enter(field.current, { y: 0, scale: 0.96, duration: 150 });
-    input.current?.focus();
-  }, [open]);
-  if (!open) {
-    return (
-      <button className="icon-btn" type="button" aria-label="搜索提示词" {...tip('搜索提示词')} onClick={() => setOpen(true)}>
-        <Icon name="search" />
-      </button>
-    );
-  }
-  const close = () => {
-    onQuery('');
-    setOpen(false);
-  };
-  return (
-    <div ref={field} className="search-field">
-      <Icon name="search" />
-      <input
-        ref={input}
-        className="input search"
-        type="search"
-        placeholder="搜索提示词"
-        aria-label="搜索提示词"
-        onInput={(e) => onQuery(e.currentTarget.value.trim().toLowerCase())}
-        onBlur={(e) => !e.currentTarget.value.trim() && close()}
-        onKeyDown={(e) => e.key === 'Escape' && close()}
-      />
-    </div>
-  );
-}
-
 // 「创作记录」页：全部记录，可以按类型筛选、按提示词搜索。
 export function Records() {
   useStore('history', 'recordsType', 'recordsSource');
@@ -672,7 +630,7 @@ export function Records() {
             className="filters"
           />
         </div>
-        <SearchBox onQuery={setQuery} />
+        <SearchBox label="搜索提示词" onQuery={setQuery} />
       </div>
       <CardGrid
         list={list}

@@ -4,9 +4,10 @@ import { useEffect, useRef, useState } from 'react';
 import { api, state, useStore, loadCharacters } from './store.ts';
 import { fmtTime } from './format.ts';
 import { Icon } from './ui/Icon.tsx';
-import { tip, clipTip } from './ui/controls.tsx';
+import { SearchBox, tip, clipTip } from './ui/controls.tsx';
 import { confirmDialog, openMenu, openModal, toast } from './ui/layers.tsx';
 import { Thumb, openAssetPicker } from './assets.tsx';
+import { MediaTile, AddTile } from './ui/tiles.tsx';
 import { useCharacter } from './composer/state.ts';
 import type { Character } from './types.ts';
 
@@ -49,22 +50,15 @@ function Editor({ character, done }: { character: Partial<Character>; done: () =
       </label>
       <div className="row character-images">
         {images.map((url) => (
-          <div key={url} className="ref-tile">
+          <MediaTile key={url} onRemove={() => setImages(images.filter((u) => u !== url))}>
             <Thumb thumb={url} kind="image" />
-            <button className="ref-remove" type="button" aria-label="移除" onClick={() => setImages(images.filter((u) => u !== url))}>
-              <Icon name="x" size={10} stroke={2} />
-            </button>
-          </div>
+          </MediaTile>
         ))}
         {images.length < MAX_IMAGES && (
-          <button
-            className="ref-tile ref-add"
-            type="button"
-            aria-label="添加参考图"
-            onClick={() => openAssetPicker({ kind: 'image', local: true, sources: ['upload', 'records'], remaining: MAX_IMAGES - images.length, onPick: (ref) => setImages((list) => (list.includes(ref.url) ? list : [...list, ref.url].slice(0, MAX_IMAGES))) })}
-          >
-            <Icon name="plus" size={18} />
-          </button>
+          <AddTile
+            label="添加参考图"
+            onClick={() => openAssetPicker({ title: '添加参考图', kind: 'image', local: true, sources: ['upload', 'records'], usedUrls: images, remaining: MAX_IMAGES - images.length, onPick: (ref) => setImages((list) => (list.includes(ref.url) ? list : [...list, ref.url].slice(0, MAX_IMAGES))) })}
+          />
         )}
       </div>
       <p className="muted small">建议上传正脸、全身、侧面各一张</p>
@@ -128,10 +122,7 @@ export function Characters() {
         <div>
           <h1>角色</h1>
         </div>
-        <div className="search-field">
-          <Icon name="search" />
-          <input className="input search" type="search" placeholder="搜索角色" aria-label="搜索角色" onInput={(e) => setQuery(e.currentTarget.value.trim().toLowerCase())} />
-        </div>
+        <SearchBox label="搜索角色" onQuery={setQuery} />
       </header>
       <div className="project-grid character-grid">
         {!query && (

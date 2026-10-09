@@ -5,7 +5,7 @@ import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { api, canvasInPath, canvasPath, setImmersive } from '../store.ts';
 import { fmtTime } from '../format.ts';
 import { Icon } from '../ui/Icon.tsx';
-import { tip, clipTip } from '../ui/controls.tsx';
+import { SearchBox, tip, clipTip } from '../ui/controls.tsx';
 import { confirmDialog, openMenu, openModal, toast } from '../ui/layers.tsx';
 
 // 画布用到的库比较大，第一次点进项目时才加载。
@@ -139,10 +139,7 @@ export function Projects() {
         <div>
           <h1>画布</h1>
         </div>
-        <div className="search-field">
-          <Icon name="search" />
-          <input className="input search" type="search" placeholder="搜索项目" aria-label="搜索项目" onInput={(e) => setQuery(e.currentTarget.value.trim().toLowerCase())} />
-        </div>
+        <SearchBox label="搜索项目" onQuery={setQuery} />
       </header>
       <div className="project-grid">
         {!query && (

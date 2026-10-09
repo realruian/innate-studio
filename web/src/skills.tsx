@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, state, useStore, loadSkills, goTo } from './store.ts';
 import { Icon } from './ui/Icon.tsx';
-import { Segmented, tip } from './ui/controls.tsx';
+import { Segmented, SearchBox, tip } from './ui/controls.tsx';
 import { confirmDialog, openMenu, openModal, toast } from './ui/layers.tsx';
 import { composer, activeSkill, setSkill } from './composer/state.ts';
 import type { Skill } from './types.ts';
@@ -13,9 +13,10 @@ type SkillType = Skill['type'];
 const TYPE_LABELS: Record<SkillType, string> = { video: '视频', image: '图片' };
 const TYPE_OPTIONS = (Object.keys(TYPE_LABELS) as SkillType[]).map((value) => ({ value, label: TYPE_LABELS[value] }));
 const message = (err: unknown) => (err as Error).message;
-const matches = (skill: Skill, query: string) => `${skill.name}\n${skill.description}`.toLowerCase().includes(query);
+const matches = (skill: Skill, query: string) => `${skill.name}\n${skill.description}\n${(skill.tags || []).join('\n')}`.toLowerCase().includes(query);
+const parseTags = (text: string) => [...new Set(text.split(/[,，、;；\s]+/).filter(Boolean))];
 
-// 一行技能：图标、名字、官方标记，下面一行说明。面板和「技能」页都用它。
+// 一行技能：图标、名字、官方标记，下面一行说明。面板和「技能」页都用它；「技能」页多带类型和标签。
 function SkillLine({ skill, typed }: { skill: Skill; typed?: boolean }) {
   return (
     <>
@@ -23,8 +24,13 @@ function SkillLine({ skill, typed }: { skill: Skill; typed?: boolean }) {
       <span className="skill-text">
         <span className="skill-name">
           <span className="ellipsis">{skill.name}</span>
-          {skill.official && <span className="badge badge-pending">官方</span>}
+          {skill.official && <span className="badge badge-mark">官方</span>}
           {typed && <span className="badge badge-pending">{TYPE_LABELS[skill.type]}</span>}
+          {typed && (skill.tags || []).map((tag) => (
+            <span key={tag} className="badge badge-pending">
+              {tag}
+            </span>
+          ))}
         </span>
         <span className="skill-desc ellipsis">{skill.description || '暂无简介'}</span>
       </span>
@@ -39,6 +45,7 @@ function Editor({ skill, done }: { skill: Partial<Skill>; done: () => void }) {
   const locked = Boolean(skill.official);
   const name = useRef<HTMLInputElement>(null);
   const description = useRef<HTMLInputElement>(null);
+  const tags = useRef<HTMLInputElement>(null);
   const rules = useRef<HTMLTextAreaElement>(null);
   const [type, setType] = useState<SkillType>(skill.type || 'video');
   const [saving, setSaving] = useState(false);
@@ -49,7 +56,7 @@ function Editor({ skill, done }: { skill: Partial<Skill>; done: () => void }) {
   }, []);
 
   async function save() {
-    const body = { name: name.current!.value, description: description.current!.value, type, rules: rules.current!.value };
+    const body = { name: name.current!.value, description: description.current!.value, type, tags: parseTags(tags.current!.value), rules: rules.current!.value };
     setSaving(true);
     try {
       await (skill.id ? api('PUT', `/api/skills/${skill.id}`, body) : api('POST', '/api/skills', body));
@@ -69,6 +76,8 @@ function Editor({ skill, done }: { skill: Partial<Skill>; done: () => void }) {
       <input ref={description} className="input" type="text" defaultValue={skill.description || ''} maxLength={120} readOnly={locked} placeholder="技能简介" />
       <label className="field-label">适用类型</label>
       <div>{locked ? <span className="badge badge-pending">{TYPE_LABELS[type]}</span> : <Segmented options={TYPE_OPTIONS} value={type} onChange={setType} />}</div>
+      <label className="field-label">标签</label>
+      <input ref={tags} className="input" type="text" defaultValue={(skill.tags || []).join('，')} readOnly={locked} placeholder="最多 3 个，用逗号分隔" />
       <label className="field-label">规则</label>
       <textarea ref={rules} className="input skill-rules" rows={12} defaultValue={skill.rules || ''} maxLength={8000} readOnly={locked} placeholder="提示词扩写规则：内容要求、禁止项、输出格式" />
       {locked && <p className="muted small">官方技能不可修改</p>}
@@ -153,6 +162,7 @@ export function SkillPanel({ close }: { close: () => void }) {
 export function Skills() {
   useStore('skills');
   const [query, setQuery] = useState('');
+  const [picked, setPicked] = useState('');
   useEffect(() => {
     loadSkills().catch((err) => toast(`技能加载失败：${message(err)}`, 'error', 6000));
   }, []);
@@ -178,24 +188,31 @@ export function Skills() {
     });
   }
 
-  const shown = (state.skills || []).filter((skill) => matches(skill, query));
+  // 筛选项是现有技能用到的全部标签，按出现的先后排。选着的标签没有技能在用了（改了、删了）就回到「全部」。
+  const tags = [...new Set((state.skills || []).flatMap((skill) => skill.tags || []))];
+  const tag = tags.includes(picked) ? picked : '';
+  const shown = (state.skills || []).filter((skill) => (!tag || skill.tags?.includes(tag)) && matches(skill, query));
   return (
     <div className="page">
       <header className="page-head">
         <div>
           <h1>技能</h1>
         </div>
-        <div className="row">
-          <div className="search-field">
-            <Icon name="search" />
-            <input className="input search" type="search" placeholder="搜索技能" aria-label="搜索技能" onInput={(e) => setQuery(e.currentTarget.value.trim().toLowerCase())} />
-          </div>
-          <button className="btn btn-primary" type="button" onClick={() => openSkillEditor()}>
-            <Icon name="plus" />
-            新建技能
-          </button>
-        </div>
+        <button className="btn btn-primary" type="button" onClick={() => openSkillEditor()}>
+          <Icon name="plus" />
+          新建技能
+        </button>
       </header>
+      <div className="page-tools">
+        <div className="tag-filter" role="group" aria-label="标签">
+          {['', ...tags].map((item) => (
+            <button key={item} className={`tag-chip ${item === tag ? 'active' : ''}`} type="button" aria-pressed={item === tag} onClick={() => setPicked(item)}>
+              {item || '全部'}
+            </button>
+          ))}
+        </div>
+        <SearchBox label="搜索技能" onQuery={setQuery} />
+      </div>
       <div className="skill-page-list">
         {shown.map((skill) => (
           <div key={skill.id} className="skill-card">
@@ -209,7 +226,7 @@ export function Skills() {
             )}
           </div>
         ))}
-        {state.skills && !shown.length && <div className="empty">没有带「{query}」的技能</div>}
+        {state.skills && !shown.length && <div className="empty">{query ? `未找到「${query}」` : '暂无技能'}</div>}
       </div>
     </div>
   );

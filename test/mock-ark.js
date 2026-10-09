@@ -14,6 +14,7 @@ import crypto from 'node:crypto';
 
 export const MOCK_ARK_KEY = '0a1b2c3d-mock-4e5f-ark0-testkey00001';
 export const MOCK_SPEECH_KEY = 'mock-doubao-speech-key-0001';
+export const MOCK_ACCESS_KEY = { id: 'AKLTmockaccesskeyid0001', secret: 'bW9ja3NlY3JldGFjY2Vzc2tleQ==' };
 
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
 
@@ -56,6 +57,13 @@ export function startMock({ port = 0, taskSeconds = 14 } = {}) {
       const bytes = Buffer.from(`mock ark video ${file[1]}`);
       res.writeHead(200, { 'Content-Type': 'video/mp4', 'Content-Length': bytes.length });
       return res.end(bytes);
+    }
+
+    // 费用中心查余额：不认 API Key，要带签名。这里只核对签名头的样子和 Access Key ID。
+    if (req.method === 'GET' && pathname === '/' && new URL(req.url, 'http://mock').searchParams.get('Action') === 'QueryBalanceAcct') {
+      const ok = new RegExp(`^HMAC-SHA256 Credential=${MOCK_ACCESS_KEY.id}/\\d{8}/cn-north-1/billing/request, SignedHeaders=host;x-content-sha256;x-date, Signature=[0-9a-f]{64}$`).test(req.headers.authorization || '');
+      if (!ok || !/^\d{8}T\d{6}Z$/.test(req.headers['x-date'] || '')) return json(res, 401, { ResponseMetadata: { Error: { Code: 'SignatureDoesNotMatch', Message: 'signature mismatch' } } });
+      return json(res, 200, { ResponseMetadata: { Action: 'QueryBalanceAcct', Service: 'billing' }, Result: { AccountID: 2100000001, ArrearsBalance: '0.00', AvailableBalance: '77.01', CashBalance: '83.01', CreditLimit: '0.00', FreezeAmount: '6.00' } });
     }
 
     // 豆包语音：Key 放在 X-Api-Key 里，响应体是一个接一个的 JSON，中间没有分隔。

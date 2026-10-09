@@ -147,7 +147,7 @@ export function buildSpecRequest(form: VideoForm, spec: VideoSpec, platform = '�
 
   const used = refsInUse(form);
   if (used.some((r) => r.source === 'asset')) problems.push(`${platform} 不支持 Flatkey 素材库的素材，请移除后重新添加`);
-  else if (used.some((r) => r.kind !== 'image' && r.source === 'local')) problems.push('参考视频和音频仅支持公网链接');
+  else if (used.some((r) => r.kind === 'video' && r.source === 'local')) problems.push('参考视频仅支持公网链接');
 
   if (spec.audio) payload.generate_audio = Boolean(form.generateAudio);
   const seed = String(form.seed).trim();

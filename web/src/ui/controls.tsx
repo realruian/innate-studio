@@ -1,8 +1,9 @@
 // 表单控件。所有页面都只用这里的控件，不直接用浏览器原生的下拉框、勾选框和折叠标签。
 
-import { useEffect, useLayoutEffect, useRef, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { Icon, type IconName } from './Icon.tsx';
 import { openMenu } from './layers.tsx';
+import { enter } from './motion.ts';
 
 // 悬停时显示自绘的提示气泡（代替原生的 title）。用法：<button {...tip('说明')}>
 export const tip = (text?: string | null | false) => (text ? { 'data-tip': text } : undefined);
@@ -97,7 +98,7 @@ export function Slider({ value, min, max, from = min, marks = [], onChange, labe
 }
 
 // 设置项的一行：左边名称（可带一句说明），右边控件。
-export function FormRow({ label, desc, children }: { label: string; desc?: string; children: ReactNode }) {
+export function FormRow({ label, desc, children }: { label: string; desc?: ReactNode; children: ReactNode }) {
   return (
     <div className="form-row">
       <div className="form-label">
@@ -143,5 +144,43 @@ export function Dropdown({ label, value, options, onChange, variant = 'field', i
       </span>
       {(!tool || chevron) && <Icon name="chevron" size={12} />}
     </button>
+  );
+}
+
+// 页面上的搜索。用得少，平时只是一个图标，点了才展开成输入框；清空并离开后收回去。交出去的词已去掉首尾空格、转成小写。
+export function SearchBox({ label, onQuery }: { label: string; onQuery: (query: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const field = useRef<HTMLDivElement>(null);
+  const input = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    enter(field.current, { y: 0, scale: 0.96, duration: 150 });
+    input.current?.focus();
+  }, [open]);
+  if (!open) {
+    return (
+      <button className="icon-btn" type="button" aria-label={label} {...tip(label)} onClick={() => setOpen(true)}>
+        <Icon name="search" />
+      </button>
+    );
+  }
+  const close = () => {
+    onQuery('');
+    setOpen(false);
+  };
+  return (
+    <div ref={field} className="search-field">
+      <Icon name="search" />
+      <input
+        ref={input}
+        className="input search"
+        type="search"
+        placeholder={label}
+        aria-label={label}
+        onInput={(e) => onQuery(e.currentTarget.value.trim().toLowerCase())}
+        onBlur={(e) => !e.currentTarget.value.trim() && close()}
+        onKeyDown={(e) => e.key === 'Escape' && close()}
+      />
+    </div>
   );
 }

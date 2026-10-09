@@ -10,7 +10,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startMock as startFlatkey } from './mock-flatkey.js';
-import { startMock as startArk, MOCK_ARK_KEY, MOCK_SPEECH_KEY } from './mock-ark.js';
+import { startMock as startArk, MOCK_ARK_KEY, MOCK_SPEECH_KEY, MOCK_ACCESS_KEY } from './mock-ark.js';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 let flatkey;
@@ -64,7 +64,7 @@ const IMAGE = 'doubao-seedream-5-0-pro-260628';
 const videoPayload = (prompt, extra = {}) => ({ model: VIDEO, prompt, duration: 5, resolution: '720p', aspect_ratio: '16:9', ...extra });
 const sent = (pathname) => ark.log.filter((entry) => entry.method === 'POST' && entry.pathname === pathname).map((entry) => JSON.parse(entry.body));
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
-const upload = async () => (await (await fetch(`${base}/api/uploads`, { method: 'POST', headers: { 'Content-Type': 'image/png' }, body: PNG })).json()).url;
+const upload = async (type = 'image/png') => (await (await fetch(`${base}/api/uploads`, { method: 'POST', headers: { 'Content-Type': type }, body: PNG })).json()).url;
 
 before(async () => {
   flatkey = await startFlatkey({ taskSeconds: 0.5, assetSeconds: 0.5 });
@@ -76,7 +76,7 @@ before(async () => {
     cwd: root,
     stdio: 'ignore',
     // Key 的环境变量都置空：即使本机设置了真实 Key，测试也绝不会用到它。
-    env: { ...process.env, PORT: String(port), FLATKEY_BASE_URL: flatkey.url, ARK_BASE_URL: ark.url, DOUBAO_SPEECH_BASE_URL: ark.url, SEEDANCE_DATA_DIR: dataDir, DOUBAO_SPEECH_API_KEY: '', FLATKEY_API_KEY: '', ARK_API_KEY: '' },
+    env: { ...process.env, PORT: String(port), FLATKEY_BASE_URL: flatkey.url, ARK_BASE_URL: ark.url, DOUBAO_SPEECH_BASE_URL: ark.url, VOLC_BILLING_BASE_URL: ark.url, VOLC_ACCESS_KEY_ID: '', VOLC_SECRET_ACCESS_KEY: '', SEEDANCE_DATA_DIR: dataDir, DOUBAO_SPEECH_API_KEY: '', FLATKEY_API_KEY: '', ARK_API_KEY: '' },
   });
   await waitFor(async () => (await fetch(`${base}/api/state`)).ok, '服务启动');
 });
@@ -121,7 +121,21 @@ test('模型列表：型号和各自支持什么是登记好的，连一次接�
   assert.equal(ark.log.some((entry) => entry.method === 'GET' && entry.pathname === '/contents/generations/tasks' && entry.authed), true);
 });
 
-test('余额：方舟没有查余额的接口，告诉页面读不到', async () => {
+test('余额：方舟的 API Key 查不了，配了账号的 Access Key 才到费用中心查', async () => {
+  assert.deepEqual((await call('GET', '/api/credits')).data, { unavailable: true });
+  // 一对里少一项、或者签名对不上的，都不存。
+  assert.equal((await call('PUT', '/api/key', { service: 'billing', accessKeyId: MOCK_ACCESS_KEY.id })).status, 400);
+  const wrong = await call('PUT', '/api/key', { service: 'billing', accessKeyId: 'AKLTsomeoneelse', secretAccessKey: MOCK_ACCESS_KEY.secret });
+  assert.equal(wrong.status, 401);
+  assert.match(wrong.data.error.message, /Access Key 无效/);
+  assert.deepEqual((await call('GET', '/api/credits')).data, { unavailable: true });
+
+  const saved = (await call('PUT', '/api/key', { service: 'billing', accessKeyId: MOCK_ACCESS_KEY.id, secretAccessKey: MOCK_ACCESS_KEY.secret })).data;
+  assert.equal(saved.billing?.hasKey, true, JSON.stringify(saved));
+  assert.equal(saved.billing.keyHint.includes(MOCK_ACCESS_KEY.secret), false);
+  assert.deepEqual((await call('GET', '/api/credits')).data, { currency: 'CNY', remaining: 77.01, cash: 83.01, arrears: 0 });
+
+  assert.equal((await call('DELETE', '/api/key?service=billing')).data.billing.hasKey, false);
   assert.deepEqual((await call('GET', '/api/credits')).data, { unavailable: true });
 });
 
@@ -165,6 +179,15 @@ test('参考生成：图片、视频、音频各有各的 role；参考视频只
   assert.deepEqual(content.slice(1).map((c) => [c.type, c.role]), [['image_url', 'reference_image'], ['video_url', 'reference_video'], ['audio_url', 'reference_audio']]);
   assert.equal(content[2].video_url.url, 'https://example.com/a.mp4');
 
+  // 本机的参考音频内嵌进请求，类型写文件格式本身
+  const audio = await upload('audio/mpeg');
+  assert.match(audio, /\.mp3$/);
+  const withAudio = await call('POST', '/api/videos', { payload: videoPayload('按音频1的节奏', { input_references: [{ type: 'image_url', image_url: { url } }, { type: 'audio_url', audio_url: { url: audio } }] }) });
+  assert.equal(withAudio.status, 200);
+  const inlined = sent('/contents/generations/tasks').at(-1).content.at(-1);
+  assert.equal(inlined.role, 'reference_audio');
+  assert.match(inlined.audio_url.url, /^data:audio\/mp3;base64,/);
+
   const before = sent('/contents/generations/tasks').length;
   const local = await call('POST', '/api/videos', { payload: videoPayload('延长', { input_references: [{ type: 'video_url', video_url: { url: '/media/videos/a.mp4' } }] }) });
   assert.equal(local.status, 400);
@@ -201,7 +224,7 @@ test('生图：要几张发几次，大小按画面比例换成像素值，不�
     return items.every((i) => i.status === 'completed') ? items : null;
   }, '两张图都生成完');
   assert.match(done[0].mediaUrl, /^\/media\/images\/img_\w+\.jpg$/);
-  assert.equal(done[0].usage, null);
+  assert.deepEqual(done[0].usage, { generated_images: 1, total_tokens: 16384, size: '2048x1152' });
   assert.deepEqual(sent('/images/generations').slice(-2), Array(2).fill({ model: IMAGE, prompt: '窗台上的猫', size: '2048x1152', response_format: 'b64_json', watermark: false }));
 
   // 选了分辨率档位：按那一档的像素发；这个模型没有的档位直接拒掉，不发出去。
@@ -269,6 +292,7 @@ test('语音：用豆包语音，Key 另外存；音色是登记好的；音频�
   assert.equal(created.data.model, 'seed-tts-2.0');
   const done = await waitFor(async () => (await call('GET', '/api/history')).data.items.find((i) => i.id === created.data.id && i.status === 'completed'), '语音生成完');
   assert.match(done.mediaUrl, /^\/media\/audio\/aud_\w+\.mp3$/);
+  assert.deepEqual(done.usage, { text_words: 5 });
   assert.equal(await (await fetch(base + done.mediaUrl)).text(), 'mock mp3 zh_female_vv_uranus_bigtts 你好，世界');
   const request = sent('/api/v3/tts/unidirectional').at(-1);
   assert.deepEqual(request, { req_params: { text: '你好，世界', speaker: 'zh_female_vv_uranus_bigtts', audio_params: { format: 'mp3', sample_rate: 24000 } } });

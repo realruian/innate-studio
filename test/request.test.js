@@ -269,6 +269,11 @@ test('火山方舟参考生成：素材放在 input_references 里；本机的�
 
   const localVideo = { image: [], video: [{ uid: 'v', kind: 'video', source: 'local', url: '/media/videos/a.mp4' }], audio: [] };
   assert.match(buildSpecRequest(orForm({ mode: 'reference', refs: localVideo }), spec()).problems[0], /公网链接/);
+  // 本机的参考音频可以用：由本地服务内嵌进请求
+  const localAudio = { image: [], video: [], audio: [{ uid: 'a', kind: 'audio', source: 'local', url: '/media/uploads/a.mp3' }] };
+  const withAudio = buildSpecRequest(orForm({ mode: 'reference', refs: localAudio }), spec());
+  assert.deepEqual(withAudio.problems, []);
+  assert.deepEqual(withAudio.payload.input_references, [{ type: 'audio_url', audio_url: { url: '/media/uploads/a.mp3' } }]);
   const fromLibrary = { image: [{ uid: 'a', kind: 'image', source: 'asset', assetId: 'ast_1', url: 'asset://ast_1' }], video: [], audio: [] };
   assert.match(buildSpecRequest(orForm({ mode: 'reference', refs: fromLibrary }), spec()).problems[0], /素材库/);
 });

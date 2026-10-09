@@ -135,6 +135,10 @@ interface PickerOptions {
   remaining?: number;
   limits?: Partial<Record<Kind, number>>;
   usedIds?: string[];
+  // 已经用上的本机文件的地址：生成记录里同一份不让加第二次。
+  usedUrls?: string[];
+  // 弹窗的标题。没给就按能选的类型写。
+  title?: string;
   onPick: (ref: Ref) => void;
   // 为 true 时选的是只存在本机的素材（见 media.ts 里"只存在本机的素材"），不经过 Flatkey 的素材库。
   local?: boolean;
@@ -169,7 +173,7 @@ function AssetGrid({ list, kinds, used, emptyText, onPick }: { list: Asset[]; ki
 const labelsOf = (kinds: Kind[]) => kinds.map((kind) => KINDS[kind].label).join('、');
 
 // 生成记录里已经存到本机的结果。选中后：本机素材直接引用这个文件；要进素材库的先传上去。
-function RecordGrid({ kinds, local, onPick }: { kinds: Kind[]; local: boolean; onPick: (ref: Ref) => void }) {
+function RecordGrid({ kinds, local, usedUrls, onPick }: { kinds: Kind[]; local: boolean; usedUrls: string[]; onPick: (ref: Ref) => void }) {
   const [busy, setBusy] = useState('');
   const list = state.history.filter((i) => kinds.includes(i.kind) && i.status === 'completed' && i.savedLocally).slice(0, 60);
   if (!list.length) return <div className="empty small-empty">暂无{labelsOf(kinds)}</div>;
@@ -187,10 +191,10 @@ function RecordGrid({ kinds, local, onPick }: { kinds: Kind[]; local: boolean; o
   return (
     <div className="pick-grid">
       {list.map((item) => (
-        <button key={item.id} className="pick-card" type="button" disabled={Boolean(busy)} {...tip(item.prompt)} onClick={() => choose(item)}>
+        <button key={item.id} className="pick-card" type="button" disabled={Boolean(busy) || usedUrls.includes(item.mediaUrl!)} {...tip(item.prompt)} onClick={() => choose(item)}>
           <div className="pick-thumb">{item.kind === 'video' ? <video className="thumb-img" src={item.mediaUrl} preload="metadata" muted playsInline /> : <Thumb thumb={item.kind === 'image' ? item.mediaUrl : null} kind={item.kind} />}</div>
           <div className="pick-name ellipsis">{recordName(item)}</div>
-          <span className="badge badge-pending">{busy === item.id ? (local ? '加载中' : '上传中') : fmtTime(item.createdAt)}</span>
+          {usedUrls.includes(item.mediaUrl!) ? <span className="badge badge-ok">已添加</span> : <span className="badge badge-pending">{busy === item.id ? (local ? '加载中' : '上传中') : fmtTime(item.createdAt)}</span>}
         </button>
       ))}
     </div>
@@ -265,7 +269,7 @@ function PersonAssets({ kinds, used, onPick }: { kinds: Kind[]; used: Set<string
   );
 }
 
-function AssetPicker({ kind, remaining = 1, limits, usedIds = [], onPick, local = false, sources, close }: PickerOptions & { sources: Source[]; close: () => void }) {
+function AssetPicker({ kind, remaining = 1, limits, usedIds = [], usedUrls = [], onPick, local = false, sources, close }: PickerOptions & { sources: Source[]; close: () => void }) {
   useStore('assets');
   const [tab, setTab] = useState(sources[0]);
   // 每种素材还能加几个。选一个少一个。
@@ -309,7 +313,7 @@ function AssetPicker({ kind, remaining = 1, limits, usedIds = [], onPick, local 
           />
         )}
         {tab === 'library' && <AssetGrid list={state.assets} kinds={kinds} used={used} emptyText={`暂无${labelsOf(kinds)}素材`} onPick={pickAsset} />}
-        {tab === 'records' && <RecordGrid kinds={kinds} local={local} onPick={pickAndClose} />}
+        {tab === 'records' && <RecordGrid kinds={kinds} local={local} usedUrls={usedUrls} onPick={pickAndClose} />}
         {tab === 'person' && <PersonAssets kinds={kinds} used={used} onPick={pickAsset} />}
         {tab === 'character' && (
           <CharacterGrid
@@ -329,7 +333,7 @@ export function openAssetPicker(options: PickerOptions) {
   const kinds = options.limits ? (Object.keys(options.limits) as Kind[]) : [options.kind!];
   // 角色的参考图是本机的图片，所以只在选本机图片时出现。
   const sources: Source[] = options.sources ?? (options.local ? ['upload', 'records', ...(kinds.includes('image') ? (['character'] as const) : [])] : ['upload', 'library', 'person', 'records']);
-  const modal = openModal({ title: kinds.length > 1 ? '添加参考素材' : `添加${KINDS[kinds[0]].label}`, size: 'md', content: <AssetPicker {...options} sources={sources} close={() => modal.close()} /> });
+  const modal = openModal({ title: options.title || (kinds.length > 1 ? '添加参考素材' : `添加${KINDS[kinds[0]].label}`), size: 'md', content: <AssetPicker {...options} sources={sources} close={() => modal.close()} /> });
 }
 // ---------- 素材库页面 ----------
 

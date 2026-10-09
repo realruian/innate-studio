@@ -11,6 +11,8 @@ export interface Skill {
   description: string;
   // 用在哪种创作上。
   type: 'video' | 'image';
+  // 分类用的标签，最多 3 个。「技能」页按它筛选。
+  tags?: string[];
   // 给文本模型的规则（系统提示词）。
   rules: string;
   official?: boolean;
@@ -101,7 +103,7 @@ const MULTI_SHOT = `你现在写 Seedance 2 的多镜成片提示词。用户写
 10 秒。0s-4s：手持中景跟拍，成年女人穿过昏暗仓库，侧身避开倒下的木架，动作连续。4s-7s：低机位全景，成年男人从另一条通道截住出口，两人隔着货箱对峙。7s-10s：快速推近女人握紧的右手，她停住脚步，目光转向旁边半开的铁门。脚步与木架落地声贴合动作；不要字幕、水印或标志。`;
 
 export const OFFICIAL_SKILLS: Skill[] = [
-  { id: 'official-multi-shot', name: '多镜头成片', description: '把一段剧情按时间轴拆成几个镜头，写明每段的景别、机位、运镜和光线', type: 'video', rules: MULTI_SHOT, official: true },
-  { id: 'official-character-sheet', name: '角色设定图', description: '白底上同一角色的正面、全身、侧面、背面四个视角，适合存进角色库', type: 'image', rules: CHARACTER_SHEET, official: true },
-  { id: 'official-first-frame', name: '分镜首帧', description: '把一个镜头的剧情写成一张静止画面：谁在哪、什么姿态、看向哪里，适合当视频首帧', type: 'image', rules: FIRST_FRAME, official: true },
+  { id: 'official-multi-shot', name: '多镜头成片', description: '把一段剧情按时间轴拆成几个镜头，写明每段的景别、机位、运镜和光线', type: 'video', tags: ['成片'], rules: MULTI_SHOT, official: true },
+  { id: 'official-character-sheet', name: '角色设定图', description: '白底上同一角色的正面、全身、侧面、背面四个视角，适合存进角色库', type: 'image', tags: ['角色'], rules: CHARACTER_SHEET, official: true },
+  { id: 'official-first-frame', name: '分镜首帧', description: '把一个镜头的剧情写成一张静止画面：谁在哪、什么姿态、看向哪里，适合当视频首帧', type: 'image', tags: ['分镜'], rules: FIRST_FRAME, official: true },
 ];

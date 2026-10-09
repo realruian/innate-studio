@@ -14,6 +14,7 @@ import { Projects } from './canvas/Projects.tsx';
 import { Characters } from './characters.tsx';
 import { Skills } from './skills.tsx';
 import { openSettings } from './settings.tsx';
+import { SpendButton } from './spend.tsx';
 import type { ViewId } from './types.ts';
 
 // 七项是同一层的页签。「创造」是首页，在首页再点一次会回到顶部并把光标放回输入框。
@@ -82,6 +83,8 @@ export function App() {
         </div>
       </aside>
       <main ref={main} className="main">
+        {/* 右上角的消费入口。进了画布就收起，那里的右上角是画布自己的工具。 */}
+        {state.booted && !(state.immersive && view === 'canvas') && <SpendButton />}
         <div className="view view-create" hidden={view !== 'create'}>
           {state.booted && (
             <>

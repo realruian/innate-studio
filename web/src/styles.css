@@ -26,6 +26,8 @@
   --text-off: #696969;
   --text-strong: #ffffff;
   --accent: #6ea8fe;
+  /* 标记色：只给技能这类小标记上色，不用在按钮上 */
+  --mark: #a898ff;
   --ok: #4cc38a;
   --warn: #e2a63b;
   --danger: #f2706b;
@@ -36,6 +38,7 @@
   --switch-knob: #a3a3a3;
   --shadow-float: 0 8px 24px rgba(0, 0, 0, 0.5);
   --shadow-lift: 0 16px 32px -12px rgba(0, 0, 0, 0.55);
+  --shadow-tile: 0 2px 6px -1px rgba(0, 0, 0, 0.4);
   /* 盖在图片和视频上的东西（角标、按钮、控制条）固定是半透明黑底白字，两种主题一样 */
   --scrim: rgba(0, 0, 0, 0.55);
   --scrim-strong: rgba(0, 0, 0, 0.75);
@@ -116,6 +119,7 @@
   --text-off: #8a8a8a;
   --text-strong: #000000;
   --accent: #2f6fec;
+  --mark: #6753f3;
   --ok: #1a9060;
   --warn: #a66a00;
   --danger: #d23f37;
@@ -126,6 +130,14 @@
   --switch-knob: #ffffff;
   --shadow-float: 0 4px 12px rgba(0, 0, 0, 0.06);
   --shadow-lift: 0 16px 32px -12px rgba(0, 0, 0, 0.12);
+  --shadow-tile: 0 2px 6px -1px rgba(0, 0, 0, 0.14);
+}
+
+/* 浅色下 --surface-2、--surface-3 加深过一档，是给直接垫在页面底图上的块用的（底图带颜色，浅了分不开）。
+   白色的卡片、弹窗、浮层里面底色是纯的，用回原来浅的那一档。 */
+:root[data-theme='light'] :is(.popover, .composer-card, .modal, .skill-card, .asset-card, .person-list, .person-detail, .cnode-box, .cnode-panel, .cfind, .canvas-tools, .canvas-foot) {
+  --surface-2: #f3f3f3;
+  --surface-3: #eaeaea;
 }
 
 /* 悬停样式都包在 @media (hover: hover) 里：触屏上点一下会一直停在悬停状态，所以只在有鼠标的设备上生效。 */
@@ -228,7 +240,29 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .nav-dot { margin-left: auto; }
 .sidebar-foot { margin-top: auto; padding-top: var(--sp-8); }
 
-.main { min-width: 0; height: 100vh; overflow: hidden; }
+.main { position: relative; min-width: 0; height: 100vh; overflow: hidden; }
+/* 右上角的消费入口和点开的明细。按钮浮在页面上方的留白里，不占版面 */
+.spend-btn { position: absolute; z-index: 5; top: var(--sp-12); right: var(--sp-24); display: inline-flex; align-items: center; gap: var(--sp-8); height: var(--h-sm); padding: 0 var(--sp-12); border: 0; border-radius: var(--r-sm); background: var(--hover); color: var(--text); font-size: var(--text-caption); font-variant-numeric: tabular-nums; cursor: pointer; transition: background-color var(--t-fast) var(--ease); }
+.spend-btn-label { color: var(--text-3); }
+.spend-btn[aria-expanded='true'] { background: var(--surface-3); }
+@media (hover: hover) { .spend-btn:hover { background: var(--surface-3); } }
+.spend-popover { width: 340px; max-height: min(520px, calc(100vh - 80px)); }
+.spend { display: flex; flex-direction: column; min-height: 0; padding: var(--sp-12); gap: var(--sp-8); }
+.spend-totals { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--sp-4); margin: 0; }
+.spend-totals > div { padding: var(--sp-8) var(--sp-12); border-radius: var(--r-sm); background: var(--hover); }
+.spend-totals dt { color: var(--text-3); font-size: var(--text-micro); }
+.spend-totals dd { margin: var(--sp-2) 0 0; font-size: var(--text-body); font-weight: var(--fw-medium); font-variant-numeric: tabular-nums; }
+.spend-list { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.spend-row { display: flex; align-items: center; gap: var(--sp-12); width: 100%; padding: var(--sp-8); border: 0; border-radius: var(--r-xs); background: none; color: var(--text); text-align: left; cursor: pointer; }
+.spend-row:focus-visible { background: var(--hover); outline: 0; }
+@media (hover: hover) { .spend-row:hover { background: var(--hover); } }
+.spend-what { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; flex: 1; }
+.spend-prompt { overflow: hidden; font-size: var(--text-ui); white-space: nowrap; text-overflow: ellipsis; }
+.spend-meta, .spend-note, .spend-empty { color: var(--text-3); font-size: var(--text-micro); }
+.spend-cost { flex: none; font-size: var(--text-ui); font-variant-numeric: tabular-nums; }
+.spend-empty { padding: var(--sp-16) var(--sp-8); text-align: center; }
+.spend-note { padding: 0 var(--sp-8); }
+.spend-setup { align-self: flex-start; margin: 0 var(--sp-8); }
 /* 滚动条的位置一直留着：内容变高、滚动条出现时，页面里的东西不会因此变窄或挪位置 */
 .view { height: 100%; overflow-y: auto; scrollbar-gutter: stable; animation: fade var(--t-quick) var(--ease-out); }
 .view-create { padding: 0 var(--sp-32) var(--sp-64); }
@@ -341,13 +375,16 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 .form-control .input { width: 190px; }
 .form-control .row .input { width: 132px; flex: none; }
 .sub-panel { display: flex; flex-direction: column; margin: var(--sp-4) 0 var(--sp-8); padding: var(--sp-4) var(--sp-12); border-radius: var(--r-sm); background: var(--hover); }
-/* 设置弹窗：一组一个小标题加一张卡片。卡片和里面的控件都不描边，靠底色分开：
-   每行垫一块 --surface-2，行与行之间留 2 像素露出弹窗的底色。组与组隔 24 */
-.settings { display: flex; flex-direction: column; gap: var(--sp-24); }
-.settings-group { display: flex; flex-direction: column; gap: var(--sp-8); }
-.settings-card { display: flex; flex-direction: column; gap: var(--sp-2); border-radius: var(--r-md); overflow: hidden; }
-.settings-card > * { padding: var(--sp-8) var(--sp-16); background: var(--surface-2); }
-.settings-card > .form-row { min-height: 52px; }
+/* 设置弹窗：一组一个灰色小标题加几行设置项。组和组靠两样东西分开：
+   小标题比行里的字小一号、颜色浅两档，一眼看得出是标题；组与组隔 32，组内的行挨着 */
+.settings { display: flex; flex-direction: column; gap: var(--sp-32); }
+.settings-group > h3 { font-size: var(--text-caption); color: var(--text-3); }
+.settings > .settings-hint { margin-top: calc(var(--sp-12) * -1); }
+/* 每组的行直接放在弹窗的底色上，不再垫一层灰底：弹窗本身已经是一张卡片，里面再套一层是多余的。行的左右和小标题对齐。 */
+.settings-group { display: flex; flex-direction: column; gap: var(--sp-4); }
+.settings-card { display: flex; flex-direction: column; }
+.settings-card > * { padding: var(--sp-4) 0; }
+.settings-card > .form-row { min-height: 44px; }
 .settings-hint { font-size: var(--text-caption); color: var(--text-3); text-wrap: pretty; }
 /* Key 那一行换成输入框时，输入框占满右边 */
 .form-control.key-edit { flex: 1; }
@@ -434,27 +471,53 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 
 
 /* 参考素材（在输入框内部、提示词左边）。第一行素材的上边和提示词第一行文字的上边对齐。 */
-.media-block { grid-column: 1; grid-row: 1; align-self: start; display: flex; flex-wrap: wrap; gap: var(--sp-12) var(--sp-24); padding: var(--sp-16) 0 var(--sp-8) var(--sp-16); }
-.frames-row { display: flex; align-items: flex-start; gap: var(--sp-12); }
-.frame-slot { display: flex; flex-direction: column; align-items: center; gap: var(--sp-4); }
-.frame-slot .ref-tile { width: 96px; height: 60px; }
-.frames-swap { margin-top: var(--sp-16); }
+.media-block { grid-column: 1; grid-row: 1; align-self: start; position: relative; z-index: 2; display: flex; flex-wrap: wrap; gap: var(--sp-12) var(--sp-24); padding: var(--sp-16) 0 var(--sp-8) var(--sp-16); }
+/* 有固定位置的素材（首帧、尾帧、待配乐视频）排成一行 */
+.frames-row { display: flex; align-items: center; gap: var(--sp-8); }
+.frame-slot { display: flex; }
 .frames-swap:active:not(:disabled), .detail-nav-btn:active:not(:disabled) { scale: 0.96; }
-/* 素材多了往下排，一行最多三个，免得把提示词挤窄 */
-.ref-row { display: flex; flex-wrap: wrap; gap: var(--sp-8); max-width: calc(56px * 3 + var(--sp-8) * 2); }
-.ref-tile { position: relative; width: 56px; height: 56px; padding: 0; overflow: hidden; border: 1px solid transparent; border-radius: var(--r-sm); background: var(--surface-2); }
-.ref-tile.tone-error { border-color: var(--danger); }
+/* 素材格子：全站只有这一种（ui/tiles.tsx）。大小由所在的那一排用 --tile 定，平的、不描边；出错时才有一圈线。 */
+.ref-tile { position: relative; flex: none; display: grid; place-items: center; width: var(--tile, 56px); height: var(--tile, 56px); padding: 0; overflow: hidden; border: 0; border-radius: var(--r-sm); background: var(--surface-2); color: var(--text-3); }
+.ref-tile.tone-error { outline: 1px solid var(--danger); outline-offset: -1px; }
+.ref-face { display: grid; place-items: center; width: 100%; height: 100%; padding: 0; border: 0; background: none; color: inherit; cursor: pointer; transition: color var(--t-fast) var(--ease); }
+@media (hover: hover) { .ref-face:hover { color: var(--text); } }
+.ref-tile:has(> .ref-face[aria-expanded='true']) { outline: 1px solid var(--text-3); outline-offset: -1px; }
 .thumb-img { display: block; width: 100%; height: 100%; object-fit: cover; }
 .thumb-fallback { display: grid; place-items: center; width: 100%; height: 100%; color: var(--text-3); font-size: var(--text-micro); }
-.ref-add { display: grid; place-items: center; background: var(--hover); color: var(--text-3); font-size: var(--text-title); line-height: 1; cursor: pointer; transition: border-color var(--t-fast) var(--ease), color var(--t-fast) var(--ease), background-color var(--t-fast) var(--ease); }
+/* 加号：只垫底色。带一行小字时写着这个位置放什么 */
+.ref-add { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--sp-4); border: 0; background: var(--hover); color: var(--text-3); cursor: pointer; transition: color var(--t-fast) var(--ease), background-color var(--t-fast) var(--ease), scale var(--t-quick) var(--ease-out); }
 @media (hover: hover) { .ref-add:hover { color: var(--text); background: var(--hover-strong); } }
+.ref-add:active { scale: 0.96; }
+.ref-caption { font-size: var(--text-micro); line-height: 1; }
+/* 文件拖到输入框上：加号亮起来，表示松手就加到这里 */
+.composer-card.is-drop .ref-add { color: var(--text); background: var(--hover-strong); }
 /* 盖在缩略图上的角标固定用半透明黑底白字，不随主题变 */
-.ref-index { position: absolute; left: 4px; bottom: 4px; padding: 0 var(--sp-4); border-radius: var(--r-xs); background: var(--scrim); color: var(--on-scrim); font-size: var(--text-micro); line-height: 1; display: inline-flex; align-items: center; height: 16px; }
-.ref-state { position: absolute; inset: 0; display: grid; place-items: center; background: var(--scrim); color: var(--on-scrim); font-size: var(--text-micro); }
+.ref-tag { position: absolute; left: 0; right: 0; bottom: 0; padding: var(--sp-2) 0; background: var(--scrim); color: var(--on-scrim); font-size: var(--text-micro); line-height: 1; text-align: center; pointer-events: none; }
+.ref-state { position: absolute; inset: 0; display: grid; place-items: center; background: var(--scrim); color: var(--on-scrim); font-size: var(--text-micro); pointer-events: none; }
 .ref-state.is-error { color: color-mix(in srgb, var(--danger) 60%, var(--on-scrim)); }
 .ref-remove { position: absolute; top: 4px; right: 4px; display: grid; place-items: center; width: 16px; height: 16px; padding: 0; border: 0; border-radius: 50%; background: var(--scrim); color: var(--on-scrim); font-size: var(--text-ui); line-height: 1; cursor: pointer; opacity: 0; transition: opacity var(--t-fast) var(--ease); }
 .ref-remove:focus-visible { opacity: 1; }
 @media (hover: hover) { .ref-tile:hover .ref-remove { opacity: 1; } }
+/* 张数不固定的素材叠成一摞：每张歪一点，最新的在最上面，圆形的「+」压在右下角。摊开时盖在提示词上面，不挤它的宽度。 */
+.ref-stack { --step: calc(var(--tile, 56px) + var(--sp-8)); position: relative; width: 64px; height: 62px; transition: height var(--t-base) var(--ease-out); }
+.ref-stack::before { content: ''; position: absolute; left: calc(var(--sp-8) * -1); top: calc(var(--sp-8) * -1); width: calc(var(--cols) * var(--step) + var(--sp-8)); height: calc(var(--rows) * var(--step) + var(--sp-8)); border-radius: var(--r-md); background: var(--surface-1); opacity: 0; pointer-events: none; transition: opacity var(--t-base) var(--ease); }
+.ref-stack-item { display: contents; }
+.ref-stack .ref-tile { position: absolute; left: 0; top: 0; transition: translate var(--t-base) var(--ease-out), rotate var(--t-base) var(--ease-out), opacity var(--t-base) var(--ease), color var(--t-fast) var(--ease), background-color var(--t-fast) var(--ease), scale var(--t-quick) var(--ease-out); }
+/* 空的和只有一张时是正的，两张以上才歪着叠起来。叠着的每张外面留一圈输入框的底色、带一点很淡的投影，上下两张才分得开 */
+.ref-stack.is-multi .ref-tile { box-shadow: 0 0 0 2px var(--surface-1), var(--shadow-tile); }
+.ref-stack.is-multi .ref-tile[data-depth="0"] { rotate: -6deg; }
+.ref-stack.is-multi .ref-tile[data-depth="1"] { rotate: 5deg; }
+.ref-stack.is-multi .ref-tile[data-depth="2"] { rotate: 14deg; }
+.ref-stack.is-multi .ref-tile[data-depth="3"] { rotate: 14deg; opacity: 0; }
+.ref-add-dot { position: absolute; left: 0; top: 0; z-index: 100; translate: 42px 40px; width: 22px; height: 22px; padding: 0; border-radius: 50%; background: var(--surface-3); color: var(--text-2); box-shadow: 0 0 0 2px var(--surface-1); transition: translate var(--t-base) var(--ease-out), color var(--t-fast) var(--ease), scale var(--t-quick) var(--ease-out); }
+@media (hover: hover) { .ref-add-dot:hover { background: var(--surface-3); color: var(--text); } }
+.composer-card.is-drop .ref-add-dot { background: var(--surface-3); }
+/* 叠着的时候只有一张露在外面，移除按钮等摊开了再给 */
+.ref-stack.is-multi:not(.is-open) .ref-remove { opacity: 0; pointer-events: none; }
+.ref-stack.is-open { height: calc(var(--rows) * var(--step)); }
+.ref-stack.is-open::before { opacity: 1; pointer-events: auto; }
+.ref-stack.is-multi.is-open .ref-tile { translate: calc(var(--x) * var(--step)) calc(var(--y) * var(--step)); rotate: 0deg; opacity: 1; box-shadow: none; }
+.ref-stack.is-open .ref-add-dot { translate: calc(var(--ax) * var(--step) + 17px) calc(var(--ay) * var(--step) + 17px); }
 
 /* ---------- 创作记录 ---------- */
 
@@ -463,7 +526,7 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 .feed-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-16); flex-wrap: wrap; margin-bottom: var(--sp-16); }
 .feed-head h2 { font-weight: var(--fw-medium); color: var(--text-2); }
 /* 贴着内容区右边的无边框按钮往外挪 8，它的字、图标才和下面卡片的右边对齐 */
-.feed-head > .entry-action-btn:last-child, .page-tools > .icon-btn:last-child { margin-right: calc(var(--sp-8) * -1); }
+.feed-head > .entry-action-btn:last-child, .page-tools > .icon-btn:last-child, .page-head > .icon-btn:last-child { margin-right: calc(var(--sp-8) * -1); }
 /* 只有图标的按钮：全站只有这一种。默认 32；-sm 是 28（弹窗的关闭、卡片和节点上的小操作），-lg 是 36（画布工具栏）。
    盖在图片、视频上的加 .on-media：半透明黑底白字。各处自己的类只管位置和什么时候出现。 */
 .icon-btn { display: grid; place-items: center; flex: none; width: var(--h-md); height: var(--h-md); padding: 0; border: 0; border-radius: var(--r-sm); background: none; color: var(--text-2); cursor: pointer; transition: background-color var(--t-fast) var(--ease), color var(--t-fast) var(--ease), opacity var(--t-fast) var(--ease), scale var(--t-quick) var(--ease-out); }
@@ -480,6 +543,8 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 .search-field .icon { position: absolute; left: var(--sp-8); color: var(--text-3); pointer-events: none; }
 .search { width: 200px; }
 .search-field .search { padding-left: var(--sp-32); }
+/* 展开的搜索框一直是聚焦的，不再画聚焦的边线，否则它永远带着一圈边 */
+.search-field .search:focus { border-color: transparent; }
 
 .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: var(--sp-20); align-items: start; }
 .card { min-width: 0; }
@@ -529,7 +594,9 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 .audio-fill { width: 0; height: 100%; background: var(--text); }
 .card-state { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--sp-8); padding: var(--sp-16) var(--sp-24); background: var(--surface-1); color: var(--text-3); font-size: var(--text-caption); text-align: center; }
 .state-title { display: inline-flex; align-items: center; gap: var(--sp-8); color: var(--text); font-size: var(--text-body); }
-.card-state.is-pending .state-title::before { content: ""; width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid var(--text-3); border-top-color: var(--text); animation: spin 0.8s linear infinite; }
+/* 正在生成：状态写在左上角的小标签里，中间留空给扫光 */
+.card-state.is-pending, .cnode-state.is-pending { align-items: flex-start; justify-content: flex-start; padding: var(--sp-8); text-align: left; }
+.state-chip { padding: var(--sp-2) var(--sp-8); border-radius: var(--r-xs); background: var(--surface-3); color: var(--text-2); font-size: var(--text-micro); line-height: var(--lh-body); font-variant-numeric: tabular-nums; }
 /* 生成失败：一个淡红底的提示图标，下面是标题、原因（最多两行）和一句说明。只有图标是红的，文字用正常的字色，读起来不刺眼 */
 .card-state.is-failed { gap: var(--sp-4); }
 .state-mark { display: grid; place-items: center; width: var(--h-md); height: var(--h-md); margin-bottom: var(--sp-8); border-radius: 50%; background: color-mix(in srgb, var(--danger) 12%, transparent); color: var(--danger); }
@@ -579,6 +646,7 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 
 .badge { display: inline-flex; align-items: center; flex: none; height: 20px; padding: 0 var(--sp-8); border-radius: 999px; font-size: var(--text-micro); white-space: nowrap; }
 .badge-ok { background: color-mix(in srgb, var(--ok) 14%, transparent); color: var(--ok); }
+.badge-mark { background: color-mix(in srgb, var(--mark) 14%, transparent); color: var(--mark); }
 .badge-pending { background: var(--hover); color: var(--text-2); }
 .badge-error { background: color-mix(in srgb, var(--danger) 14%, transparent); color: var(--danger); }
 
@@ -696,10 +764,10 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 .character-images { flex-wrap: wrap; }
 
 /* ---------- 技能 ---------- */
-/* 输入框里选着的技能：写在提示词第一行的开头，灰色的图标加名字，提示词接在它后面。 */
+/* 输入框里选着的技能：写在提示词第一行的开头，标记色（--mark）的图标加名字，提示词接在它后面。 */
 /* 它和提示词叠在同一格里，提示词第一行按它的宽度缩进（宽度由 Composer 量了写到 text-indent 上）。字号、行高和提示词一样，两边才在一条线上。 */
 .skill-chip-row { grid-column: 2; grid-row: 1; align-self: start; justify-self: start; z-index: 1; display: flex; max-width: 60%; padding: var(--sp-16) 0 0 var(--sp-16); pointer-events: none; }
-.skill-chip { display: inline-flex; align-items: center; gap: var(--sp-4); min-width: 0; height: calc(var(--text-body) * var(--lh-body)); color: var(--text-3); font-size: var(--text-body); pointer-events: auto; }
+.skill-chip { display: inline-flex; align-items: center; gap: var(--sp-4); min-width: 0; height: calc(var(--text-body) * var(--lh-body)); color: var(--mark); font-size: var(--text-body); pointer-events: auto; }
 .skill-chip > .icon { flex: none; }
 .skill-chip > button { display: grid; place-items: center; flex: none; width: var(--sp-16); height: var(--sp-16); padding: 0; border: 0; border-radius: var(--r-xs); background: none; color: var(--text-3); cursor: pointer; opacity: 0; transition: opacity var(--t-fast) var(--ease), color var(--t-fast) var(--ease); }
 .skill-chip > button:focus-visible { opacity: 1; }
@@ -728,6 +796,11 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 /* 底下两个入口就是菜单项，只是图标和文字的间隔跟上面的技能一样，文字才对得齐 */
 .skill-action { gap: var(--sp-12); }
 /* 「技能」页：一个技能一行，和面板里是同一种写法，外面多一圈边 */
+/* 「技能」页的标签筛选：一排可换行的小按钮，选中的垫底色 */
+.tag-filter { display: flex; flex-wrap: wrap; gap: var(--sp-4); }
+.tag-chip { height: var(--h-sm); padding: 0 var(--sp-12); border: 0; border-radius: var(--r-xs); background: none; color: var(--text-2); font-size: var(--text-ui); white-space: nowrap; cursor: pointer; transition: background-color var(--t-fast) var(--ease), color var(--t-fast) var(--ease); }
+.tag-chip.active { background: var(--hover); color: var(--text); }
+@media (hover: hover) { .tag-chip:hover { color: var(--text); } }
 .skill-page-list { display: flex; flex-direction: column; gap: var(--sp-8); }
 .skill-card { display: flex; align-items: center; gap: var(--sp-4); padding: var(--sp-4); border-radius: var(--r-md); background: var(--surface-1); }
 .skill-card > .skill-item { flex: 1; border-radius: var(--r-sm); }
@@ -925,7 +998,7 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 .cnode-badge { position: absolute; left: var(--sp-8); bottom: var(--sp-8); padding: var(--sp-2) var(--sp-8); border-radius: var(--r-xs); background: var(--scrim); color: var(--on-scrim); font-size: var(--text-micro); }
 /* 还没有内容、正在生成、失败：正中一个淡淡的图标或一句话 */
 .cnode-state { display: flex; align-items: center; justify-content: center; gap: var(--sp-8); height: 100%; min-height: 0; padding: var(--sp-16); color: var(--text-off); font-size: var(--text-caption); font-variant-numeric: tabular-nums; text-align: center; overflow: hidden; overflow-wrap: anywhere; }
-.cnode-state:has(.spinner), .cnode-state.is-failed { color: var(--text-2); }
+.cnode-state.is-failed { color: var(--text-2); }
 .cnode-state.is-failed .icon { color: var(--danger); }
 /* 文本节点：平时是一段文字，双击进去改。写多了在框里滚动 */
 .cnode-text-view, .cnode-text-edit { display: block; width: 100%; height: 100%; min-height: 0; padding: var(--sp-12); overflow-y: auto; color: var(--text); font-size: var(--text-ui); line-height: var(--lh-body); white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -936,14 +1009,8 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 /* 输入面板：只在选中一个节点时出现在它正下方。它不跟着画布缩放，大小一直不变。和创作页的输入框是同一种卡片 */
 .cnode-panel { display: flex; flex-direction: column; width: 680px; max-width: calc(100vw - var(--sp-48)); background: var(--surface-1); border: 1px solid var(--border-float); border-radius: var(--r-lg); box-shadow: var(--shadow-float); cursor: default; animation: cnode-rise var(--t-base) var(--ease-out); }
 /* 参考素材：连进来的素材各一张小图，角上写着用途；最后一个加号是再加一份 */
-.cnode-refs { display: flex; flex-wrap: wrap; gap: var(--sp-8); padding: var(--sp-20) var(--sp-20) 0; }
-.cnode-ref { position: relative; display: grid; place-items: center; flex: none; width: 64px; height: 64px; padding: 0; overflow: hidden; border: 1px solid transparent; border-radius: var(--r-sm); background: var(--surface-2); color: var(--text-3); }
-.cnode-ref > img { width: 100%; height: 100%; object-fit: cover; }
-button.cnode-ref { cursor: pointer; transition: border-color var(--t-fast) var(--ease), color var(--t-fast) var(--ease); }
-@media (hover: hover) { button.cnode-ref:hover { background: var(--surface-3); color: var(--text); } }
-button.cnode-ref[aria-expanded='true'] { border-color: var(--text-3); }
-.cnode-ref.is-text { border-color: transparent; background: color-mix(in srgb, var(--accent) 14%, var(--surface-2)); color: var(--accent); }
-.cnode-ref-tag { position: absolute; left: 0; right: 0; bottom: 0; padding: var(--sp-2) 0; background: var(--scrim); color: var(--on-scrim); font-size: var(--text-micro); line-height: 1; text-align: center; }
+.cnode-refs { --tile: 64px; display: flex; flex-wrap: wrap; gap: var(--sp-8); padding: var(--sp-20) var(--sp-20) 0; }
+.cnode-refs .ref-tile.is-text { background: color-mix(in srgb, var(--accent) 14%, var(--surface-2)); color: var(--accent); }
 .cnode-prompt { display: block; width: 100%; min-height: 104px; max-height: 280px; padding: var(--sp-20) var(--sp-20) var(--sp-8); border: 0; outline: 0; background: transparent; color: var(--text); font-size: var(--text-body); line-height: var(--lh-body); resize: none; field-sizing: content; cursor: text; }
 /* 引用连进来的节点：提示词右下角的一个 @ */
 .cnode-panel { position: relative; }
@@ -995,15 +1062,17 @@ button.cnode-ref[aria-expanded='true'] { border-color: var(--text-3); }
 /* 拖动节点时的对齐参考线：画在画布坐标里，线宽和虚线的疏密不跟着缩放变。 */
 .canvas-guides { position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: visible; pointer-events: none; }
 .canvas-guides line { stroke: var(--accent); stroke-width: 1; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; }
-/* 正在生成：框上扫过一道淡淡的光。画布的节点和创作页、记录页生成中的卡片都是它；系统设了减少动效时不显示，转圈还在 */
-.card-state.is-pending { position: relative; }
-.cnode-box:has(.spinner)::after, .card-state.is-pending::after { content: ""; position: absolute; inset: 0; background: linear-gradient(100deg, transparent 30%, color-mix(in srgb, var(--text) 7%, transparent) 50%, transparent 70%); background-size: 220% 100%; animation: sheen 1.6s linear infinite; pointer-events: none; }
-@keyframes sheen { from { background-position: 120% 0; } to { background-position: -100% 0; } }
-@media (prefers-reduced-motion: reduce) { .cnode-box:has(.spinner)::after, .card-state.is-pending::after { display: none; } }
+/* 正在生成：框上扫过一道淡淡的光。画布的节点和创作页、记录页生成中的卡片都是它；系统设了减少动效时不显示，左上角的状态标签还在 */
+/* 光带整条从框外左边移到框外右边，首尾都在看不见的地方，循环时不跳；用位移来动，不用重画 */
+.card-state.is-pending { position: relative; overflow: hidden; }
+.cnode-box:has(.cnode-state.is-pending)::after, .card-state.is-pending::after { content: ""; position: absolute; inset: 0; background: linear-gradient(100deg, transparent 10%, color-mix(in srgb, var(--text) 7%, transparent) 50%, transparent 90%); animation: sheen 1.6s linear infinite; will-change: transform; pointer-events: none; }
+@keyframes sheen { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+@media (prefers-reduced-motion: reduce) { .cnode-box:has(.cnode-state.is-pending)::after, .card-state.is-pending::after { display: none; } }
 
 /* ---------- 窄屏 ---------- */
 
 @media (max-width: 900px) {
+  .spend-btn { display: none; }
   #app { grid-template-columns: 1fr; height: auto; min-height: 100vh; }
   .sidebar { flex-direction: row; flex-wrap: wrap; align-items: center; gap: var(--sp-4); padding: var(--sp-8) var(--sp-12); }
   .brand { padding: var(--sp-4) var(--sp-12); }
@@ -1036,7 +1105,6 @@ button.cnode-ref[aria-expanded='true'] { border-color: var(--text-3); }
 /* 很窄的屏幕上素材回到提示词上面，左右并排会把提示词挤得太窄 */
 @media (max-width: 560px) {
   .media-block { grid-column: 1 / -1; padding-right: var(--sp-16); padding-bottom: 0; }
-  .ref-row { max-width: none; }
   .prompt, .skill-chip-row { grid-column: 1 / -1; grid-row: 2; }
   .composer-bar { grid-row: 3; }
 }

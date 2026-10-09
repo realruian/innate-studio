@@ -604,11 +604,17 @@ test('技能：官方的只读，自己建的能改能删，扩写时把规则�
   assert.equal(created.status, 200);
   assert.match(created.data.id, /^sk_/);
   assert.equal(created.data.name, '产品展示');
+  assert.deepEqual(created.data.tags, []);
+  assert.ok(official.every((s) => s.tags.length));
   const { id } = created.data;
   // 只改说明，别的不动。
   const edited = await call('PUT', `/api/skills/${id}`, { description: '新的说明' });
   assert.equal(edited.data.description, '新的说明');
   assert.equal(edited.data.rules, rules);
+  // 标签去掉空的和重复的，最多 3 个；不传就不动。
+  assert.equal((await call('PUT', `/api/skills/${id}`, { tags: '产品' })).status, 400);
+  assert.deepEqual((await call('PUT', `/api/skills/${id}`, { tags: [' 产品 ', '', '产品', '棚拍', '广告', '环绕'] })).data.tags, ['产品', '棚拍', '广告']);
+  assert.deepEqual((await call('PUT', `/api/skills/${id}`, { name: '产品展示' })).data.tags, ['产品', '棚拍', '广告']);
   assert.equal((await call('GET', '/api/skills')).data.items.length, official.length + 1);
 
   const before = mock.log.length;

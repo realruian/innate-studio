@@ -1,7 +1,7 @@
 // 创作输入框：上面选要生成什么（视频、图片、语音、音效、配乐），框里左边是素材、右边是提示词，下面一排工具栏，右下角提交。
 // 状态和动作在 state.ts。
 
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { state, useStore, KINDS, goTo, loadCharacters } from '../store.ts';
 import { RES_RANK } from '../request.ts';
 import { modelLabel, modelNote, referenceModeLabel } from '../../../shared/models.ts';
@@ -10,6 +10,7 @@ import { Segmented, Slider, Toggle, Dropdown, FormRow, tip, clipTip } from '../u
 import { openPopover, openMenu, toast } from '../ui/layers.tsx';
 import { enter, enterEach, reducedMotion, useOnChange, EASE_OUT } from '../ui/motion.ts';
 import { Thumb, openAssetPicker } from '../assets.tsx';
+import { MediaTile, AddTile } from '../ui/tiles.tsx';
 import { openSettings } from '../settings.tsx';
 import { SkillPanel } from '../skills.tsx';
 import type { Kind, Ref, VideoForm } from '../types.ts';
@@ -18,6 +19,7 @@ import {
   typeOf, draftPrompt, isGrok, specDriven, traits, availableTypes, capabilities, imageRatios, imageSizes, imageRefLimit, usedAssetIds, refStatus, currentRequest,
   update, setMode, swapFrames, updateSr, updateStudio, setType, typePrompt, polish, undoPolish, submit, registerPrompt,
   voiceName, voiceNote, togglePreview, setVoiceFilter, pickVoice, stopPreview, useCharacter, activeSkill, setSkill,
+  addableKinds, mediaRoom, usedMediaUrls, addMedia, addFiles,
 } from './state.ts';
 
 const SR_SCENES = [
@@ -45,7 +47,7 @@ const INPUT_TYPES = [
   { value: 'reference', label: 'reference', note: '参考' },
   { value: 'first_last_frame', label: 'first_last_frame', note: '首尾帧' },
 ];
-// 和官方提示词里指代素材的叫法一致：图片1、视频1、音频1。
+// 和官方提示词里指代素材的叫法一致：图片1、视频1、音频1。缩略图上不写，鼠标停上去的提示里有。
 const REF_PREFIX: Record<Kind, string> = { image: '图片', video: '视频', audio: '音频' };
 
 const IMAGE_COUNTS = [1, 2, 3, 4];
@@ -58,34 +60,82 @@ const SFX_INFLUENCES = [
 
 // ---------- 参考素材 ----------
 
-function RefTile({ item, label, onRemove }: { item: Ref; label?: string; onRemove: () => void }) {
+// 输入框里的一份素材。name 是它在提示词里的叫法（图片1）或者它的位置（首帧），悬停时和文件名一起显示；tag 是写在底边的那行小字。
+function RefTile({ item, name, tag, onRemove, depth, style }: { item: Ref; name?: string; tag?: string; onRemove: () => void; depth?: number; style?: CSSProperties }) {
   const s = refStatus(item);
   return (
-    <div className={`ref-tile tone-${s.tone}`} {...tip(item.name)}>
+    <MediaTile tag={tag} state={s.ready ? undefined : s.label} error={s.tone === 'error'} tipText={name ? `${name}：${item.name}` : item.name} onRemove={onRemove} style={style} data={{ 'data-ref': name, 'data-depth': depth }}>
       <Thumb thumb={item.thumb} kind={item.kind} />
-      {label && <span className="ref-index">{label}</span>}
-      {!s.ready && <span className={`ref-state ${s.tone === 'error' ? 'is-error' : ''}`}>{s.label}</span>}
-      <button className="ref-remove" type="button" aria-label="移除" onClick={onRemove}>
-        <Icon name="x" size={10} stroke={2} />
-      </button>
+    </MediaTile>
+  );
+}
+
+// 张数不固定的素材（参考素材、参考图）叠成一摞，最新加的在最上面，「+」压在右下角；一份都没有时就是一个加号格子。鼠标停在这一摞上（或用键盘走到里面）就摊开，每份都能单独移除。
+const STACK_COLS = 5;
+const STACK_OPEN_DELAY = 120;
+function RefStack({ items, add }: { items: { ref: Ref; label: string; onRemove: () => void }[]; add?: { label: string; tip: string; onClick: () => void } }) {
+  const root = useRef<HTMLDivElement>(null);
+  const timer = useRef(0);
+  const [open, setOpen] = useState(false);
+  const multi = items.length > 1;
+  const expanded = open && multi;
+  // 鼠标只是路过去点「+」时不摊开，所以等一小会儿。
+  const openSoon = () => {
+    window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => setOpen(true), STACK_OPEN_DELAY);
+  };
+  const close = () => {
+    window.clearTimeout(timer.current);
+    setOpen(false);
+  };
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+  // 触屏上没有「鼠标移开」，点别处收起。
+  useEffect(() => {
+    if (!expanded) return;
+    const onDown = (e: PointerEvent) => {
+      if (!root.current?.contains(e.target as Node)) close();
+    };
+    document.addEventListener('pointerdown', onDown);
+    return () => document.removeEventListener('pointerdown', onDown);
+  }, [expanded]);
+
+  const slots = items.length + (add ? 1 : 0);
+  const vars = {
+    '--cols': Math.min(slots, STACK_COLS),
+    '--rows': Math.ceil(slots / STACK_COLS),
+    '--ax': items.length % STACK_COLS,
+    '--ay': Math.floor(items.length / STACK_COLS),
+  } as CSSProperties;
+  return (
+    <div
+      ref={root}
+      className={`ref-row ref-stack ${multi ? 'is-multi' : ''} ${expanded ? 'is-open' : ''}`}
+      style={vars}
+      onMouseLeave={close}
+      onFocus={(e) => !e.target.closest('.ref-add') && setOpen(true)}
+      onBlur={(e) => !e.currentTarget.contains(e.relatedTarget) && close()}
+      onClick={(e) => (e.target as Element).closest('.ref-tile') && setOpen(true)}
+    >
+      {items.length === 0 && add && <AddTile label={add.label} tipText={add.tip} onClick={add.onClick} />}
+      {items.map(({ ref, label, onRemove }, i) => (
+        <div key={ref.uid} className="ref-stack-item" onMouseEnter={openSoon}>
+          <RefTile
+            item={ref}
+            name={label}
+            onRemove={onRemove}
+            depth={Math.min(items.length - 1 - i, 3)}
+            style={{ '--x': i % STACK_COLS, '--y': Math.floor(i / STACK_COLS), zIndex: i + 1 } as CSSProperties}
+          />
+        </div>
+      ))}
+      {items.length > 0 && add && <AddTile dot label={add.label} tipText={add.tip} onClick={add.onClick} />}
     </div>
   );
 }
 
-// 一个只放一份素材的格子：有就显示缩略图，没有就是一个「+」。
-function Slot({ item, label, onAdd, onRemove }: { item: Ref | null; label: string; onAdd: () => void; onRemove: () => void }) {
-  return (
-    <div className="frame-slot">
-      {item ? (
-        <RefTile item={item} onRemove={onRemove} />
-      ) : (
-        <button className="ref-tile ref-add" type="button" aria-label={`添加${label}`} onClick={onAdd}>
-          <Icon name="plus" size={18} />
-        </button>
-      )}
-      <span className="small muted">{label}</span>
-    </div>
-  );
+// 有固定位置的素材（首帧、尾帧、待配乐视频）：一个位置一个格子，和参考素材是同一种。有就显示缩略图，底边写着它是什么；没有就是加号，下面写着这里放什么。
+function Slot({ item, name, tag, addLabel, onAdd, onRemove }: { item: Ref | null; name: string; tag?: string; addLabel?: string; onAdd: () => void; onRemove: () => void }) {
+  return <div className="frame-slot">{item ? <RefTile item={item} name={name} tag={tag || name} onRemove={onRemove} /> : <AddTile label={addLabel || `添加${name}`} caption={name} onClick={onAdd} />}</div>;
 }
 
 function MediaBlock() {
@@ -93,6 +143,11 @@ function MediaBlock() {
   const type = studio.type;
   const imageRefs = type === 'image' ? imageRefLimit() : 0;
   const hidden = !(type === 'music' || (type === 'video' && form.mode !== 'text') || imageRefs > 0);
+  // 加进来的素材都交给 addMedia：放哪、同一份加没加过、满没满，和拖入、粘贴是同一套规则。
+  const pick = (ref: Ref, slot?: 'first' | 'last') => {
+    const refused = addMedia(ref, slot);
+    if (refused) toast(refused, 'info');
+  };
   let content: ReactNode = null;
 
   if (hidden) {
@@ -101,43 +156,47 @@ function MediaBlock() {
     // 图生图：这个模型收几张参考图，就能加几张。用的是本机的图片，不经过素材库。
     const refs = studio.image.refs || [];
     const setRefs = (next: Ref[]) => updateStudio('image', { refs: next });
+    const addImage = () => openAssetPicker({ title: '添加参考图', kind: 'image', local: true, remaining: imageRefs - refs.length, usedUrls: usedMediaUrls(), onPick: pick });
     content = (
-      <div className="ref-row">
-        {refs.map((ref, i) => (
-          <RefTile key={ref.uid} item={ref} label={`图片${i + 1}`} onRemove={() => setRefs(refs.filter((r) => r.uid !== ref.uid))} />
-        ))}
-        {refs.length < imageRefs && (
-          <button className="ref-tile ref-add" type="button" aria-label="添加参考图" {...tip('添加参考图，按提示词改这张图')} onClick={() => openAssetPicker({ kind: 'image', local: true, remaining: imageRefs - refs.length, onPick: (ref) => setRefs([...(composer.studio.image.refs || []), ref].slice(0, imageRefs)) })}>
-            <Icon name="plus" size={18} />
-          </button>
-        )}
-      </div>
+      <RefStack
+        items={refs.map((ref, i) => ({ ref, label: `图片${i + 1}`, onRemove: () => setRefs(refs.filter((r) => r.uid !== ref.uid)) }))}
+        add={refs.length < imageRefs ? { label: '添加参考图', tip: '添加参考图', onClick: addImage } : undefined}
+      />
     );
   } else if (type === 'music') {
     const video = studio.music.video;
-    const setVideo = (next: Ref | null) => updateStudio('music', { video: next });
-    const label = video?.duration ? `待配乐视频 · ${Math.round(video.duration)} 秒` : '待配乐视频';
     // 配乐要把视频文件传给模型，所以只能选本机有的：生成记录里的，或者从电脑里选一个。
     content = (
       <div className="frames-row">
-        <Slot item={video} label={label} onAdd={() => openAssetPicker({ kind: 'video', local: true, sources: ['records', 'upload'], onPick: setVideo })} onRemove={() => setVideo(null)} />
+        <Slot
+          item={video}
+          name="待配乐视频"
+          tag={video?.duration ? `${Math.round(video.duration)} 秒` : '视频'}
+          onAdd={() => openAssetPicker({ title: '添加待配乐视频', kind: 'video', local: true, sources: ['records', 'upload'], onPick: pick })}
+          onRemove={() => updateStudio('music', { video: null })}
+        />
       </div>
     );
   } else if (form.mode === 'frames') {
-    const frame = (key: 'first' | 'last', label: string) => {
-      const setRef = (value: Ref | null) => update({ frames: { ...form.frames, [key]: value } });
-      return <Slot item={form.frames[key]} label={label} onAdd={() => openAssetPicker({ kind: 'image', remaining: 1, usedIds: usedAssetIds(), local: traits().localFiles, onPick: setRef })} onRemove={() => setRef(null)} />;
-    };
+    const frame = (key: 'first' | 'last', name: string, addLabel: string) => (
+      <Slot
+        item={form.frames[key]}
+        name={name}
+        addLabel={addLabel}
+        onAdd={() => openAssetPicker({ title: `添加${name}`, kind: 'image', remaining: 1, usedIds: usedAssetIds(), usedUrls: usedMediaUrls(), local: traits().localFiles, onPick: (ref) => pick(ref, key) })}
+        onRemove={() => update({ frames: { ...composer.form.frames, [key]: null } })}
+      />
+    );
     // 有的模型只有首帧。
     content = (
       <div className="frames-row">
-        {frame('first', '首帧')}
+        {frame('first', '首帧', '添加首帧')}
         {traits().lastFrame && (
           <>
             <button className="icon-btn icon-btn-sm frames-swap" type="button" aria-label="互换首帧和尾帧" disabled={!form.frames.first && !form.frames.last} onClick={swapFrames} {...tip('互换首帧和尾帧')}>
               <Icon name="swap" />
             </button>
-            {frame('last', '尾帧（可选）')}
+            {frame('last', '尾帧', '添加尾帧（可选）')}
           </>
         )}
       </div>
@@ -148,27 +207,16 @@ function MediaBlock() {
     const kinds = (Object.keys(KINDS) as Kind[]).filter((kind) => allowed.includes(kind) || form.refs[kind].length > 0);
     const setList = (kind: Kind, next: Ref[]) => update({ refs: { ...composer.form.refs, [kind]: next } });
     // 三种素材共用一个「+」，不用先选类型：上传的、选中的是什么就放进哪一类。
-    // 火山方舟上只有图片能加：它的参考视频只收公网链接，本机的文件发不过去，而这里不提供填链接。
-    const addable = specDriven() ? allowed.filter((kind) => kind === 'image') : allowed;
-    const addRef = () =>
-      openAssetPicker({
-        limits: Object.fromEntries(addable.map((kind) => [kind, KINDS[kind].max - form.refs[kind].length])),
-        usedIds: usedAssetIds(),
-        local: specDriven(),
-        onPick: (ref) => setList(ref.kind, [...composer.form.refs[ref.kind], ref].slice(0, KINDS[ref.kind].max)),
-      });
+    const addable = addableKinds();
+    const addRef = () => openAssetPicker({ title: '添加参考素材', limits: mediaRoom(), usedIds: usedAssetIds(), usedUrls: usedMediaUrls(), local: specDriven(), onPick: pick });
     const full = addable.every((kind) => form.refs[kind].length >= KINDS[kind].max);
     content = (
-      <div className="ref-row">
-        {kinds.flatMap((kind) =>
-          form.refs[kind].map((ref, i) => <RefTile key={ref.uid} item={ref} label={`${REF_PREFIX[kind]}${i + 1}`} onRemove={() => setList(kind, composer.form.refs[kind].filter((r) => r.uid !== ref.uid))} />),
+      <RefStack
+        items={kinds.flatMap((kind) =>
+          form.refs[kind].map((ref, i) => ({ ref, label: `${REF_PREFIX[kind]}${i + 1}`, onRemove: () => setList(kind, composer.form.refs[kind].filter((r) => r.uid !== ref.uid)) })),
         )}
-        {!full && (
-          <button className="ref-tile ref-add" type="button" aria-label="添加参考素材" {...tip(`添加参考素材：${addable.map((kind) => KINDS[kind].label).join('、')}`)} onClick={addRef}>
-            <Icon name="plus" size={18} />
-          </button>
-        )}
-      </div>
+        add={full ? undefined : { label: '添加参考素材', tip: `添加参考素材：${addable.map((kind) => KINDS[kind].label).join('、')}`, onClick: addRef }}
+      />
     );
   }
 
@@ -682,6 +730,10 @@ export function Composer() {
   const params = useRef<HTMLDivElement>(null);
   const chip = useRef<HTMLDivElement>(null);
   const resizing = useRef<Animation | null>(null);
+  // 有文件正拖在输入框上面。拖进子元素时也会触发离开，所以数进出的次数。
+  const [dropping, setDropping] = useState(false);
+  const dragDepth = useRef(0);
+  const hasFiles = (e: React.DragEvent) => e.dataTransfer.types.includes('Files');
   const settledHeight = useRef(0);
 
   // 文本框里的字由用户打，不由这里逐字回写；只有换类型、润色、复用这些从外面改了文字的时候才写回去。
@@ -747,7 +799,29 @@ export function Composer() {
           className="type-switch"
         />
       </div>
-      <div ref={card} className="composer-card">
+      {/* 文件可以直接拖到输入框上，或者在提示词里粘贴；加到哪、能不能加，和点加号是同一套规则。 */}
+      <div
+        ref={card}
+        className={`composer-card ${dropping ? 'is-drop' : ''}`}
+        onDragEnter={(e) => {
+          if (!hasFiles(e)) return;
+          dragDepth.current += 1;
+          setDropping(true);
+        }}
+        onDragOver={(e) => hasFiles(e) && e.preventDefault()}
+        onDragLeave={(e) => {
+          if (!hasFiles(e)) return;
+          dragDepth.current -= 1;
+          if (dragDepth.current <= 0) setDropping(false);
+        }}
+        onDrop={(e) => {
+          if (!hasFiles(e)) return;
+          e.preventDefault();
+          dragDepth.current = 0;
+          setDropping(false);
+          addFiles([...e.dataTransfer.files]);
+        }}
+      >
         <MediaBlock />
         {/* 选着的技能：写在提示词第一行的开头。点叉取消，光标在最前面时按退格也取消。 */}
         {skill && (
@@ -770,6 +844,13 @@ export function Composer() {
           placeholder={skill ? '输入简要描述，发送时自动扩写' : type.placeholder || ''}
           aria-label={type.value === 'speech' ? '朗读文本' : '提示词'}
           onInput={(e) => typePrompt(e.currentTarget.value)}
+          onPaste={(e) => {
+            // 粘贴的是文件（截图、复制的图片或视频）就当素材加进来；带着文字的（从文档里复制的一段）照常粘贴文字。
+            const files = [...e.clipboardData.files];
+            if (!files.length || e.clipboardData.getData('text/plain')) return;
+            e.preventDefault();
+            addFiles(files);
+          }}
           onKeyDown={(e) => {
             if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
               e.preventDefault();
