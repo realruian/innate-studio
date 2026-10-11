@@ -159,7 +159,7 @@ function openCardMenu(button: HTMLElement, id: string, scope: Scope) {
       // 图片、语音、音效没有任务可查，生成中只能等。
       isPendingTask(item) && !item.direct && { value: 'refresh', label: '刷新' },
       isTimedOutTask(item) && { value: 'recheck', label: '重新查询' },
-      { value: 'reuse', label: '复用' },
+      { value: 'reuse', label: '复用参数' },
       done(item) && item.kind === 'video' && { value: 'score', label: '配乐' },
       done(item) && item.kind === 'image' && { value: 'animate', label: '生成视频' },
       done(item) && item.kind === 'image' && item.savedLocally && { value: 'character', label: '存为角色' },
@@ -226,14 +226,14 @@ function MediaBox({ item, large = false }: { item: HistoryItem; large?: boolean 
         <div className="state-text" {...clipTip(reason)}>
           {reason}
         </div>
-        {item.kind === 'video' && !isTimedOutTask(item) && <div className="state-note">预扣余额将自动退还</div>}
+        {item.kind === 'video' && !isTimedOutTask(item) && <div className="state-note">预扣额度将自动退回</div>}
       </div>
     );
   }
   if (item.status === 'completed') {
     return (
       <div className="card-state">
-        <div className="state-title">已完成，但没有拿到{KIND_LABELS[item.kind]}地址</div>
+        <div className="state-title">已完成，但未获取到{KIND_LABELS[item.kind]}地址</div>
       </div>
     );
   }
@@ -569,7 +569,7 @@ const TYPE_FILTERS = [{ value: 'all' as const, label: '全部' }, ...(Object.key
 
 // 记录页的来源切换：创作页生成的和画布里生成的分开看。
 const SOURCE_FILTERS = [
-  { value: 'create' as const, label: '创造' },
+  { value: 'create' as const, label: '创作' },
   { value: 'canvas' as const, label: '画布' },
 ];
 

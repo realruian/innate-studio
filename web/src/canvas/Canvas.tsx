@@ -920,7 +920,7 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
     try {
       list = (await api<{ items: { id: string; name: string }[] }>('GET', '/api/canvases')).items;
     } catch (err) {
-      return toast(`项目加载失败：${(err as Error).message}`, 'error', 6000);
+      return toast(`画布加载失败：${(err as Error).message}`, 'error', 6000);
     }
     openMenu(button, {
       label: '切换画布',
@@ -1091,10 +1091,10 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
             </Panel>
           )}
           <Panel position="top-left" className="canvas-title">
-            <button className="icon-btn" type="button" {...tip('返回项目列表')} aria-label="返回项目列表" onClick={exit}>
+            <button className="icon-btn" type="button" {...tip('返回画布列表')} aria-label="返回画布列表" onClick={exit}>
               <Icon name="arrowLeft" />
             </button>
-            <input className="canvas-name" value={name} aria-label="项目名称" maxLength={60} spellCheck={false} onChange={(e) => setName(e.target.value)} onBlur={() => !name.trim() && setName('未命名画布')} />
+            <input className="canvas-name" value={name} aria-label="画布名称" maxLength={60} spellCheck={false} onChange={(e) => setName(e.target.value)} onBlur={() => !name.trim() && setName('未命名画布')} />
             <button className="icon-btn icon-btn-sm canvas-switch" type="button" {...tip('切换画布')} aria-label="切换画布" aria-haspopup="listbox" aria-expanded="false" onClick={(e) => switchCanvas(e.currentTarget)}>
               <Icon name="chevron" size={14} />
             </button>

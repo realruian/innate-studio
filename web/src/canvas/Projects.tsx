@@ -27,7 +27,7 @@ function Rename({ project, done }: { project: ProjectMeta; done: (name?: string)
   const submit = () => done(input.current!.value.trim() || project.name);
   return (
     <>
-      <label className="field-label">项目名称</label>
+      <label className="field-label">画布名称</label>
       <input ref={input} className="input" type="text" defaultValue={project.name} maxLength={60} onKeyDown={(e) => e.key === 'Enter' && submit()} />
       <div className="modal-actions">
         <button className="btn btn-primary" onClick={submit}>
@@ -46,7 +46,7 @@ export function Projects() {
   const load = useCallback(() => {
     api<{ items: ProjectMeta[] }>('GET', '/api/canvases')
       .then((data) => setList(data.items))
-      .catch((err) => toast(`项目加载失败：${(err as Error).message}`, 'error', 6000));
+      .catch((err) => toast(`画布加载失败：${(err as Error).message}`, 'error', 6000));
   }, []);
   useEffect(load, [load]);
 
@@ -90,7 +90,7 @@ export function Projects() {
 
   function more(button: HTMLElement, project: ProjectMeta) {
     openMenu(button, {
-      label: '项目操作',
+      label: '画布操作',
       items: [
         { value: 'rename', label: '重命名' },
         { value: 'delete', label: '删除', danger: true },
@@ -114,7 +114,7 @@ export function Projects() {
             });
             return;
           }
-          if (!(await confirmDialog({ title: '删除这个项目？', message: `删除「${project.name}」后无法恢复，已生成的内容不受影响。`, okText: '删除', danger: true }))) return;
+          if (!(await confirmDialog({ title: '删除这张画布？', message: `删除「${project.name}」后无法恢复，已生成的内容不受影响。`, okText: '删除', danger: true }))) return;
           await api('DELETE', `/api/canvases/${project.id}`);
           load();
         } catch (err) {
@@ -139,14 +139,14 @@ export function Projects() {
         <div>
           <h1>画布</h1>
         </div>
-        <SearchBox label="搜索项目" onQuery={setQuery} />
+        <SearchBox label="搜索画布" onQuery={setQuery} />
       </header>
       <div className="project-grid">
         {!query && (
           <article className="project">
             <button className="project-cover project-new" type="button" onClick={create}>
               <Icon name="plus" size={20} />
-              <span>新建项目</span>
+              <span>新建画布</span>
             </button>
           </article>
         )}

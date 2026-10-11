@@ -16,11 +16,11 @@ import { openSettings, openAdmin } from './settings.tsx';
 import { SpendButton } from './spend.tsx';
 import type { ViewId } from './types.ts';
 
-// 五项是同一层的页签。「创造」是首页，在首页再点一次会回到顶部并把光标放回输入框。
+// 五项是同一层的页签。「创作」是首页，在首页再点一次会回到顶部并把光标放回输入框。
 // 侧栏的图标线宽是 2，比别处的 1.5 粗一档。
 // Sparkle 在库里画得比别的图标小一圈（只占画布中间六成），所以放大到 22 显示，线条相应调细，看上去和其他几项一样大、一样粗。
 const VIEWS: { id: ViewId; label: string; icon: IconName; size?: number; stroke?: number }[] = [
-  { id: 'create', label: '创造', icon: 'sparkle', size: 22, stroke: 1.45 },
+  { id: 'create', label: '创作', icon: 'sparkle', size: 22, stroke: 1.45 },
   { id: 'canvas', label: '画布', icon: 'workflow' },
   { id: 'records', label: '创作记录', icon: 'history' },
   { id: 'characters', label: '角色', icon: 'userStory' },

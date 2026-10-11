@@ -257,7 +257,7 @@ async function aihubmixImage(request) {
 // 三样都走豆包语音，用的是同一个 Key。
 
 function requireSpeechKey() {
-  if (!speechKey()) throw new HttpError(401, 'no_api_key', '请先在「设置」中配置豆包语音的 API Key。');
+  if (!speechKey()) throw new HttpError(401, 'no_api_key', '请先在「管理」中配置豆包语音的 API Key。');
 }
 
 // 豆包语音的音色是登记好的，不用去读。

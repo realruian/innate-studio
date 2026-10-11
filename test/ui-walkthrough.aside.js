@@ -420,7 +420,7 @@ if ((await text('.view-create .feed-head h2')).join('') !== '最近生成') prob
 if ((await count('.view-create h1')) !== 1) problems.push('创作页应该只有一个一级标题（首屏问句），「最近生成」是二级标题');
 const sideText = (await text('.sidebar')).join('');
 if ((await count('.side-list, .side-row')) || sideText.includes('最近生成')) problems.push('侧栏里不应该有「最近生成」列表');
-if ((await text('.sidebar .nav-item')).join('|') !== '创造|画布|创作记录|角色|技能|素材库|真人档案|设置') problems.push(`侧栏的入口不对：${(await text('.sidebar .nav-item')).join('|')}`);
+if ((await text('.sidebar .nav-item')).join('|') !== '创作|画布|创作记录|角色|技能|素材库|真人档案|设置') problems.push(`侧栏的入口不对：${(await text('.sidebar .nav-item')).join('|')}`);
 await audit('提交后');
 await shot('06-submitted');
 
@@ -518,9 +518,9 @@ if (await pg.evaluate(() => [...document.querySelectorAll('.view-create video')]
 // 筛选这一行：左边是类型的分段（和创作页是同一组），右边是条数、状态下拉、搜索
 const total = await count(`${V} .card`);
 if (!total) problems.push('记录页没有列出记录');
-// 筛选这一行：左边是来源（创造、画布）和类型两组分段，右边只有一个搜索图标。没有条数、没有状态筛选，搜索框平时不展开
+// 筛选这一行：左边是来源（创作、画布）和类型两组分段，右边只有一个搜索图标。没有条数、没有状态筛选，搜索框平时不展开
 const tools = await pg.evaluate((v) => ({ dropdowns: document.querySelectorAll(`${v} .page-tools .dropdown`).length, inputs: document.querySelectorAll(`${v} .page-tools input`).length, icon: document.querySelectorAll(`${v} .page-tools .icon-btn svg`).length, words: document.querySelector(`${v} .page-tools`).innerText.replace(/\s+/g, '') }), V);
-if (tools.dropdowns || tools.inputs || tools.icon !== 1 || tools.words !== '创造画布全部视频图片语音音效配乐') problems.push(`记录页的筛选行不对：${JSON.stringify(tools)}`);
+if (tools.dropdowns || tools.inputs || tools.icon !== 1 || tools.words !== '创作画布全部视频图片语音音效配乐') problems.push(`记录页的筛选行不对：${JSON.stringify(tools)}`);
 // 点搜索图标展开输入框并把光标放进去；words 为空且没展开时不用管
 const searchFor = async (words) => {
   if (!(await count(`${V} input.search`))) {
@@ -532,7 +532,7 @@ const searchFor = async (words) => {
   await pg.locator(`${V} input.search`).fill(words);
   await sleep(300);
 };
-if ((await text(`${V} .filters .seg`)).join('|') !== '创造|画布|全部|视频|图片|语音|音效|配乐') problems.push(`记录页的类型切换不对：${(await text(`${V} .filters .seg`)).join('|')}`);
+if ((await text(`${V} .filters .seg`)).join('|') !== '创作|画布|全部|视频|图片|语音|音效|配乐') problems.push(`记录页的类型切换不对：${(await text(`${V} .filters .seg`)).join('|')}`);
 await audit('创作记录页');
 await shot('08b-records');
 // 同一时间只放一个：播着一条再去播另一条，前一条要停下并回到开头
@@ -675,7 +675,7 @@ if (await count('.view-create .feed-head .entry-action-btn:not([hidden])')) {
   await sleep(500);
   const landed = await pg.evaluate((v) => ({ active: [...document.querySelectorAll(`${v} .filters .seg.active`)].pop()?.textContent, others: document.querySelectorAll(`${v} .card :is(.player, .audio-player)`).length }), V);
   if (landed.active !== '图片' || landed.others) problems.push(`从图片的「查看全部」进记录页，应该只看图片：${JSON.stringify(landed)}`);
-  await must('回到创作', clickText('.nav-item', '创造'));
+  await must('回到创作', clickText('.nav-item', '创作'));
   await sleep(300);
 }
 
@@ -820,7 +820,7 @@ for (const [label, lead, keep] of [['延长', '向后延长视频1：', '镜头�
   await sleep(400);
 }
 // 收拾一下，免得影响后面的检查：移除视频素材，清空提示词
-await must('回到创作', clickText('.nav-item', '创造'));
+await must('回到创作', clickText('.nav-item', '创作'));
 await sleep(300);
 await must('移除视频素材', click('.ref-row .ref-remove'));
 await sleep(200);
@@ -999,7 +999,7 @@ await escape();
 await sleep(200);
 
 // 10. 回到创作页；窄窗口下不溢出
-await must('回到创作', clickText('.nav-item', '创造'));
+await must('回到创作', clickText('.nav-item', '创作'));
 await sleep(300);
 if (!(await pg.evaluate(() => document.activeElement === document.querySelector('textarea.prompt')))) problems.push('点「创作」后光标没有回到输入框');
 const narrow = await pg.evaluate(async () => {

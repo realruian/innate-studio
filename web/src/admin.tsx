@@ -269,7 +269,7 @@ function KeyRow({ name, label = 'API Key', desc, placeholder, copyHint = '', has
 
   async function submit() {
     const value = input.current!.value.trim();
-    if (!value) return toast(`请输入${name}API Key`, 'error');
+    if (!value) return toast(`请输入 ${name} API Key`, 'error');
     if (/[^\x21-\x7e]/.test(value)) {
       setMasked(false);
       return toast(`API Key 格式不正确：包含中文或空格。${copyHint}`, 'error', 8000);
@@ -433,7 +433,7 @@ function SpeechKey() {
   }
 
   async function remove() {
-    const ok = await confirmDialog({ title: `清除已保存的${label} API Key？`, message: '清除后将无法生成语音。', okText: '清除', danger: true });
+    const ok = await confirmDialog({ title: `清除已保存的${label} API Key？`, message: '清除后将无法生成语音、音效与配乐。', okText: '清除', danger: true });
     if (!ok) return;
     try {
       await api('DELETE', '/api/key?service=speech');

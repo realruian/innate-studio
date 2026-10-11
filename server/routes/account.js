@@ -27,7 +27,7 @@ route('PUT', /^\/api\/key$/, async ({ req }) => {
   if (service === 'billing') {
     const id = String(accessKeyId || '').trim();
     const secret = String(secretAccessKey || '').trim();
-    if (!id || !secret) throw new HttpError(400, 'invalid_key', 'Access Key ID 和 Secret Access Key 都要填');
+    if (!id || !secret) throw new HttpError(400, 'invalid_key', '请填写 Access Key ID 与 Secret Access Key');
     if (!isUsableKey(id) || !isUsableKey(secret)) throw new HttpError(400, 'invalid_key', 'Access Key 格式不正确：包含中文、空格或其他非法字符。请从火山引擎控制台重新复制。');
     // 先查一次，查得到才存，免得存下一对用不了的。
     await queryBalance({ id, secret });
