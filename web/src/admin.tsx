@@ -225,9 +225,12 @@ function MembersSection() {
     });
   }
 
+  const totalCredits = (members || []).reduce((sum, m) => sum + (m.credits || 0), 0);
+  const totalMonthUsed = (members || []).reduce((sum, m) => sum + (m.monthUsed || 0), 0);
+
   return (
     <section className="settings-group">
-      <h3>成员</h3>
+      <h3>成员{members ? ` · 团队剩余 ${fmtCredits(totalCredits)} · 本月已用 ${fmtCredits(totalMonthUsed)}` : ''}</h3>
       <div className="settings-card">
         {(members || []).map((member) => (
           <FormRow key={member.id} label={member.name} desc={[member.role === 'admin' ? '管理员' : '成员', member.disabled ? '已停用' : member.lastSeenAt ? `最近使用 ${fmtTime(member.lastSeenAt)}` : '尚未登录', `本月 ${fmtCredits(member.monthUsed)}`].join(' · ')}>

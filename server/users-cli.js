@@ -11,8 +11,23 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { DATA_DIR } from './config.js';
 import { allUsers, createUser, newPassword, updateUser, userDir } from './auth.js';
+import { balanceOf, grantCredits } from './credits.js';
 
-const [command, name, ...flags] = process.argv.slice(2);
+const rawArgs = process.argv.slice(2);
+let customPassword = null;
+const filteredArgs = [];
+for (let i = 0; i < rawArgs.length; i++) {
+  if (rawArgs[i] === '--password' && rawArgs[i + 1]) {
+    customPassword = rawArgs[i + 1];
+    i++;
+  } else if (rawArgs[i].startsWith('--password=')) {
+    customPassword = rawArgs[i].slice('--password='.length);
+  } else {
+    filteredArgs.push(rawArgs[i]);
+  }
+}
+
+const [command, name, ...flags] = filteredArgs;
 const LOCAL_DATA = ['history.json', 'canvases.json', 'characters.json', 'skills.json', 'workflows.json', 'videos', 'images', 'audio', 'uploads', 'thumbs'];
 
 function moveLocalData(id) {
@@ -26,23 +41,30 @@ function moveLocalData(id) {
 
 try {
   if (command === 'add' && name) {
-    const password = newPassword();
+    const password = customPassword || newPassword();
     const user = createUser({ name, role: flags.includes('--admin') ? 'admin' : 'member', password });
     if (flags.includes('--with-local-data')) moveLocalData(user.id);
     console.log(`已创建${user.role === 'admin' ? '管理员' : '成员'}：${user.name}`);
     console.log(`初始密码：${password}`);
-    console.log('密码只显示这一次。');
+    if (!customPassword) console.log('密码只显示这一次。');
   } else if (command === 'reset' && name) {
     const user = allUsers().find((u) => u.name.toLowerCase() === name.toLowerCase());
     if (!user) throw new Error(`没有名为「${name}」的账号`);
-    const password = newPassword();
+    const password = customPassword || newPassword();
     updateUser(user, { password });
     console.log(`${user.name} 的新密码：${password}`);
+  } else if (command === 'grant' && name) {
+    const user = allUsers().find((u) => u.name.toLowerCase() === name.toLowerCase());
+    if (!user) throw new Error(`没有名为「${name}」的账号`);
+    const amount = Number(flags[0]);
+    if (!amount) throw new Error('请输入有效的积分数');
+    const balance = grantCredits(user, amount, { id: 'cli' });
+    console.log(`已为 ${user.name} 发放积分，当前余额：${balance} 积分`);
   } else if (command === 'list') {
-    for (const user of allUsers()) console.log(`${user.role === 'admin' ? '管理员' : '成员  '}  ${user.name}${user.disabled ? '（已停用）' : ''}`);
+    for (const user of allUsers()) console.log(`${user.role === 'admin' ? '管理员' : '成员  '}  ${user.name}${user.disabled ? '（已停用）' : ''}  积分: ${balanceOf(user.id)}`);
     if (!allUsers().length) console.log('还没有账号，服务处于本机模式。');
   } else {
-    console.log('用法：\n  npm run user -- add <名称> [--admin] [--with-local-data]\n  npm run user -- reset <名称>\n  npm run user -- list');
+    console.log('用法：\n  npm run user -- add <名称> [--admin] [--with-local-data] [--password <密码>]\n  npm run user -- reset <名称> [--password <密码>]\n  npm run user -- grant <名称> <积分数>\n  npm run user -- list');
     process.exit(1);
   }
 } catch (err) {
