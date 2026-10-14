@@ -4,6 +4,7 @@ import { useRef, useState } from 'react';
 import { api, state } from './store.ts';
 import { FormRow } from './ui/controls.tsx';
 import { toast, openModal } from './ui/layers.tsx';
+import { Logo } from './brand/Logo.tsx';
 
 const message = (err: unknown) => (err as Error).message;
 
@@ -32,8 +33,7 @@ export function Login() {
   return (
     <form className="login" onSubmit={submit}>
       <div className="brand">
-        <span className="brand-mark" aria-hidden="true" />
-        <span className="brand-word" role="img" aria-label="INNATE" />
+        <Logo />
       </div>
       <input ref={name} className="input" type="text" placeholder="名称" aria-label="名称" autoComplete="username" autoFocus required />
       <input ref={password} className="input" type="password" placeholder="密码" aria-label="密码" autoComplete="current-password" required />
@@ -69,7 +69,7 @@ function PasswordDialog({ close }: { close: () => void }) {
       <label className="field-label">当前密码</label>
       <input ref={current} className="input" type="password" autoComplete="current-password" aria-label="当前密码" />
       <label className="field-label">新密码</label>
-      <input ref={next} className="input" type="password" autoComplete="new-password" placeholder="至少 8 位" aria-label="新密码" onKeyDown={(e) => e.key === 'Enter' && submit()} />
+      <input ref={next} className="input" type="password" autoComplete="new-password" placeholder="至少 6 位" aria-label="新密码" onKeyDown={(e) => e.key === 'Enter' && submit()} />
       <div className="modal-actions">
         <button className="btn btn-primary" disabled={busy} onClick={submit}>
           保存

@@ -14,6 +14,7 @@ import { Characters } from './characters.tsx';
 import { Skills } from './skills.tsx';
 import { openSettings, openAdmin } from './settings.tsx';
 import { SpendButton } from './spend.tsx';
+import { Logo } from './brand/Logo.tsx';
 import type { ViewId } from './types.ts';
 
 // 五项是同一层的页签。「创作」是首页，在首页再点一次会回到顶部并把光标放回输入框。
@@ -57,8 +58,7 @@ function Workbench() {
       {/* 进了一张画布之后侧栏收起，靠画布左上角的返回键出来。 */}
       <aside className="sidebar" hidden={state.immersive && view === 'canvas'}>
         <div className="brand">
-          <span className="brand-mark" aria-hidden="true" />
-          <span className="brand-word" role="img" aria-label="INNATE" />
+          <Logo />
         </div>
         <nav className="nav">
           {VIEWS.map((v) => {

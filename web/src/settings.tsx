@@ -17,6 +17,8 @@ function Settings() {
 
   return (
     <div className="settings">
+      {state.app.user && <AccountSection />}
+
       <section className="settings-group">
         <h3>通用</h3>
         <div className="settings-card">
@@ -52,8 +54,6 @@ function Settings() {
           </FormRow>
         </div>
       </section>
-
-      {state.app.user && <AccountSection />}
     </div>
   );
 }

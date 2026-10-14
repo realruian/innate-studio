@@ -31,14 +31,57 @@ function write(file, value) {
   fs.renameSync(tmp, file);
 }
 
-const users = read(USERS_FILE, []);
+let users = read(USERS_FILE, []);
 let sessions = read(SESSIONS_FILE, []);
-const saveUsers = () => write(USERS_FILE, users);
-const saveSessions = () => write(SESSIONS_FILE, sessions);
+let usersMtime = 0;
+let sessionsMtime = 0;
 
-export const isHosted = () => users.length > 0;
+function syncUsers() {
+  try {
+    const mtime = fs.statSync(USERS_FILE).mtimeMs;
+    if (mtime !== usersMtime) {
+      users = read(USERS_FILE, []);
+      usersMtime = mtime;
+    }
+  } catch {
+    users = [];
+    usersMtime = 0;
+  }
+}
+
+function syncSessions() {
+  try {
+    const mtime = fs.statSync(SESSIONS_FILE).mtimeMs;
+    if (mtime !== sessionsMtime) {
+      sessions = read(SESSIONS_FILE, []);
+      sessionsMtime = mtime;
+    }
+  } catch {
+    sessions = [];
+    sessionsMtime = 0;
+  }
+}
+syncUsers();
+syncSessions();
+
+const saveUsers = () => {
+  write(USERS_FILE, users);
+  try { usersMtime = fs.statSync(USERS_FILE).mtimeMs; } catch {}
+};
+const saveSessions = () => {
+  write(SESSIONS_FILE, sessions);
+  try { sessionsMtime = fs.statSync(SESSIONS_FILE).mtimeMs; } catch {}
+};
+
+export const isHosted = () => {
+  syncUsers();
+  return users.length > 0;
+};
 export const userDir = (id) => path.join(DATA_DIR, 'users', id);
-export const allUsers = () => users;
+export const allUsers = () => {
+  syncUsers();
+  return users;
+};
 
 // 给页面看的账号信息，不带密码的散列。
 export const userView = (user) => ({ id: user.id, name: user.name, role: user.role, disabled: Boolean(user.disabled), createdAt: user.createdAt, lastSeenAt: user.lastSeenAt || null });
@@ -58,18 +101,20 @@ export const newPassword = () => Array.from(crypto.randomBytes(12), (byte) => AL
 
 function checkPassword(password) {
   const value = String(password || '');
-  if (value.length < 8) throw new HttpError(400, 'invalid_request', '密码至少 8 位');
+  if (value.length < 6) throw new HttpError(400, 'invalid_request', '密码至少 6 位');
   if (value.length > 200) throw new HttpError(400, 'invalid_request', '密码太长');
   return value;
 }
 
 export function findUser(id) {
+  syncUsers();
   const user = users.find((u) => u.id === id);
   if (!user) throw new HttpError(404, 'not_found', '成员不存在');
   return user;
 }
 
 export function createUser({ name, role = 'member', password }) {
+  syncUsers();
   const clean = String(name || '').trim();
   if (!clean || clean.length > 30) throw new HttpError(400, 'invalid_request', '请输入名称，最多 30 个字');
   if (users.some((u) => sameName(u.name, clean))) throw new HttpError(400, 'invalid_request', '该名称已被使用');
@@ -89,6 +134,7 @@ function keepAnAdmin(user, change) {
 }
 
 export function updateUser(user, { role, disabled, password }) {
+  syncUsers();
   const change = {};
   if (role !== undefined) change.role = role === 'admin' ? 'admin' : 'member';
   if (disabled !== undefined) change.disabled = Boolean(disabled);
@@ -103,6 +149,7 @@ export function updateUser(user, { role, disabled, password }) {
 
 // 只删账号，它的数据目录留在磁盘上。
 export function removeUser(user) {
+  syncUsers();
   keepAnAdmin(user, { disabled: true });
   users.splice(users.indexOf(user), 1);
   dropSessions(user.id);
@@ -110,6 +157,7 @@ export function removeUser(user) {
 }
 
 function dropSessions(userId, except) {
+  syncSessions();
   sessions = sessions.filter((s) => s.userId !== userId || s.token === except);
   saveSessions();
 }
@@ -119,6 +167,8 @@ function dropSessions(userId, except) {
 const fails = new Map();
 
 export function login(name, password) {
+  syncUsers();
+  syncSessions();
   const key = String(name || '').trim().toLowerCase();
   const record = fails.get(key);
   if (record && record.count >= MAX_FAILS && Date.now() - record.at < LOCK_MS) throw new HttpError(429, 'too_many_attempts', '尝试次数过多，请 10 分钟后再试');
@@ -140,6 +190,8 @@ export function login(name, password) {
 }
 
 export function changeOwnPassword(user, current, next, req) {
+  syncUsers();
+  syncSessions();
   if (hashPassword(String(current || ''), user.salt) !== user.hash) throw new HttpError(400, 'bad_credentials', '当前密码不正确');
   setPassword(user, checkPassword(next));
   // 别处登录着的都退出，正在用的这一处留着。
@@ -154,6 +206,8 @@ function tokenOf(req) {
 
 // 这个请求是谁发的。没登录、登录过期、账号停用了，都是 null。
 export function userOf(req) {
+  syncUsers();
+  syncSessions();
   const token = tokenOf(req);
   if (!token) return null;
   const hashed = sha256(token);
@@ -169,6 +223,7 @@ export function userOf(req) {
 }
 
 export function logout(req) {
+  syncSessions();
   const hashed = sha256(tokenOf(req));
   sessions = sessions.filter((s) => s.token !== hashed);
   saveSessions();
