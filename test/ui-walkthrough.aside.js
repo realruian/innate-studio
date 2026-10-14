@@ -946,6 +946,80 @@ if (await pg.evaluate(() => document.querySelector('.modal input.mono').classLis
 await escape();
 await sleep(200);
 
+// 9b. 角色、技能、画布三页
+// 角色：新建格子看得出来；弹窗没填名字时原因写在表单里，不弹轻提示
+await must('进入角色', clickText('.nav-item', '角色'));
+await sleep(500);
+await audit('角色');
+await shot('21-characters');
+if (await pg.evaluate(() => { const n = document.querySelector('.project-new'); return !n || getComputedStyle(n).backgroundColor === getComputedStyle(document.body).backgroundColor; })) problems.push('「新建角色」的格子和页面底色一样，看不出来');
+await must('打开新建角色', click('.project-new'));
+await sleep(400);
+await audit('新建角色弹窗');
+await must('不填名字就保存', click('.modal .btn-primary'));
+await sleep(300);
+if ((await text('.modal .form-error')).join('') !== '请输入角色名称' || (await count('.toast'))) problems.push(`角色弹窗没填名字时的提示不对：${(await text('.modal .form-error')).join('')}`);
+await escape();
+await sleep(200);
+
+// 技能：官方的带「官方」徽标，点开是只读的规则
+await must('进入技能', clickText('.nav-item', '技能'));
+await sleep(500);
+await audit('技能');
+await shot('22-skills');
+if (!(await count('.skill-card .badge-mark'))) problems.push('技能页没有带「官方」徽标的技能');
+await must('打开一个技能', click('.skill-card .skill-item', 0));
+await sleep(400);
+await audit('技能弹窗');
+await escape();
+await sleep(200);
+
+// 画布：建一张临时的画布走一遍，走完删掉
+const board = await pg.evaluate(async (theme) => (await (await fetch('/api/canvases', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: `走查画布 ${theme}` }) })).json()).id, THEME);
+await must('进入画布列表', clickText('.nav-item', '画布'));
+await sleep(500);
+await audit('画布列表');
+await shot('23-canvas-list');
+await must('打开走查画布', pg.evaluate((id) => { location.hash = `#/canvas/${id}`; return 'ok'; }, board));
+for (let i = 0; i < 20 && !(await count("button[aria-label='添加文本节点']")); i += 1) await sleep(300);
+if (await count('.sidebar:not([hidden])')) problems.push('进了画布侧栏没有收起');
+await pg.locator("button[aria-label='添加文本节点']").click();
+await sleep(500);
+await pg.locator("button[aria-label='添加视频节点']").click();
+await sleep(700);
+// 用鼠标点过工具栏的按钮，名字不能一直盖在画布上
+await pg.locator('.canvas-name').hover();
+await sleep(300);
+if (await pg.evaluate(() => [...document.querySelectorAll('.canvas-tool-name')].some((e) => getComputedStyle(e).opacity !== '0'))) problems.push('点过工具栏按钮后，名字一直显示在画布上');
+// 选着的视频节点：输入面板完整地在窗口里
+const panel = await pg.evaluate(() => { const r = document.querySelector('.cnode-panel')?.getBoundingClientRect(); return r && { left: Math.round(r.left), right: Math.round(r.right), bottom: Math.round(r.bottom), w: innerWidth, h: innerHeight }; });
+if (!panel || panel.left < 0 || panel.right > panel.w || panel.bottom > panel.h) problems.push(`新加节点的输入面板跑出了窗口：${JSON.stringify(panel)}`);
+// 打 @ 但没有连上游：不出菜单，提示词里写的引用标成没连进来
+await pg.locator('.cnode-panel textarea.cnode-prompt').fill('镜头跟随 @文本 9');
+await sleep(400);
+if ((await count('.menu')) || (await count('.cnode-pill'))) problems.push('没连上游时打 @ 不应该出菜单，提示词上面也不该另有一排胶囊');
+if ((await text('.cnode-prompt-mirror mark.is-missing')).join('') !== '@文本 9') problems.push('没连进来的引用没有标出来');
+await audit('画布·视频节点');
+await shot('24-canvas');
+// 全选（⌘ A）：操作条是黑白的文字按钮
+await pg.locator('.react-flow__pane').click();
+await pg.keyboard.press('ControlOrMeta+a');
+await sleep(400);
+const bar = await pg.evaluate(() => { const b = document.querySelector('.canvas-batch-bar'); if (!b) return null; const main = b.querySelector('.batch-btn.is-primary'); return { icons: [...b.querySelectorAll('.batch-btn .icon')].filter((i) => !i.closest('.batch-btn').getAttribute('aria-haspopup') && !/对齐分布/.test(i.closest('.batch-btn').textContent)).length, labels: [...b.querySelectorAll('.batch-btn')].map((e) => e.textContent.trim()).join('|'), mainBg: main && getComputedStyle(main).backgroundColor, text: getComputedStyle(document.body).color }; });
+if (!bar) problems.push('全选之后没有出现操作条');
+else if (bar.icons || bar.labels !== '批量生成|对齐分布|打组|堆叠|复制|删除' || bar.mainBg !== bar.text) problems.push(`框选后的操作条不对：${JSON.stringify(bar)}`);
+await audit('画布·操作条');
+await shot('25-canvas-batch');
+await must('点批量生成', click('.canvas-batch-bar .batch-btn.is-primary'));
+await sleep(400);
+if (!(await count('.modal'))) problems.push('批量生成之前没有先确认');
+await audit('画布·批量生成确认');
+await must('取消批量生成', clickText('.modal .btn', '取消'));
+await sleep(300);
+await must('回到画布列表', click("button[aria-label='返回画布列表']"));
+await sleep(500);
+await pg.evaluate((id) => fetch(`/api/canvases/${id}`, { method: 'DELETE' }), board);
+
 // 10. 回到创作页；窄窗口下不溢出
 await must('回到创作', clickText('.nav-item', '创作'));
 await sleep(300);

@@ -828,7 +828,8 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 }
 /* 小地图点开才显示，叠在左下角那一条的上面 */
 .canvas .react-flow__minimap { overflow: hidden; margin-bottom: var(--sp-64); border: 1px solid var(--border-float); border-radius: var(--r-sm); }
-.canvas .react-flow__attribution a { color: var(--text-4); }
+/* 署名的字号按规范取最小的一档（React Flow 默认是 10px，不在阶梯里）。 */
+.canvas .react-flow__attribution a { color: var(--text-4); font-size: var(--text-micro); }
 /* 连接点：框的左右两边各一块看不见的感应区（屏幕上 52 见方，贴着框边，正对框的中线），里面一个 14 像素的小加号。
    感应区一直在，在里面任何地方按下都能拉线；加号平时藏着，鼠标移到节点上、选中节点或者进了感应区才出现。
    鼠标进了感应区，加号吸到鼠标的位置并放大一点（位置由脚本写在加号上）。正在拉线的时候所有加号都藏起来。
