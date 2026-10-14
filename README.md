@@ -1,7 +1,11 @@
 <div align="center">
 
 <p align="center">
-  <img src="web/src/brand/wordmark.png" alt="Innate Studio" width="280" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/logo-dark.svg" />
+    <source media="(prefers-color-scheme: light)" srcset="docs/screenshots/logo-light.svg" />
+    <img alt="Innate Studio" src="docs/screenshots/logo-light.svg" width="240" />
+  </picture>
 </p>
 
 ### 本地优先、支持团队托管的 AIGC 多模态创作工作台
