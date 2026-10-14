@@ -8,7 +8,7 @@ import { buildVideoRequest, buildImageRequest, buildSpeechRequest, buildSfxReque
 import { recordName } from '../media.ts';
 import { toast } from '../ui/layers.tsx';
 import type { HistoryItem, Kind, Ref } from '../types.ts';
-import { NODE_LABELS, joinPrompt, nodeWidth, numbered, placeResults, resolveMentions, runOrder, stripNodeData, videoFormFrom, type AudioData, type ImageData, type LinkData, type MediaInput, type NodeKind, type TextData, type VideoData } from './model.ts';
+import { BOX_HEIGHT, NODE_LABELS, TITLE_ROOM, joinPrompt, nodeWidth, numbered, placeResults, resolveMentions, runOrder, stripNodeData, videoFormFrom, type AudioData, type ImageData, type LinkData, type MediaInput, type NodeKind, type TextData, type VideoData } from './model.ts';
 
 type Flow = ReactFlowInstance<Node, Edge>;
 type AnyData = Partial<ImageData & VideoData & AudioData & TextData>;
@@ -30,6 +30,19 @@ async function submitVideo(node: Node, sources: { link: LinkData; node: Node }[]
   const media = sources.filter((s) => s.link.kind !== 'text');
   const counts: Record<Kind, number> = { image: 0, video: 0, audio: 0 };
   const inputs: MediaInput[] = [];
+
+  // 如果节点挂载了本片尾帧作为续写首帧，且没有外部图片首帧连入：
+  if (data.selfFrame && !sources.some((s) => s.link.kind === 'image')) {
+    inputs.push({ kind: 'image', role: 'first', ref: { uid: crypto.randomUUID(), kind: 'image', source: 'local', url: data.selfFrame.url, name: data.selfFrame.name, thumb: null } });
+    counts.image++;
+  } else if (data.selfRole === 'reference' && !sources.some((s) => s.link.kind === 'video')) {
+    const selfOutput = outputOf(node);
+    if (selfOutput) {
+      inputs.push({ kind: 'video', role: 'reference', ref: { uid: crypto.randomUUID(), kind: 'video', source: 'local', url: selfOutput.url, name: selfOutput.name, thumb: null } });
+      counts.video++;
+    }
+  }
+
   for (const { link, node: source } of media) {
     const kind = link.kind as Kind;
     const output = outputOf(source);
@@ -52,18 +65,34 @@ const FROM_CANVAS = { from: 'canvas' };
 
 async function submitImage(node: Node, sources: { link: LinkData; node: Node }[], prompt: string, given?: { url: string; name: string }[]) {
   const data = node.data as unknown as ImageData;
+  const selfOutput = outputOf(node);
+  const hasWireImages = sources.some((s) => s.link.kind === 'image');
+  const limit = imageRefLimit(data.model);
+  const usesSelfRef = Boolean(!hasWireImages && selfOutput?.kind === 'image' && limit > 0 && !(data as { ignoreSelfRef?: boolean }).ignoreSelfRef);
+
   // 连进来的图片是参考图（图生图）。given 是这一次临时指定的参考图（扩图的底图），有它就不看连线。
-  const refs: Ref[] = given
-    ? given.map((item) => ({ uid: crypto.randomUUID(), kind: 'image' as const, source: 'local' as const, url: item.url, name: item.name, thumb: null }))
-    : sources
-    .filter((s) => s.link.kind === 'image')
-    .map((s) => {
-      const output = outputOf(s.node);
-      if (!output) throw new Error('上游图片节点尚未生成');
-      return { uid: crypto.randomUUID(), kind: 'image' as const, source: 'local' as const, url: output.url, name: output.name, thumb: null };
-    });
+  let refs: Ref[] = [];
+  if (given) {
+    refs = given.map((item) => ({ uid: crypto.randomUUID(), kind: 'image' as const, source: 'local' as const, url: item.url, name: item.name, thumb: null }));
+  } else if (hasWireImages) {
+    refs = sources
+      .filter((s) => s.link.kind === 'image')
+      .map((s) => {
+        const output = outputOf(s.node);
+        if (!output) throw new Error('上游图片节点尚未生成');
+        return { uid: crypto.randomUUID(), kind: 'image' as const, source: 'local' as const, url: output.url, name: output.name, thumb: null };
+      });
+  } else if (usesSelfRef && selfOutput) {
+    refs = [{ uid: crypto.randomUUID(), kind: 'image' as const, source: 'local' as const, url: selfOutput.url, name: selfOutput.name, thumb: null }];
+  }
+
+  if (limit > 0 && refs.length > limit) {
+    refs = refs.slice(0, limit);
+    toast(`已自动取前 ${limit} 张参考图`, 'info', 3000);
+  }
+
   const form = { prompt, model: data.model, ratio: data.ratio, resolution: fitImageSize(data.model, data.resolution), quality: fitImageQuality(data.model, data.quality), count: data.count || 1, refs };
-  const request = buildImageRequest(form, imageRefLimit(data.model));
+  const request = buildImageRequest(form, limit);
   if (request.problems.length) throw new Error(request.problems[0]);
   return (await api<{ items: HistoryItem[] }>('POST', '/api/images', { payload: request.payload, form: { type: 'image', ...form, ...FROM_CANVAS } })).items.map((item) => item.id);
 }
@@ -104,7 +133,14 @@ export function deliver(flow: Flow, id: string, results: Record<string, unknown>
   const node = flow.getNode(id);
   if (!node || !results.length) return;
   const width = (n: Node) => n.measured?.width || nodeWidth(n.type as NodeKind, n.data);
-  const { here, spots } = placeResults({ id, position: node.position, width: width(node) }, isFilled(node.data as AnyData), results.length, flow.getNodes().filter((n) => n.type !== 'group' && !n.hidden).map((n) => ({ id: n.id, position: n.position, width: width(n) })));
+  const rowStep = Math.max(TITLE_ROOM + BOX_HEIGHT + 56, (node.measured?.height || (TITLE_ROOM + BOX_HEIGHT + 240)) + 48);
+  const { here, spots } = placeResults(
+    { id, position: node.position, width: width(node) },
+    isFilled(node.data as AnyData),
+    results.length,
+    flow.getNodes().filter((n) => n.type !== 'group' && !n.hidden).map((n) => ({ id: n.id, position: n.position, width: width(n) })),
+    rowStep
+  );
   if (here >= 0) flow.updateNodeData(id, results[here]);
   const rest = results.filter((_, index) => index !== here);
   if (!rest.length) return;

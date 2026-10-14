@@ -135,7 +135,7 @@
 
 /* 浅色下 --surface-2、--surface-3 加深过一档，是给直接垫在页面底图上的块用的（底图带颜色，浅了分不开）。
    白色的卡片、弹窗、浮层里面底色是纯的，用回原来浅的那一档。 */
-:root[data-theme='light'] :is(.popover, .composer-card, .modal, .skill-card, .cnode-box, .cnode-panel, .cfind, .canvas-tools, .canvas-foot) {
+:root[data-theme='light'] :is(.popover, .composer-card, .modal, .skill-card, .cnode-box, .cnode-panel, .cfind, .canvas-tools, .canvas-foot, .canvas-batch-bar) {
   --surface-2: #f3f3f3;
   --surface-3: #eaeaea;
 }
@@ -207,11 +207,11 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 .sidebar { display: flex; flex-direction: column; min-height: 0; padding: var(--sp-12) var(--sp-8) var(--sp-8); background: var(--bg-side); }
 .brand { display: flex; align-items: center; gap: var(--sp-8); padding: var(--sp-4) var(--sp-12) var(--sp-16); font-size: var(--text-body); font-weight: var(--fw-semibold); }
-/* 品牌图有两版：深色主题用白底图标配白字，浅色主题用黑底图标配黑字。字标只存了形状，颜色在这里填。 */
+.brand-logo { flex: none; height: 24px; width: auto; color: #fff; }
+:root[data-theme='light'] .brand-logo { color: #2a2a2a; }
+/* 历史与空画布使用的品牌图标。字标现由 .brand-logo SVG 绘制。 */
 .brand-mark { flex: none; width: 24px; height: 24px; background: url('./brand/mark-on-dark.png') center / contain no-repeat; }
-.brand-word { flex: none; width: 72px; height: 14px; background: #fff; mask: url('./brand/wordmark.png') center / contain no-repeat; }
 :root[data-theme='light'] .brand-mark { background-image: url('./brand/mark-on-light.png'); }
-:root[data-theme='light'] .brand-word { background: #181818; }
 .nav { display: flex; flex-direction: column; gap: var(--sp-2); }
 .nav-item {
   display: flex;
@@ -406,7 +406,8 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 .menu-item:focus-visible { background: var(--hover); outline: 0; }
 @media (hover: hover) { .menu-item:hover:not(:disabled) { background: var(--hover); outline: 0; } }
 .menu-item:disabled { opacity: 0.4; cursor: not-allowed; }
-.menu-item-note { color: var(--text-4); }
+.menu-item-note { margin-left: auto; padding-left: var(--sp-12); font-size: var(--text-caption); color: var(--text-4); }
+.menu-item:has(.menu-item-note) .menu-item-check { margin-left: var(--sp-4); }
 .menu-item.danger { color: var(--danger); }
 .menu-item-check { display: inline-flex; justify-content: flex-end; width: 26px; margin-left: auto; }
 .popover-body { display: flex; flex-direction: column; }
@@ -860,6 +861,16 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 .canvas-zoom { min-width: 52px; padding: 0 var(--sp-8); border: 0; background: none; color: var(--text-2); font-size: var(--text-caption); font-variant-numeric: tabular-nums; cursor: pointer; transition: background-color var(--t-fast) var(--ease), color var(--t-fast) var(--ease); }
 .canvas-zoom[aria-expanded='true'] { background: var(--hover); color: var(--text); }
 @media (hover: hover) { .canvas-zoom:hover { background: var(--hover); color: var(--text); } }
+/* 多选批量操作栏：悬浮在底部中央 */
+.canvas-batch-bar { display: flex; align-items: center; gap: var(--sp-4); padding: var(--sp-4) var(--sp-8); background: var(--surface-float); border: 1px solid var(--border-float); border-radius: var(--r-md); box-shadow: var(--shadow-float); animation: cnode-rise var(--t-fast) var(--ease-out); }
+.batch-badge { padding: 0 var(--sp-8); color: var(--text-2); font-size: var(--text-caption); font-weight: var(--fw-medium); white-space: nowrap; user-select: none; }
+.batch-split { width: 1px; height: var(--sp-16); margin: 0 var(--sp-2); background: var(--border-strong); }
+.batch-btn { display: inline-flex; align-items: center; gap: var(--sp-4); height: var(--h-sm); padding: 0 var(--sp-8); border: 0; border-radius: var(--r-xs); background: transparent; color: var(--text); font-size: var(--text-ui); font-weight: var(--fw-medium); cursor: pointer; white-space: nowrap; transition: background-color var(--t-fast) var(--ease), color var(--t-fast) var(--ease); }
+@media (hover: hover) { .batch-btn:hover { background: var(--hover); } }
+.batch-btn.is-primary { background: var(--accent); color: var(--on-accent); }
+@media (hover: hover) { .batch-btn.is-primary:hover { background: var(--accent-hover); } }
+.batch-btn.is-danger { color: var(--danger); }
+@media (hover: hover) { .batch-btn.is-danger:hover { background: color-mix(in srgb, var(--danger) 12%, transparent); } }
 /* 空画布正中间的一句提示，加了第一个节点就消失 */
 .canvas-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: var(--sp-16); color: var(--text-3); font-size: var(--text-title); pointer-events: none; }
 .canvas-empty .brand-mark { width: 28px; height: 28px; }
@@ -927,6 +938,8 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 /* 搜到的节点闪一下 */
 .react-flow__node.is-found .cnode-box { animation: cnode-found 1.2s var(--ease-out); }
 @keyframes cnode-found { 0%, 60% { box-shadow: 0 0 0 calc(4px * var(--inv, 1)) color-mix(in srgb, var(--accent) 45%, transparent); } }
+/* @ 胶囊悬停定位高亮 */
+.react-flow__node.is-mention-hover .cnode-box { box-shadow: 0 0 0 calc(3px * var(--inv, 1)) var(--accent), 0 0 16px var(--accent-alpha); }
 /* 生成历史：筛选一行，下面是三列小图，点一个放回画布 */
 .chist { gap: var(--sp-12); width: 348px; padding: var(--sp-4); }
 .chist-head { display: flex; flex-direction: column; gap: var(--sp-8); }
@@ -984,6 +997,18 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 /* 参考素材：连进来的素材各一张小图，角上写着用途；最后一个加号是再加一份 */
 .cnode-refs { --tile: 64px; display: flex; flex-wrap: wrap; gap: var(--sp-8); padding: var(--sp-20) var(--sp-20) 0; }
 .cnode-refs .ref-tile.is-text { background: color-mix(in srgb, var(--accent) 14%, var(--surface-2)); color: var(--accent); }
+/* 提示词里的 @ 引用胶囊 */
+.cnode-pills { display: flex; flex-wrap: wrap; gap: var(--sp-4); padding: var(--sp-12) var(--sp-20) 0; }
+.cnode-pill { display: inline-flex; align-items: center; gap: var(--sp-4); height: 24px; padding: 0 var(--sp-8); border: 1px solid var(--border-float); border-radius: 999px; background: var(--surface-2); color: var(--text-2); font-size: var(--text-caption); font-weight: var(--fw-medium); cursor: pointer; user-select: none; transition: background-color var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease), color var(--t-fast) var(--ease); }
+@media (hover: hover) { .cnode-pill:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--surface-2)); color: var(--accent); } }
+.cnode-pill.is-image { border-color: color-mix(in srgb, var(--accent) 30%, transparent); background: color-mix(in srgb, var(--accent) 10%, var(--surface-2)); color: var(--accent); }
+.cnode-pill.is-video { border-color: color-mix(in srgb, #8b5cf6 30%, transparent); background: color-mix(in srgb, #8b5cf6 10%, var(--surface-2)); color: #8b5cf6; }
+.cnode-pill.is-audio { border-color: color-mix(in srgb, #ec4899 30%, transparent); background: color-mix(in srgb, #ec4899 10%, var(--surface-2)); color: #ec4899; }
+.cnode-pill.is-text { border-color: color-mix(in srgb, var(--accent) 24%, transparent); background: color-mix(in srgb, var(--accent) 8%, var(--surface-2)); color: var(--text-2); }
+.cnode-pill-name { line-height: 1; }
+.cnode-pill-del { display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; margin-left: var(--sp-2); padding: 0; border: 0; border-radius: 50%; background: transparent; color: inherit; opacity: 0.6; cursor: pointer; transition: opacity var(--t-fast) var(--ease); }
+@media (hover: hover) { .cnode-pill-del:hover { opacity: 1; background: color-mix(in srgb, currentColor 16%, transparent); } }
+.cnode-pills + .cnode-prompt { padding-top: var(--sp-8); }
 .cnode-prompt { display: block; width: 100%; min-height: 104px; max-height: 280px; padding: var(--sp-20) var(--sp-20) var(--sp-8); border: 0; outline: 0; background: transparent; color: var(--text); font-size: var(--text-body); line-height: var(--lh-body); resize: none; field-sizing: content; cursor: text; }
 /* 引用连进来的节点：提示词右下角的一个 @ */
 .cnode-panel { position: relative; }
@@ -1009,6 +1034,7 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 /* 连线：一条细线，不带标签。两头的节点有一个被选中，或者线自己被选中时变亮 */
 .canvas .react-flow__edge-path.clink { transition: stroke var(--t-quick) var(--ease); animation: fade var(--t-base) var(--ease-out); }
 .canvas .react-flow__edge-path.clink.is-lit { stroke: color-mix(in srgb, var(--accent) 38%, transparent); }
+.canvas .react-flow__edge-path.clink.is-mention { stroke: var(--accent); stroke-width: 2.5; }
 /* 流光：在同一条细线上再描一遍，描边是一条两头透明的渐变，顺着线滑过去（做法取自 Magic UI 的 Animated Beam）。只在两头有节点被选中时出现。 */
 .clink-beam { fill: none; pointer-events: none; stroke-width: 2; stroke-linecap: round; }
 .clink-beam-tail { stop-color: var(--accent); }

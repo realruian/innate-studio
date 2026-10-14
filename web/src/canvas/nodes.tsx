@@ -3,7 +3,7 @@
 // 左右两个加号是连接点：拖出去连到别的节点，点一下是在那一侧接一个新节点。
 // 跟着画布缩放的只有框和里面的内容；名字、加号、操作条、输入面板在屏幕上的大小不变，缩得再小也看得清、点得到。
 
-import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { BaseEdge, Handle, NodeToolbar, Position, getBezierPath, useConnection, useEdges, useInternalNode, useReactFlow, useStore as useFlowStore, useUpdateNodeInternals, type ConnectionLineComponentProps, type EdgeProps, type Node, type NodeProps } from '@xyflow/react';
 import { state, useStore, loadVoices, isPendingTask, polishModel, KINDS as MEDIA } from '../store.ts';
 import { RATIOS, fitImageQuality, fitImageSize, hasLastFrame, imageQualities, imageRatios, imageRefLimit, imageSizes, specOf, voiceName } from '../composer/state.ts';
@@ -28,15 +28,17 @@ import { Cropper, cropImage, grabFrame, padImage, splitGrid, type Made } from '.
 // addBeside：把几张做好的图（裁剪、切分、截帧的结果）各变成一个图片节点，摆在某个节点右边；columns 是一行摆几个。
 export const CanvasActions = createContext<{
   snap: () => void;
-  addInput: (targetId: string, kind: NodeKind, extra?: Record<string, unknown>) => void;
+  addInput: (targetId: string, kind: NodeKind, extra?: Record<string, unknown>, role?: FrameRole) => void;
   ungroup: (groupId: string) => void;
   saveWorkflow: (groupId: string) => void;
   unstack: (stackId: string, memberId?: string) => void;
   addBeside: (sourceId: string, made: Made[], columns?: number) => void;
   // addNodeBeside：在某个节点右边加一个同类的空节点，返回它的 id（扩图的结果放进它）。continueVideo：接着一段视频往后拍，frame 是它的最后一帧。
   addNodeBeside: (sourceId: string, data: Record<string, unknown>) => string;
-  continueVideo: (sourceId: string, frame: Made) => void;
-}>({ snap() {}, addInput() {}, ungroup() {}, saveWorkflow() {}, unstack() {}, addBeside() {}, addNodeBeside: () => '', continueVideo() {} });
+  continueVideo: (sourceId: string, frame: Made, targetAt?: { x: number; y: number }) => void;
+  jumpTo: (nodeId: string) => void;
+  hoverNode: (nodeId: string | null) => void;
+}>({ snap() {}, addInput() {}, ungroup() {}, saveWorkflow() {}, unstack() {}, addBeside() {}, addNodeBeside: () => '', continueVideo() {}, jumpTo() {}, hoverNode() {} });
 
 export const NODE_ICONS: Record<NodeKind, IconName> = { text: 'type', image: 'image', video: 'video', audio: 'music' };
 
@@ -44,6 +46,7 @@ export const NODE_ICONS: Record<NodeKind, IconName> = { text: 'type', image: 'im
 const INERT = 'nodrag nowheel';
 
 type MediaData = Partial<ImageData & VideoData & AudioData>;
+type AnyData = Partial<ImageData & VideoData & AudioData & TextData & { autofocus?: boolean; ignoreSelfRef?: boolean }>;
 
 // 只选中了这一个节点时才显示它的工具条和输入面板；框选了一片时都不显示，免得叠成一堆。
 function useAlone(selected?: boolean) {
@@ -197,6 +200,46 @@ function Prompt({ id, value, placeholder, presets }: { id: string; value: string
   const inputs = useInputs(id);
   const area = useRef<HTMLTextAreaElement>(null);
   const { set, ...draft } = useDraft(value, (prompt) => flow.updateNodeData(id, { prompt }));
+  const { jumpTo, hoverNode } = useContext(CanvasActions);
+
+  const mentions = useMemo(() => {
+    const list: { label: string; no: string; name: string; node?: Node; kind: NodeKind }[] = [];
+    const regex = /@(文本|图片|视频|音频)\s*(\d+)/g;
+    let m: RegExpExecArray | null;
+    const seen = new Set<string>();
+    while ((m = regex.exec(draft.value)) !== null) {
+      const label = m[1];
+      const no = m[2];
+      const name = `${label} ${no}`;
+      if (seen.has(name)) continue;
+      seen.add(name);
+      const input = inputs.find((inp) => nameOf(inp.node) === name);
+      const kind = (input?.node.type as NodeKind) || (label === '图片' ? 'image' : label === '视频' ? 'video' : label === '音频' ? 'audio' : 'text');
+      list.push({
+        label,
+        no,
+        name,
+        node: input?.node,
+        kind,
+      });
+    }
+    return list;
+  }, [draft.value, inputs]);
+
+  const removeMention = (label: string, no: string) => {
+    const regex = new RegExp(`@${label}\\s*${no}\\s*`, 'g');
+    const next = draft.value.replace(regex, '').trim();
+    set(next);
+    hoverNode(null);
+  };
+
+  useEffect(() => {
+    const rawData = flow.getNode(id)?.data as AnyData | undefined;
+    if (rawData?.autofocus) {
+      flow.updateNodeData(id, { autofocus: undefined });
+      requestAnimationFrame(() => area.current?.focus());
+    }
+  }, [id, flow]);
 
   // typed：菜单是打 @ 打出来的，选了之后要把那个 @ 一起换掉。
   function mention(typed: boolean) {
@@ -231,7 +274,7 @@ function Prompt({ id, value, placeholder, presets }: { id: string; value: string
         const own = typed ? '' : el.value.trim();
         set(own ? `${item.prompt}\n${own}` : item.prompt);
         // 有输入可用就直接开始；没有（比如故事板还没写剧情）就把光标放到最后，等着补。
-        if (inputs.length || own) return presets!.run(own ? `${item.prompt}\n${own}` : item.prompt);
+        if (inputs.length || presets?.refs || own) return presets!.run(own ? `${item.prompt}\n${own}` : item.prompt);
         requestAnimationFrame(() => {
           el.focus();
           el.setSelectionRange(el.value.length, el.value.length);
@@ -242,6 +285,37 @@ function Prompt({ id, value, placeholder, presets }: { id: string; value: string
 
   return (
     <>
+      {mentions.length > 0 && (
+        <div className="cnode-pills nodrag" role="list" aria-label="引用的节点">
+          {mentions.map((item) => (
+            <div
+              key={item.name}
+              className={`cnode-pill is-${item.kind}`}
+              role="button"
+              tabIndex={0}
+              {...tip(item.node ? `点击定位 ${item.name}` : `${item.name}（未连入）`)}
+              onClick={() => item.node && jumpTo(item.node.id)}
+              onMouseEnter={() => item.node && hoverNode(item.node.id)}
+              onMouseLeave={() => hoverNode(null)}
+            >
+              <Icon name={NODE_ICONS[item.kind]} size={12} />
+              <span className="cnode-pill-name">@{item.name}</span>
+              <button
+                type="button"
+                className="cnode-pill-del"
+                {...tip('移除引用')}
+                aria-label={`移除引用 ${item.name}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  removeMention(item.label, item.no);
+                }}
+              >
+                <Icon name="x" size={10} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
       <textarea
         ref={area}
         className="cnode-prompt"
@@ -501,7 +575,10 @@ function NodeTools({ id, kind, data, onUpload }: { id: string; kind: Kind; data:
       if (!padded) return toast(`图片已是 ${ratio}`, 'info');
       const made = addNodeBeside(id, { prompt: `扩图成 ${ratio}`, ratio, count: 1 });
       // 等新节点真的上了画布再让它生成。
-      await new Promise((resolve) => setTimeout(resolve, 120));
+      let tries = 0;
+      while (!flow.getNode(made) && tries++ < 20) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
       generate(flow, made, snap, { prompt: OUTPAINT_PROMPT, refs: [padded] });
     } catch (err) {
       toast((err as Error).message, 'error', 6000);
@@ -546,6 +623,11 @@ function NodeTools({ id, kind, data, onUpload }: { id: string; kind: Kind; data:
       {hasContent && (
         <button className="icon-btn icon-btn-sm cnode-btn" type="button" {...tip('全屏查看')} aria-label="全屏查看" onClick={view}>
           <Icon name="expand" size={16} />
+        </button>
+      )}
+      {hasContent && kind === 'video' && local && (
+        <button className="icon-btn icon-btn-sm cnode-btn" type="button" {...tip('接着拍（截取尾帧接续生成下一个镜头）')} aria-label="接着拍" onClick={extend}>
+          <Icon name="workflow" size={16} />
         </button>
       )}
       {!hasContent && onUpload ? (
@@ -657,14 +739,22 @@ export function ImageNode({ id, data: raw, selected, dragging }: NodeProps) {
   // 这个模型收几张参考图。不收的模型不显示参考图那一排；已经连进来的仍然显示，方便看出问题在哪。
   const refLimit = imageRefLimit(data.model);
   const { snap } = useContext(CanvasActions);
-  const hasRefs = inputs.some((i) => i.link.kind === 'image');
+  const selfNode = flow.getNode(id);
+  const selfOutput = selfNode ? outputOf(selfNode) : (data.upload ? { url: data.upload.url, kind: 'image' as const, name: data.upload.name } : null);
+  const usesSelfRef = Boolean(
+    !inputs.some((i) => i.link.kind === 'image') &&
+    selfOutput?.kind === 'image' &&
+    refLimit > 0 &&
+    !(data as { ignoreSelfRef?: boolean }).ignoreSelfRef
+  );
+  const hasRefs = inputs.some((i) => i.link.kind === 'image') || usesSelfRef;
 
   async function upload(picked?: File) {
     if (!picked) return;
-    flow.updateNodeData(id, { busy: '正在上传', error: '' });
+    flow.updateNodeData(id, { busy: '正在上传', error: '', ignoreSelfRef: false });
     try {
       const ref = await uploadLocalFile(picked, 'image');
-      flow.updateNodeData(id, { upload: { url: ref.url, name: ref.name }, recordId: undefined });
+      flow.updateNodeData(id, { upload: { url: ref.url, name: ref.name }, recordId: undefined, ignoreSelfRef: false });
     } catch (err) {
       toast((err as Error).message, 'error', 6000);
     } finally {
@@ -685,9 +775,9 @@ export function ImageNode({ id, data: raw, selected, dragging }: NodeProps) {
       panel={
         <>
           <Refs id={id} kind="image" model={data.model} limit={refLimit} />
-          <Prompt id={id} value={data.prompt} placeholder={promptHint(linked, hasRefs ? '描述修改要求，例如：把背景改成雪夜' : '描述主体、环境、构图、光线与风格')} presets={{ refs: inputs.filter((i) => i.link.kind === 'image').length, limit: refLimit, run: (prompt) => generate(flow, id, snap, { prompt }) }} />
+          <Prompt id={id} value={data.prompt} placeholder={promptHint(linked, hasRefs ? '描述修改要求，例如：把背景改成雪夜' : '描述主体、环境、构图、光线与风格')} presets={{ refs: inputs.filter((i) => i.link.kind === 'image').length + (usesSelfRef ? 1 : 0), limit: refLimit, run: (prompt) => generate(flow, id, snap, { prompt }) }} />
           {data.error && !data.busy && <p className="cnode-error">{data.error}</p>}
-          <Bar working={working} ready={Boolean(data.prompt.trim()) || linked} action="生成图片" onSend={() => generate(flow, id, snap)}>
+          <Bar working={working} ready={Boolean(data.prompt.trim()) || linked || hasRefs} action="生成图片" onSend={() => generate(flow, id, snap)}>
             <Dropdown variant="tool" chevron label="模型" value={data.model} options={models.map((m) => ({ value: m, label: modelLabel(m) }))} onChange={(model) => flow.updateNodeData(id, { model, ratio: imageRatios(model).includes(data.ratio) ? data.ratio : imageRatios(model)[0] || data.ratio, resolution: fitImageSize(model, data.resolution), quality: fitImageQuality(model, data.quality) })} />
             <Params
               label="参数"
@@ -742,12 +832,23 @@ function pickRole(anchor: HTMLElement, model: string | undefined, current: Frame
 function Refs({ id, kind, model = '', limit = 0 }: { id: string; kind: NodeKind; model?: string; limit?: number }) {
   const forImage = kind === 'image';
   const flow = useReactFlow();
-  const { snap, addInput } = useContext(CanvasActions);
+  const { snap, addInput, continueVideo } = useContext(CanvasActions);
   useStore('history', 'app');
   const inputs = useInputs(id);
+  const selfNode = flow.getNode(id);
+  const rawData = selfNode?.data as (AnyData & { ignoreSelfRef?: boolean; selfFrame?: { url: string; name: string }; selfRole?: string }) | undefined;
+  const selfOutput = selfNode ? outputOf(selfNode) : (rawData?.upload ? { url: rawData.upload.url, kind: kind as Kind, name: rawData.upload.name } : null);
+  const usesSelfRef = Boolean(
+    forImage &&
+    !inputs.some((i) => i.link.kind === 'image') &&
+    selfOutput?.kind === 'image' &&
+    limit > 0 &&
+    !rawData?.ignoreSelfRef
+  );
+  const hasVideoContent = Boolean(kind === 'video' && selfOutput?.kind === 'video');
   // 文本排在前面。这个节点的模型不收的素材也照样显示，方便看出问题在哪。
   const media = [...inputs.filter((i) => i.link.kind === 'text'), ...inputs.filter((i) => i.link.kind !== 'text')];
-  const used = inputs.filter((i) => i.link.kind === 'image').length;
+  const used = inputs.filter((i) => i.link.kind === 'image').length + (usesSelfRef ? 1 : 0);
   const canUpload = kind === 'video' || (forImage && used < limit);
   const only = !canUpload;
   // 移除一份素材就是断开那条线，上游的节点留在画布上。
@@ -762,9 +863,46 @@ function Refs({ id, kind, model = '', limit = 0 }: { id: string; kind: NodeKind;
     const kinds = Object.keys(MEDIA) as Kind[];
     const items = [
       ...(canUpload ? [{ value: 'local', label: forImage ? '参考图' : '图片、视频或音频' }] : []),
+      ...(forImage && rawData?.ignoreSelfRef && selfOutput ? [{ value: 'self', label: '使用当前图片作为底图' }] : []),
+      ...(hasVideoContent ? [
+        { value: 'extend', label: '接着拍（截取尾帧在右侧生成下一个分镜）' },
+        ...(specOf(model).frames.includes('first_frame') ? [{ value: 'self-frame', label: '以本片尾帧作为首帧续拍' }] : []),
+        { value: 'self-video', label: '以本片作为参考视频' },
+      ] : []),
       { value: 'text', label: '文本节点' },
     ];
-    const pick = (value: string) => {
+    const pick = async (value: string) => {
+      if (value === 'self') {
+        snap();
+        return flow.updateNodeData(id, { ignoreSelfRef: false });
+      }
+      if (value === 'extend') {
+        if (!selfOutput?.url) return toast('视频尚未准备好', 'info');
+        toast('正在截取最后一帧…', 'info', 1800);
+        try {
+          const frame = await grabFrame(selfOutput.url, 'last', `${selfOutput.name}-尾帧`);
+          continueVideo(id, frame);
+        } catch (err) {
+          toast((err as Error).message, 'error', 6000);
+        }
+        return;
+      }
+      if (value === 'self-frame') {
+        if (!selfOutput?.url) return toast('视频尚未准备好', 'info');
+        toast('正在提取最后一帧…', 'info', 1500);
+        try {
+          const frame = await grabFrame(selfOutput.url, 'last', `${selfOutput.name}-首帧`);
+          snap();
+          flow.updateNodeData(id, { selfFrame: frame, selfRole: undefined });
+        } catch (err) {
+          toast((err as Error).message, 'error', 6000);
+        }
+        return;
+      }
+      if (value === 'self-video') {
+        snap();
+        return flow.updateNodeData(id, { selfRole: 'reference', selfFrame: undefined });
+      }
       if (value === 'text') return addInput(id, 'text');
       const onPick = (ref: Ref) => addInput(id, ref.kind, { upload: { url: ref.url, name: ref.name } });
       if (forImage) return openAssetPicker({ title: '添加参考图', kind: 'image', remaining: limit - used, onPick });
@@ -776,6 +914,45 @@ function Refs({ id, kind, model = '', limit = 0 }: { id: string; kind: NodeKind;
 
   return (
     <div className="cnode-refs">
+      {usesSelfRef && selfOutput && (
+        <MediaTile
+          key="self-ref"
+          tag="底图"
+          tipText={`基于当前${selfOutput.name || '图片'}图生图（点击 × 可切换为纯文本生成）`}
+          onRemove={() => {
+            snap();
+            flow.updateNodeData(id, { ignoreSelfRef: true });
+          }}
+        >
+          <img className="thumb-img" src={selfOutput.url} alt="" draggable={false} />
+        </MediaTile>
+      )}
+      {kind === 'video' && rawData?.selfFrame && (
+        <MediaTile
+          key="self-frame"
+          tag="首帧"
+          tipText="以本片尾帧作为接续首帧（点击 × 移除）"
+          onRemove={() => {
+            snap();
+            flow.updateNodeData(id, { selfFrame: undefined });
+          }}
+        >
+          <img className="thumb-img" src={rawData.selfFrame.url} alt="" draggable={false} />
+        </MediaTile>
+      )}
+      {kind === 'video' && rawData?.selfRole === 'reference' && selfOutput && (
+        <MediaTile
+          key="self-video"
+          tag="参考视频"
+          tipText="以当前视频作为参考（点击 × 移除）"
+          onRemove={() => {
+            snap();
+            flow.updateNodeData(id, { selfRole: undefined });
+          }}
+        >
+          <Icon name="video" size={18} />
+        </MediaTile>
+      )}
       {media.map(({ edgeId, link, node }) => {
         if (link.kind === 'text') {
           const text = ((node.data as unknown as TextData).text || '').trim();
@@ -825,6 +1002,7 @@ export function VideoNode({ id, data: raw, selected, dragging }: NodeProps) {
   const ratioLabel = (value: string) => RATIOS.find((r) => r.value === value)?.label || value;
   const set = (patch: Partial<VideoData>) => flow.updateNodeData(id, patch);
   const { snap } = useContext(CanvasActions);
+  const hasSelfRef = Boolean(data.selfFrame || data.selfRole);
   return (
     <Frame
       id={id}
@@ -838,9 +1016,9 @@ export function VideoNode({ id, data: raw, selected, dragging }: NodeProps) {
       panel={
         <>
           <Refs id={id} kind="video" model={data.model} />
-          <Prompt id={id} value={data.prompt} placeholder={promptHint(linked, '描述主体、动作、场景、运镜、光线与风格')} />
+          <Prompt id={id} value={data.prompt} placeholder={promptHint(linked, data.selfFrame ? '描述接续动作与剧情，例如：主角转身上车，车辆向远方驶去' : '描述主体、动作、场景、运镜、光线与风格')} />
           {data.error && !data.busy && <p className="cnode-error">{data.error}</p>}
-          <Bar working={working} ready={Boolean(data.prompt.trim()) || inputs.length > 0} action="生成视频" onSend={() => generate(flow, id, snap)}>
+          <Bar working={working} ready={Boolean(data.prompt.trim()) || inputs.length > 0 || hasSelfRef} action="生成视频" onSend={() => generate(flow, id, snap)}>
             <Dropdown variant="tool" chevron label="模型" value={data.model} options={models.map((m) => ({ value: m, label: modelLabel(m), note: modelNote(m) || undefined }))} onChange={(model) => set(fitVideo({ ...data, model }))} />
             <Params
               label="参数"
@@ -1075,11 +1253,12 @@ export function LinkEdge({ id, source, target, sourceX, sourceY, targetX, target
   const ux = dx / span;
   const uy = dy / span;
   const reach = Math.min(320, Math.max(100, span * 0.5));
-  // 两头的节点有一个被选中：线变成彩色，上面有一段光顺着线从上游流到下游。线自己被选中时不流，免得盖住选中的样子。
-  const lit = !selected && Boolean(from?.selected || to?.selected);
+  // 两头的节点有一个被选中，或被 @ 胶囊悬停高亮：线变成彩色，上面有一段光顺着线从上游流到下游。线自己被选中时不流，免得盖住选中的样子。
+  const isHovered = Boolean((from as { className?: string } | undefined)?.className?.includes('is-mention-hover') || (to as { className?: string } | undefined)?.className?.includes('is-mention-hover'));
+  const lit = !selected && Boolean(from?.selected || to?.selected || isHovered);
   return (
     <>
-      <BaseEdge id={id} path={path} className={`clink ${lit ? 'is-lit' : ''}`} />
+      <BaseEdge id={id} path={path} className={`clink ${lit ? 'is-lit' : ''} ${isHovered ? 'is-mention' : ''}`} />
       {lit && (
         <>
           {/* 流光的做法取自 Magic UI 的 Animated Beam：不另画一段粗线，而是在原来的细线上再描一遍，

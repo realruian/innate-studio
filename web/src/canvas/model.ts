@@ -52,6 +52,7 @@ export interface ImageData extends Generated {
   count?: number;
   // 节点里那张图实际的宽高比，图片读出来之后记下，节点的框按它定宽度。
   aspect?: number;
+  ignoreSelfRef?: boolean;
 }
 export interface VideoData extends Generated {
   prompt: string;
@@ -63,6 +64,8 @@ export interface VideoData extends Generated {
   count?: number;
   // 节点里那段视频实际的宽高比，读到之后记下，节点的框按它定宽度。
   aspect?: number;
+  selfFrame?: { url: string; name: string };
+  selfRole?: 'reference';
 }
 export interface AudioData extends Generated {
   tool: 'speech' | 'sfx';
@@ -199,7 +202,7 @@ export function videoFormFrom(base: VideoForm, data: VideoData, prompt: string, 
 
 // 存进画布之前去掉只在页面上有意义的东西。
 export function stripNodeData<T extends object>(data: T): T {
-  const { busy: _busy, error: _error, ...rest } = data as T & Generated;
+  const { busy: _busy, error: _error, autofocus: _autofocus, ...rest } = data as T & Generated & { autofocus?: boolean };
   return rest as T;
 }
 
@@ -432,13 +435,13 @@ export function runOrder(ids: string[], edges: { source: string; target: string 
 // 节点还空着：第一份放进它自己，多出来的每份一个新节点。节点里已经有内容：原来的留着不动，每份结果都是新节点。
 // 新节点和原节点左边对齐，从它下面一行一行往下排，跳过已经有节点的位置。返回的 here 是放进原节点的那一份是第几个（没有就是 -1），spots 是新节点的位置。
 const ROW_STEP = TITLE_ROOM + BOX_HEIGHT + 56;
-export function placeResults(source: { id: string; position: { x: number; y: number }; width: number }, filled: boolean, results: number, others: { id: string; position: { x: number; y: number }; width: number }[]): { here: number; spots: { x: number; y: number }[] } {
+export function placeResults(source: { id: string; position: { x: number; y: number }; width: number }, filled: boolean, results: number, others: { id: string; position: { x: number; y: number }; width: number }[], rowStep = ROW_STEP): { here: number; spots: { x: number; y: number }[] } {
   const spots: { x: number; y: number }[] = [];
   const taken = others.filter((node) => node.id !== source.id).map((node) => ({ ...node.position, width: node.width }));
   let y = source.position.y;
   for (let n = filled ? 0 : 1; n < results; n++) {
-    do y += ROW_STEP;
-    while (taken.some((node) => Math.abs(node.y - y) < ROW_STEP - 60 && node.x < source.position.x + source.width + 40 && node.x + node.width + 40 > source.position.x));
+    do y += rowStep;
+    while (taken.some((node) => Math.abs(node.y - y) < rowStep - 60 && node.x < source.position.x + source.width + 40 && node.x + node.width + 40 > source.position.x));
     spots.push({ x: source.position.x, y });
     taken.push({ x: source.position.x, y, width: source.width });
   }
@@ -464,14 +467,16 @@ interface Wire {
 export interface Clip {
   nodes: Piece[];
   edges: Wire[];
+  upstream?: Wire[];
 }
 
-// 复制下来的是选中的节点，和两头都在其中的连线；只连着一头的线不带走。
+// 复制下来的是选中的节点，和两头都在其中的连线；连着外部上游输入的线记在 upstream 里（分支复制时可继承）。
 export function clipOf(nodes: Piece[], edges: Wire[]): Clip {
   const ids = new Set(nodes.map((node) => node.id));
   return {
     nodes: nodes.map(({ id, type, position, data, hidden }) => ({ id, type, position: { ...position }, data: stripNodeData(data), ...(hidden ? { hidden } : {}) })),
     edges: edges.filter((edge) => ids.has(edge.source) && ids.has(edge.target)).map(({ id, source, target, data }) => ({ id, source, target, data })),
+    upstream: edges.filter((edge) => !ids.has(edge.source) && ids.has(edge.target)).map(({ id, source, target, data }) => ({ id, source, target, data })),
   };
 }
 
@@ -489,5 +494,84 @@ export function pasteClip(clip: Clip, place: { at?: { x: number; y: number }; by
     // 分组里记的成员也换成新 id。
     nodes: clip.nodes.map((node) => ({ ...node, id: ids.get(node.id)!, position: { x: node.position.x + dx, y: node.position.y + dy }, data: { ...node.data, ...(Array.isArray(node.data.members) ? { members: (node.data.members as string[]).map((member) => ids.get(member)).filter(Boolean) } : {}) } })),
     edges: clip.edges.filter((edge) => ids.has(edge.source) && ids.has(edge.target)).map((edge) => ({ ...edge, id: newId(), source: ids.get(edge.source)!, target: ids.get(edge.target)!, data: edge.data && { ...edge.data } })),
+    upstream: (clip.upstream || []).filter((edge) => ids.has(edge.target)).map((edge) => ({ ...edge, id: newId(), source: edge.source, target: ids.get(edge.target)!, data: edge.data && { ...edge.data } })),
   };
+}
+
+// ---------- 节点对齐与等间距分布 ----------
+
+export interface SizedNode {
+  id: string;
+  position: { x: number; y: number };
+  width: number;
+  height?: number;
+}
+
+export type AlignDirection = 'left' | 'center-h' | 'right' | 'top' | 'center-v' | 'bottom';
+
+export function alignNodes<T extends SizedNode>(nodes: T[], type: AlignDirection): Map<string, { x: number; y: number }> {
+  const result = new Map<string, { x: number; y: number }>();
+  if (nodes.length < 2) {
+    nodes.forEach((n) => result.set(n.id, { ...n.position }));
+    return result;
+  }
+  const heightOf = (n: SizedNode) => n.height || (BOX_HEIGHT + TITLE_ROOM);
+  if (type === 'left') {
+    const minX = Math.min(...nodes.map((n) => n.position.x));
+    nodes.forEach((n) => result.set(n.id, { x: minX, y: n.position.y }));
+  } else if (type === 'right') {
+    const maxRight = Math.max(...nodes.map((n) => n.position.x + n.width));
+    nodes.forEach((n) => result.set(n.id, { x: maxRight - n.width, y: n.position.y }));
+  } else if (type === 'center-h') {
+    const minX = Math.min(...nodes.map((n) => n.position.x));
+    const maxRight = Math.max(...nodes.map((n) => n.position.x + n.width));
+    const midX = (minX + maxRight) / 2;
+    nodes.forEach((n) => result.set(n.id, { x: Math.round(midX - n.width / 2), y: n.position.y }));
+  } else if (type === 'top') {
+    const minY = Math.min(...nodes.map((n) => n.position.y));
+    nodes.forEach((n) => result.set(n.id, { x: n.position.x, y: minY }));
+  } else if (type === 'bottom') {
+    const maxBottom = Math.max(...nodes.map((n) => n.position.y + heightOf(n)));
+    nodes.forEach((n) => result.set(n.id, { x: n.position.x, y: maxBottom - heightOf(n) }));
+  } else if (type === 'center-v') {
+    const minY = Math.min(...nodes.map((n) => n.position.y));
+    const maxBottom = Math.max(...nodes.map((n) => n.position.y + heightOf(n)));
+    const midY = (minY + maxBottom) / 2;
+    nodes.forEach((n) => result.set(n.id, { x: n.position.x, y: Math.round(midY - heightOf(n) / 2) }));
+  }
+  return result;
+}
+
+export function distributeNodes<T extends SizedNode>(nodes: T[], axis: 'h' | 'v', defaultGap = 40): Map<string, { x: number; y: number }> {
+  const result = new Map<string, { x: number; y: number }>();
+  nodes.forEach((n) => result.set(n.id, { ...n.position }));
+  if (nodes.length < 3) return result;
+
+  const heightOf = (n: SizedNode) => n.height || (BOX_HEIGHT + TITLE_ROOM);
+  if (axis === 'h') {
+    const sorted = [...nodes].sort((a, b) => a.position.x - b.position.x);
+    const first = sorted[0];
+    const last = sorted[sorted.length - 1];
+    const totalSpan = (last.position.x + last.width) - first.position.x;
+    const totalWidths = sorted.reduce((sum, n) => sum + n.width, 0);
+    const gap = Math.max(defaultGap, Math.round((totalSpan - totalWidths) / (sorted.length - 1)));
+    let curX = first.position.x;
+    for (const n of sorted) {
+      result.set(n.id, { x: curX, y: n.position.y });
+      curX += n.width + gap;
+    }
+  } else {
+    const sorted = [...nodes].sort((a, b) => a.position.y - b.position.y);
+    const first = sorted[0];
+    const last = sorted[sorted.length - 1];
+    const totalSpan = (last.position.y + heightOf(last)) - first.position.y;
+    const totalHeights = sorted.reduce((sum, n) => sum + heightOf(n), 0);
+    const gap = Math.max(defaultGap, Math.round((totalSpan - totalHeights) / (sorted.length - 1)));
+    let curY = first.position.y;
+    for (const n of sorted) {
+      result.set(n.id, { x: n.position.x, y: curY });
+      curY += heightOf(n) + gap;
+    }
+  }
+  return result;
 }

@@ -6,15 +6,16 @@ import '@xyflow/react/dist/style.css';
 import { api, canvasPath, useStore, KINDS as MEDIA } from '../store.ts';
 import { composer, imageRefLimit } from '../composer/state.ts';
 import { kindOfFile, uploadLocalFile } from '../media.ts';
-import { Icon } from '../ui/Icon.tsx';
+import { Icon, type IconName } from '../ui/Icon.tsx';
 import { tip } from '../ui/controls.tsx';
 import { openMenu, openPopover, toast } from '../ui/layers.tsx';
 import { reducedMotion } from '../ui/motion.ts';
 import type { HistoryItem } from '../types.ts';
-import { BOX_HEIGHT, NODE_LABELS, TITLE_ROOM, canLink, MAX_STACK, PINS, PIN_LABELS, clipOf, groupFrame, isGroup, isStack, nodeWidth, numbered, pasteClip, snapTo, sourcesOf, stripNodeData, targetsOf, tidy, type Clip, type GroupData, type Guide, type LinkData, type NodeKind, type Pin, type Rect } from './model.ts';
-import { coverOf, newNodeData } from './run.ts';
+import { BOX_HEIGHT, NODE_LABELS, TITLE_ROOM, canLink, MAX_STACK, PINS, PIN_LABELS, alignNodes, clipOf, distributeNodes, groupFrame, isGroup, isStack, nodeWidth, numbered, pasteClip, runOrder, snapTo, sourcesOf, stripNodeData, targetsOf, tidy, type AlignDirection, type Clip, type FrameRole, type GroupData, type Guide, type LinkData, type NodeKind, type Pin, type Rect } from './model.ts';
+import { coverOf, generate, newNodeData, outputOf, recordOf } from './run.ts';
 import { AudioNode, CanvasActions, DragLine, GroupNode, ImageNode, LinkEdge, NODE_ICONS, StackNode, TextNode, VideoNode } from './nodes.tsx';
 import { Finder, HistoryPicker, WorkflowPicker } from './panels.tsx';
+import { grabFrame } from './edit.tsx';
 
 interface Doc {
   id: string;
@@ -72,10 +73,10 @@ const boxOf = (node: Node, position = node.position): Rect => ({ x: position.x, 
 const savedNodes = (nodes: Node[]) => nodes.map(({ id, type, position, data, hidden }) => ({ id, type, position, data: stripNodeData(data), ...(hidden ? { hidden: true } : {}) }));
 const savedEdges = (edges: Edge[]) => edges.map(({ id, source, target, data }) => ({ id, source, target, type: 'link', data }));
 
-function makeEdge(source: Node, target: Node): Edge {
+function makeEdge(source: Node, target: Node, role?: FrameRole): Edge {
   const data: LinkData = { kind: source.type as NodeKind };
-  // 图片连到视频默认当参考图。连到图片的都是参考图，不分用途。
-  if (data.kind === 'image' && target.type === 'video') data.role = 'reference';
+  // 图片连到视频默认当参考图。指定了用途（首帧、尾帧等）就按指定的来。连到图片的都是参考图，不分用途。
+  if (data.kind === 'image' && target.type === 'video') data.role = role || 'reference';
   return { id: crypto.randomUUID(), source: source.id, target: target.id, type: 'link', data: data as unknown as Record<string, unknown> };
 }
 
@@ -255,11 +256,11 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
 
   // link 是新节点要和哪个节点连上：from 是它的上游，to 是它的下游。extra 是节点一出来就带着的内容：上传的文件、一条生成记录。
   const addNode = useCallback(
-    (kind: NodeKind, at?: { x: number; y: number }, link?: { from?: Node; also?: Node[]; to?: Node }, extra?: Record<string, unknown>) => {
+    (kind: NodeKind, at?: { x: number; y: number }, link?: { from?: Node; also?: Node[]; to?: Node }, extra?: Record<string, unknown>, role?: FrameRole) => {
       snap();
       const box = wrap.current!.getBoundingClientRect();
-      const data = { ...newNodeData(kind, { form: composer.form, image: composer.studio.image, speech: composer.studio.speech }), ...extra };
-      const width = nodeWidth(kind, data);
+      const data = { ...newNodeData(kind, { form: composer.form, image: composer.studio.image, speech: composer.studio.speech }), ...(extra ? {} : { autofocus: true }), ...extra };
+      const width = nodeWidth(kind, data as { aspect?: number });
       // 没指定位置就放在视野中间；那里已经有节点了就往右挪，直到不压着别的节点。
       const position = at || flow.screenToFlowPosition({ x: box.left + box.width / 2 - width / 2, y: box.top + box.height / 2 - 120 });
       // 节点宽窄不一，按量出来的宽度让开；还没量过的按它的内容算。
@@ -285,29 +286,50 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
           if (source.type === 'image' && kind === 'image') return room-- > 0;
           return true;
         });
-        setEdges((items) => [...items, ...sources.map((source) => makeEdge(source, node))]);
+        setEdges((items) => [...items, ...sources.map((source) => makeEdge(source, node, role))]);
       }
-      if (link?.to) setEdges((items) => [...items, makeEdge(node, link.to!)]);
+      if (link?.to) setEdges((items) => [...items, makeEdge(node, link.to!, role)]);
     },
     [flow, reveal, setEdges, setNodes, snap],
   );
 
   // 在一个节点的左边加一个节点并连进它：输入面板里「添加参考素材」用。已经有节点的位置往下错开。
   const addInput = useCallback(
-    (targetId: string, kind: NodeKind, extra?: Record<string, unknown>) => {
+    (targetId: string, kind: NodeKind, extra?: Record<string, unknown>, role?: FrameRole) => {
       const target = flow.getNode(targetId);
       if (!target) return;
       const at = { x: target.position.x - 420, y: target.position.y };
       while (flow.getNodes().some((n) => Math.abs(n.position.x - at.x) < 300 && Math.abs(n.position.y - at.y) < 200)) at.y += 260;
-      addNode(kind, at, { to: target }, extra);
+      addNode(kind, at, { to: target }, extra, role);
     },
     [addNode, flow],
   );
 
-  // 在鼠标的位置弹出「加什么节点」的菜单。菜单要贴着一个元素显示，这里用一个看不见的点。
-  // offer：菜单里列哪几种节点。off 是这一种现在接不了的原因，有它就显示成灰的。heading 是菜单最上面那行字。
+  // 连线或添加节点的意图选项。
+  interface IntentionOption {
+    value: string;
+    kind: NodeKind;
+    label: string;
+    note?: string;
+    icon?: IconName;
+    disabled?: boolean;
+    title?: string;
+    role?: FrameRole;
+    extra?: Record<string, unknown>;
+    onExecute?: (at: { x: number; y: number }) => Promise<void> | void;
+  }
+
+  // 在鼠标的位置弹出智能意图/节点菜单。菜单要贴着一个元素显示，这里用一个看不见的点。
   const menuAt = useCallback(
-    (x: number, y: number, offer: { kind: NodeKind; off?: string }[], link?: { from?: Node; also?: Node[]; to?: Node }, place?: { x: number; y: number }, heading?: string, onClose?: () => void) => {
+    (
+      x: number,
+      y: number,
+      options: IntentionOption[],
+      link?: { from?: Node; also?: Node[]; to?: Node },
+      place?: { x: number; y: number },
+      heading?: string,
+      onClose?: () => void,
+    ) => {
       const el = anchor.current!;
       el.style.left = `${x}px`;
       el.style.top = `${y}px`;
@@ -316,12 +338,29 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
       // 从线头接出来的节点，框的中线要对着线头：线是连到框的中间的。
       if (!place && link) at.y -= TITLE_ROOM + BOX_HEIGHT / 2;
       // 接在左边的节点，右边缘要落在松手的位置。
-      if (link?.to && !place) at.x -= nodeWidth(offer[0]?.kind || 'image');
+      const defaultKind = options[0]?.kind || 'image';
+      if (link?.to && !place) at.x -= nodeWidth(defaultKind);
       openMenu(el, {
-        label: '添加节点',
+        label: heading || '添加节点',
         heading,
-        items: offer.map(({ kind, off }) => ({ value: kind, label: NODE_LABELS[kind], icon: NODE_ICONS[kind], disabled: Boolean(off), title: off || null })),
-        onSelect: (kind) => addNode(kind as NodeKind, link?.to && !place ? { x: at.x + nodeWidth(offer[0]?.kind || 'image') - nodeWidth(kind as NodeKind), y: at.y } : at, link),
+        items: options.map((opt) => ({
+          value: opt.value,
+          label: opt.label,
+          note: opt.note,
+          icon: opt.icon || NODE_ICONS[opt.kind],
+          disabled: Boolean(opt.disabled),
+          title: opt.title || null,
+        })),
+        onSelect: (value) => {
+          const chosen = options.find((opt) => opt.value === value);
+          if (!chosen) return;
+          const targetAt = link?.to && !place ? { x: at.x + nodeWidth(defaultKind) - nodeWidth(chosen.kind), y: at.y } : at;
+          if (chosen.onExecute) {
+            chosen.onExecute(targetAt);
+          } else {
+            addNode(chosen.kind, targetAt, link, chosen.extra, chosen.role);
+          }
+        },
         onClose,
       });
     },
@@ -359,6 +398,29 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
       setTimeout(() => setNodes((items) => items.map((n) => (n.className ? { ...n, className: undefined } : n))), 1400);
     },
     [flow, setNodes],
+  );
+
+  const hoverNode = useCallback(
+    (nodeId: string | null) => {
+      setNodes((items) => {
+        let changed = false;
+        const next = items.map((n) => {
+          const isTarget = Boolean(nodeId && n.id === nodeId);
+          const wasTarget = n.className === 'is-mention-hover';
+          if (isTarget && !wasTarget) {
+            changed = true;
+            return { ...n, className: 'is-mention-hover' };
+          }
+          if (!isTarget && wasTarget) {
+            changed = true;
+            return { ...n, className: undefined };
+          }
+          return n;
+        });
+        return changed ? next : items;
+      });
+    },
+    [setNodes],
   );
 
   // 把一条生成记录放回画布：一个带着这份结果的新节点，放在视野中间并选中。原来的提示词也带上。
@@ -500,10 +562,10 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
 
   // 接着一段视频往后拍：它的最后一帧变成一个图片节点，再接一个视频节点，这张图当首帧。新视频节点的参数照抄原来的，选中它等着写接下来发生什么。
   const continueVideo = useCallback(
-    (sourceId: string, frame: { url: string; name: string }) => {
+    (sourceId: string, frame: { url: string; name: string }, targetAt?: { x: number; y: number }) => {
       const source = flow.getNode(sourceId);
       if (!source) return;
-      const { x, y } = spotBeside(source, 3, 1);
+      const { x, y } = targetAt || spotBeside(source, 3, 1);
       snap();
       const copied = Object.fromEntries(['model', 'ratio', 'resolution', 'duration'].map((key) => [key, source.data[key]]));
       const [image, video] = numbered(
@@ -664,16 +726,42 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
     return picked.some((node) => !isGroup(node)) ? clipOf(savedNodes(picked), savedEdges(flow.getEdges())) : null;
   }, [flow]);
 
-  // 把一份复制下来的节点放上画布并选中它们。
+  // 把一份复制下来的节点放上画布并选中它们。inheritUpstream：是否继承上游连线（分支复制/就地粘贴时使用）。
   const place = useCallback(
-    (clip: Clip, where: { at?: { x: number; y: number }; by?: { x: number; y: number } }) => {
+    (clip: Clip, where: { at?: { x: number; y: number }; by?: { x: number; y: number } }, inheritUpstream = true) => {
       if (!clip.nodes.length) return;
       snap();
       // 粘贴出来的是新节点，编号重新排。
       const pasted = pasteClip(clip, where, () => crypto.randomUUID());
       const fresh = { edges: pasted.edges, nodes: numbered(pasted.nodes.map((node) => ({ ...node, data: { ...node.data, no: undefined } })), flow.getNodes()) };
       setNodes((items) => [...items.map((n) => (n.selected ? { ...n, selected: false } : n)), ...fresh.nodes.map((node) => ({ ...node, selected: true }) as Node)]);
-      setEdges((items) => [...items.map((e) => (e.selected ? { ...e, selected: false } : e)), ...fresh.edges.map((edge) => ({ ...edge, type: 'link' }) as Edge)]);
+
+      // 继承上游连线：如果源节点在当前画布上依然存在，且符合连线规则，就自动连上。
+      const extraEdges: Edge[] = [];
+      if (inheritUpstream && pasted.upstream?.length) {
+        const currentNodes = flow.getNodes();
+        const nodeMap = new Map(currentNodes.map((n) => [n.id, n]));
+        for (const up of pasted.upstream) {
+          const sourceNode = nodeMap.get(up.source);
+          if (!sourceNode) continue;
+          const targetNode = fresh.nodes.find((n) => n.id === up.target);
+          if (!targetNode) continue;
+          if (!canLink(sourceNode.type as NodeKind, targetNode.type as NodeKind)) continue;
+          extraEdges.push({
+            id: up.id,
+            source: up.source,
+            target: up.target,
+            type: 'link',
+            data: up.data as unknown as Record<string, unknown>,
+          });
+        }
+      }
+
+      setEdges((items) => [
+        ...items.map((e) => (e.selected ? { ...e, selected: false } : e)),
+        ...fresh.edges.map((edge) => ({ ...edge, type: 'link' }) as Edge),
+        ...extraEdges,
+      ]);
     },
     [flow, setEdges, setNodes, snap],
   );
@@ -874,29 +962,210 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
         place = { x: downstream ? node.position.x + (node.measured?.width || 320) + 140 : node.position.x - 430 - 140, y: node.position.y };
         while (flow.getNodes().some((n) => Math.abs(n.position.x - place!.x) < 300 && Math.abs(n.position.y - place!.y) < 200)) place.y += 280;
       }
-      // 图片接图片是图生图：下游是新建的图片节点，看默认模型收不收参考图；上游看这个节点的模型还收不收。
-      const imageOk = downstream
-        ? imageRefLimit(newNodeData('image', { form: composer.form, image: composer.studio.image, speech: composer.studio.speech }).model as string) > 0
-        : flow.getEdges().filter((edge) => edge.target === node.id && (edge.data as unknown as LinkData)?.kind === 'image').length < imageRefLimit((node.data as { model?: string }).model);
-      // 四种节点都列出来，接不了的是灰的，指上去说为什么。
-      const able = downstream ? targetsOf(node.type as NodeKind) : sourcesOf(node.type as NodeKind);
-      const offer = KINDS.map((kind) => ({
-        kind,
-        off: !able.includes(kind)
-          ? downstream
-            ? `${NODE_LABELS[node.type as NodeKind]}节点不能连接到${NODE_LABELS[kind]}节点`
-            : `${NODE_LABELS[node.type as NodeKind]}节点不支持${NODE_LABELS[kind]}输入`
-          : kind === 'image' && node.type === 'image' && !imageOk
-            ? downstream
-              ? '默认图片模型不支持参考图'
-              : '当前模型不支持参考图，或已达上限'
-            : undefined,
-      }));
-      // 选中了好几个节点、从其中一个的右边接出去：新节点把选中的这些一起接上。
+      const type = node.type as NodeKind;
+      const defaultImageModel = newNodeData('image', { form: composer.form, image: composer.studio.image, speech: composer.studio.speech }).model as string;
+      const downstreamImageOk = imageRefLimit(defaultImageModel) > 0;
+      const upstreamImageUsed = flow.getEdges().filter((edge) => edge.target === node.id && (edge.data as unknown as LinkData)?.kind === 'image').length;
+      const upstreamImageLimit = imageRefLimit((node.data as { model?: string }).model);
+      const upstreamImageOk = upstreamImageUsed < upstreamImageLimit;
+
+      const options: IntentionOption[] = [];
       const also = downstream && node.selected ? flow.getNodes().filter((n) => n.selected && n.id !== node.id) : [];
-      menuAt(x, y, offer, downstream ? { from: node, also } : { to: node }, place, downstream ? '引用该节点生成' : '连接上游节点', onClose);
+      const link = downstream ? { from: node, also } : { to: node };
+
+      if (downstream) {
+        // 下游意图推荐（以当前节点为起点/参考，接续生成）
+        if (type === 'image') {
+          options.push({
+            value: 'img-to-video-first',
+            kind: 'video',
+            label: '以此图为首帧生成视频',
+            note: '首帧图生视频',
+            icon: 'video',
+            role: 'first',
+          });
+          options.push({
+            value: 'img-to-img',
+            kind: 'image',
+            label: '以此图为参考生图',
+            note: '图生图',
+            icon: 'image',
+            disabled: !downstreamImageOk,
+            title: downstreamImageOk ? undefined : '默认图片模型不支持参考图',
+          });
+          options.push({
+            value: 'img-to-video-ref',
+            kind: 'video',
+            label: '以此图为参考素材生成视频',
+            note: '角色/风格参考',
+            icon: 'video',
+            role: 'reference',
+          });
+        } else if (type === 'video') {
+          const out = outputOf(node);
+          options.push({
+            value: 'video-continue',
+            kind: 'video',
+            label: '接着拍（截取尾帧接续生成）',
+            note: '分镜续拍',
+            icon: 'workflow',
+            disabled: !out?.url,
+            title: out?.url ? undefined : '视频尚未生成完成，完成后可截取尾帧接续拍摄',
+            onExecute: async (at) => {
+              if (!out?.url) return toast('视频尚未准备好', 'info');
+              toast('正在截取最后一帧…', 'info', 1800);
+              try {
+                const frame = await grabFrame(out.url, 'last', `${out.name || '镜头'}-尾帧`);
+                continueVideo(node.id, frame, at);
+              } catch (err) {
+                toast((err as Error).message, 'error', 6000);
+              }
+            },
+          });
+          options.push({
+            value: 'video-to-video-ref',
+            kind: 'video',
+            label: '以此视频为参考生成视频',
+            note: '动态参考',
+            icon: 'video',
+          });
+        } else if (type === 'text') {
+          options.push({
+            value: 'text-to-img',
+            kind: 'image',
+            label: '以此文本为提示词生图',
+            note: '文生图',
+            icon: 'image',
+          });
+          options.push({
+            value: 'text-to-video',
+            kind: 'video',
+            label: '以此文本为提示词生成视频',
+            note: '文生视频',
+            icon: 'video',
+          });
+          options.push({
+            value: 'text-to-speech',
+            kind: 'audio',
+            label: '朗读此文本（生成语音）',
+            note: '语音合成',
+            icon: 'music',
+            extra: { tool: 'speech' },
+          });
+          options.push({
+            value: 'text-to-text',
+            kind: 'text',
+            label: '扩写或润色文本',
+            note: '文本生成',
+            icon: 'type',
+          });
+        } else if (type === 'audio') {
+          options.push({
+            value: 'audio-to-video',
+            kind: 'video',
+            label: '以此音频为配乐生成视频',
+            note: '音视频合成',
+            icon: 'video',
+          });
+        }
+      } else {
+        // 上游意图推荐（为当前节点添加输入素材/提示词）
+        if (type === 'image') {
+          options.push({
+            value: 'up-text',
+            kind: 'text',
+            label: '添加提示词文本',
+            note: '提示词',
+            icon: 'type',
+          });
+          options.push({
+            value: 'up-image',
+            kind: 'image',
+            label: '添加参考图节点',
+            note: '垫图参考',
+            icon: 'image',
+            disabled: !upstreamImageOk,
+            title: upstreamImageOk ? undefined : '当前模型不支持参考图，或已达上限',
+          });
+        } else if (type === 'video') {
+          options.push({
+            value: 'up-first-frame',
+            kind: 'image',
+            label: '添加首帧图片',
+            note: '起始画面',
+            icon: 'image',
+            role: 'first',
+          });
+          options.push({
+            value: 'up-text',
+            kind: 'text',
+            label: '添加分镜提示词',
+            note: '提示词',
+            icon: 'type',
+          });
+          options.push({
+            value: 'up-image-ref',
+            kind: 'image',
+            label: '添加参考图片',
+            note: '角色/风格参考',
+            icon: 'image',
+            role: 'reference',
+          });
+          options.push({
+            value: 'up-last-frame',
+            kind: 'image',
+            label: '添加尾帧图片',
+            note: '结束画面',
+            icon: 'image',
+            role: 'last',
+          });
+          options.push({
+            value: 'up-video-ref',
+            kind: 'video',
+            label: '添加参考视频',
+            note: '动态素材',
+            icon: 'video',
+          });
+          options.push({
+            value: 'up-audio',
+            kind: 'audio',
+            label: '添加配乐或音效',
+            note: '背景声音',
+            icon: 'music',
+          });
+        } else if (type === 'audio') {
+          options.push({
+            value: 'up-text',
+            kind: 'text',
+            label: '添加朗读文本',
+            note: '台词文本',
+            icon: 'type',
+          });
+        } else if (type === 'text') {
+          options.push({
+            value: 'up-text',
+            kind: 'text',
+            label: '添加参考文本',
+            note: '上游文本',
+            icon: 'type',
+          });
+        }
+      }
+
+      if (!options.length) {
+        const able = downstream ? targetsOf(type) : sourcesOf(type);
+        options.push(...able.map((k) => ({
+          value: k,
+          kind: k,
+          label: `${NODE_LABELS[k]}节点`,
+          icon: NODE_ICONS[k],
+        })));
+      }
+
+      const heading = downstream ? `引用${NODE_LABELS[type]}节点生成` : `连接到${NODE_LABELS[type]}节点`;
+      menuAt(x, y, options, link, place, heading, onClose);
     },
-    [flow, menuAt],
+    [composer.form, composer.studio.image, composer.studio.speech, continueVideo, flow, menuAt],
   );
 
   // 从节点的加号拉出一条线、松在空白处。
@@ -951,7 +1220,113 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
     });
   }
 
-  const actions = useMemo(() => ({ snap, addInput, ungroup, saveWorkflow, unstack, addBeside, addNodeBeside, continueVideo }), [snap, addInput, ungroup, saveWorkflow, unstack, addBeside, addNodeBeside, continueVideo]);
+  const actions = useMemo(() => ({ snap, addInput, ungroup, saveWorkflow, unstack, addBeside, addNodeBeside, continueVideo, jumpTo, hoverNode }), [snap, addInput, ungroup, saveWorkflow, unstack, addBeside, addNodeBeside, continueVideo, jumpTo, hoverNode]);
+  const selectedNodes = useMemo(() => nodes.filter((node) => node.selected && !node.hidden), [nodes]);
+  const selectedSolid = useMemo(() => selectedNodes.filter((node) => !isGroup(node)), [selectedNodes]);
+
+  // 批量生成：按拓扑顺序执行选中的可生成节点
+  const batchRun = useCallback(async () => {
+    const ids = selectedSolid.filter((n) => ['text', 'image', 'video', 'audio'].includes(n.type || '')).map((n) => n.id);
+    if (!ids.length) return toast('没有可执行的节点', 'info');
+    const todo = runOrder(ids, flow.getEdges());
+    toast(`开始批量生成，共 ${todo.length} 个节点`, 'info', 2400);
+    const setIds = new Set(todo);
+    const hasInternalDeps = flow.getEdges().some((e) => setIds.has(e.source) && setIds.has(e.target));
+    if (!hasInternalDeps) {
+      for (const id of todo) generate(flow, id, snap);
+    } else {
+      for (const [index, id] of todo.entries()) {
+        await generate(flow, id, snap);
+        const deadline = Date.now() + 20 * 60 * 1000;
+        for (;;) {
+          const node = flow.getNode(id);
+          if (!node) return;
+          const data = node.data as Record<string, unknown>;
+          const record = recordOf(data);
+          const failed = Boolean(data.error) || record?.status === 'failed' || (node.type !== 'text' && !data.recordId);
+          if (failed || Date.now() > deadline) return toast(`第 ${index + 1} 个节点执行失败：${data.error || record?.error?.message || '未返回结果'}`, 'error', 6000);
+          if (node.type === 'text' ? String(data.text || '').trim() && !data.busy : outputOf(node)) break;
+          await new Promise((r) => setTimeout(r, 1000));
+        }
+      }
+      toast('批量生成完成', 'success');
+    }
+  }, [flow, selectedSolid, snap]);
+
+  // 对齐节点
+  const align = useCallback(
+    (direction: AlignDirection) => {
+      if (selectedSolid.length < 2) return;
+      snap();
+      const sized = selectedSolid.map((n) => ({
+        id: n.id,
+        position: { ...n.position },
+        width: n.measured?.width || nodeWidth(n.type as NodeKind, n.data),
+        height: (n.measured?.height || BOX_HEIGHT) + TITLE_ROOM,
+      }));
+      const aligned = alignNodes(sized, direction);
+      setNodes((items) =>
+        items.map((node) => {
+          const pos = aligned.get(node.id);
+          return pos ? { ...node, position: pos } : node;
+        }),
+      );
+    },
+    [selectedSolid, snap, setNodes],
+  );
+
+  // 等间距分布节点
+  const distribute = useCallback(
+    (axis: 'h' | 'v') => {
+      if (selectedSolid.length < 3) return toast('至少需要 3 个节点才能等间距分布', 'info');
+      snap();
+      const sized = selectedSolid.map((n) => ({
+        id: n.id,
+        position: { ...n.position },
+        width: n.measured?.width || nodeWidth(n.type as NodeKind, n.data),
+        height: (n.measured?.height || BOX_HEIGHT) + TITLE_ROOM,
+      }));
+      const distributed = distributeNodes(sized, axis);
+      setNodes((items) =>
+        items.map((node) => {
+          const pos = distributed.get(node.id);
+          return pos ? { ...node, position: pos } : node;
+        }),
+      );
+    },
+    [selectedSolid, snap, setNodes],
+  );
+
+  // 批量删除
+  const batchDelete = useCallback(() => {
+    snap();
+    flow.deleteElements({ nodes: flow.getNodes().filter((n) => n.selected) });
+  }, [flow, snap]);
+
+  // 打开对齐分布菜单
+  const openAlignMenu = useCallback(
+    (target: HTMLElement) => {
+      openMenu(target, {
+        label: '对齐与分布',
+        items: [
+          { value: 'left', label: '左对齐' },
+          { value: 'center-h', label: '水平居中' },
+          { value: 'right', label: '右对齐' },
+          { value: 'top', label: '顶对齐' },
+          { value: 'center-v', label: '垂直居中' },
+          { value: 'bottom', label: '底对齐' },
+          { value: 'distribute-h', label: '水平等间距分布', disabled: selectedSolid.length < 3 },
+          { value: 'distribute-v', label: '垂直等间距分布', disabled: selectedSolid.length < 3 },
+        ],
+        onSelect: (value) => {
+          if (value === 'distribute-h') distribute('h');
+          else if (value === 'distribute-v') distribute('v');
+          else align(value as AlignDirection);
+        },
+      });
+    },
+    [align, distribute, selectedSolid.length],
+  );
   const shown = useMemo(() => framed(nodes), [nodes]);
   // 参考线画满整个视野：横线从窗口最左到最右，竖线从最上到最下。同一条线只画一次。
   const view = useViewport();
@@ -980,8 +1355,17 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
         // 节点的名字和加号要在屏幕上保持大小不变，样式里用这个倒数把画布的缩放抵消掉。
         // 50% 以下不再抵消：名字和加号跟着画布一起缩小，不然会比节点本身还大。
         // --ring、--ring-gap 是选中那圈线的粗细和间隔（画布坐标）：屏幕上 100% 时是 1.5 和 3，缩小时收到 1 和 1 为止。
-        style={{ '--inv': inv, '--zoom': 1 / inv, '--ring': `${Math.min(1.5, Math.max(1, 1.5 * zoom)) / zoom}px`, '--ring-gap': `${Math.min(3, Math.max(1, 3 * zoom)) / zoom}px` } as CSSProperties}
-        onDoubleClick={(e) => (e.target as Element).classList.contains('react-flow__pane') && menuAt(e.clientX, e.clientY, KINDS.map((kind) => ({ kind })))}
+        onDoubleClick={(e) =>
+          (e.target as Element).classList.contains('react-flow__pane') &&
+          menuAt(
+            e.clientX,
+            e.clientY,
+            KINDS.map((kind) => ({ value: kind, kind, label: `${NODE_LABELS[kind]}节点`, icon: NODE_ICONS[kind] })),
+            undefined,
+            undefined,
+            '添加节点',
+          )
+        }
         onClick={(e) => {
           // 直接点一下加号（没有拖动）：菜单出在加号外侧。
           const port = (e.target as Element).closest<HTMLElement>('.cnode-port');
@@ -1168,6 +1552,38 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
               {Math.round(zoom * 100)}%
             </button>
           </Panel>
+          {selectedNodes.length > 1 && (
+            <Panel position="bottom-center" className="canvas-batch-bar nodrag">
+              <span className="batch-badge">已选 {selectedNodes.length} 个节点</span>
+              <button className="batch-btn is-primary" type="button" onClick={batchRun} {...tip('按顺序批量生成所选节点')}>
+                <Icon name="arrowUp" size={14} />
+                <span>批量生成</span>
+              </button>
+              <span className="batch-split" />
+              <button className="batch-btn" type="button" onClick={(e) => openAlignMenu(e.currentTarget)} {...tip('对齐与等间距分布')}>
+                <Icon name="grid" size={14} />
+                <span>对齐分布</span>
+                <Icon name="chevron" size={12} />
+              </button>
+              <button className="batch-btn" type="button" onClick={group} {...tip('将所选节点打成一组（⌘ G）')}>
+                <Icon name="workflow" size={14} />
+                <span>打组</span>
+              </button>
+              <button className="batch-btn" type="button" onClick={stack} {...tip('收为一叠，节省画布空间')}>
+                <Icon name="history" size={14} />
+                <span>堆叠</span>
+              </button>
+              <button className="batch-btn" type="button" onClick={duplicate} {...tip('创建副本并继承上游连线（⌘ D）')}>
+                <Icon name="image" size={14} />
+                <span>复制</span>
+              </button>
+              <span className="batch-split" />
+              <button className="batch-btn is-danger" type="button" onClick={batchDelete} {...tip('删除所选节点（⌫）')}>
+                <Icon name="x" size={14} />
+                <span>删除</span>
+              </button>
+            </Panel>
+          )}
         </ReactFlow>
         {ready && !nodes.length && (
           <div className="canvas-empty">

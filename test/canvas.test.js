@@ -2,7 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { canLink, targetsOf, sourcesOf, linkLabel, joinPrompt, videoFormFrom, stripNodeData, nodeWidth, clipOf, pasteClip, snapTo, tidy, placeResults, groupFrame, runOrder, resolveMentions } from '../web/src/canvas/model.ts';
+import { alignNodes, canLink, distributeNodes, targetsOf, sourcesOf, linkLabel, joinPrompt, videoFormFrom, stripNodeData, nodeWidth, clipOf, pasteClip, snapTo, tidy, placeResults, groupFrame, runOrder, resolveMentions } from '../web/src/canvas/model.ts';
 import { buildVideoRequest } from '../web/src/request.ts';
 
 const base = {
@@ -157,6 +157,28 @@ test('复制粘贴：只带走两头都选中的连线，粘贴出来的换了�
   assert.deepEqual(copy.nodes.map((node) => node.position), [{ x: 140, y: 90 }, { x: 440, y: 120 }]);
 });
 
+test('创建副本与分支复制：上游连线被继承，下游连线不复制', () => {
+  const nodes = [
+    { id: 'b', type: 'image', position: { x: 400, y: 80 }, data: { prompt: '猫', model: 'm' } },
+  ];
+  const edges = [
+    { id: 'e1', source: 'upstream_ref', target: 'b', data: { kind: 'image', role: 'reference' } },
+    { id: 'e2', source: 'b', target: 'downstream_video', data: { kind: 'image' } },
+  ];
+  const clip = clipOf(nodes, edges);
+  assert.deepEqual(clip.edges, []);
+  assert.equal(clip.upstream.length, 1);
+  assert.equal(clip.upstream[0].source, 'upstream_ref');
+  assert.equal(clip.upstream[0].target, 'b');
+
+  const copy = pasteClip(clip, { by: { x: 40, y: 40 } }, () => 'b_prime');
+  assert.equal(copy.nodes[0].id, 'b_prime');
+  assert.equal(copy.upstream.length, 1);
+  assert.equal(copy.upstream[0].source, 'upstream_ref');
+  assert.equal(copy.upstream[0].target, 'b_prime');
+  assert.deepEqual(copy.upstream[0].data, { kind: 'image', role: 'reference' });
+});
+
 test('再次生成：空节点先装第一份，多出来的排在下面；已有内容的节点不动，结果全是新节点；下面有节点就跳过去', () => {
   const source = { id: 's', position: { x: 100, y: 100 }, width: 240 };
   // 空节点出 3 份：第一份进它自己，另外两份在下面，行距是节点的高度加 56（320）。
@@ -203,4 +225,34 @@ test('@ 引用：图片、视频换成它在这次请求里排第几个；文本
   assert.equal(out.prompt, '让图2里的人走进图1的街道，动作参考视频1，整体是赛博朋克风格。别管@图片 9');
   assert.deepEqual([...out.inlined], ['文本 2']);
   assert.deepEqual(resolveMentions('没有引用', inputs), { prompt: '没有引用', inlined: new Set() });
+});
+
+test('批量对齐与等间距分布：支持左、中、右、顶、中、底对齐以及水平、垂直等间距分布', () => {
+  const n1 = { id: '1', position: { x: 100, y: 100 }, width: 200, height: 264 };
+  const n2 = { id: '2', position: { x: 300, y: 150 }, width: 300, height: 264 };
+  const n3 = { id: '3', position: { x: 700, y: 200 }, width: 200, height: 264 };
+
+  // 左对齐：所有节点 x = minX (100)
+  const left = alignNodes([n1, n2, n3], 'left');
+  assert.equal(left.get('1').x, 100);
+  assert.equal(left.get('2').x, 100);
+  assert.equal(left.get('3').x, 100);
+
+  // 顶对齐：所有节点 y = minY (100)
+  const top = alignNodes([n1, n2, n3], 'top');
+  assert.equal(top.get('1').y, 100);
+  assert.equal(top.get('2').y, 100);
+  assert.equal(top.get('3').y, 100);
+
+  // 右对齐：maxRight = 700 + 200 = 900
+  const right = alignNodes([n1, n2, n3], 'right');
+  assert.equal(right.get('1').x, 700);
+  assert.equal(right.get('2').x, 600);
+  assert.equal(right.get('3').x, 700);
+
+  // 水平等间距分布：总跨度从 100 到 900 (span = 800), widths = 200 + 300 + 200 = 700, gap = (800 - 700) / 2 = 50
+  const distH = distributeNodes([n1, n2, n3], 'h');
+  assert.equal(distH.get('1').x, 100);
+  assert.equal(distH.get('2').x, 350); // 100 + 200 + 50
+  assert.equal(distH.get('3').x, 700); // 350 + 300 + 50
 });
