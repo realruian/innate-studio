@@ -4,8 +4,8 @@
   <img src="web/src/brand/wordmark.png" alt="Innate Studio" width="280" />
 </p>
 
-### 本地优先的次世代 AIGC 多模态创作工作台
-*A local-first, multimodal generative AI workbench powered by Seedance 2.5/2.0, Seedream 5.0, ElevenLabs & Infinite Node Canvas.*
+### 本地优先、支持团队托管的 AIGC 多模态创作工作台
+*A local-first & team-ready multimodal generative AI workbench powered by Seedance 2.5/2.0, MiniMax H3, Seedream 5.0, GPT Image 2.5, Nano Banana 2.1, Doubao Speech & Infinite Node Canvas.*
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22.18-339933?logo=node.js)](https://nodejs.org)
@@ -13,19 +13,19 @@
 [![Vite](https://img.shields.io/badge/Vite-8-646CFF?logo=vite)](https://vitejs.dev)
 [![Canvas](https://img.shields.io/badge/Canvas-React_Flow-FF0072)](https://reactflow.dev)
 
-[功能特性](#-功能特性) • [快速开始](#-快速开始) • [双平台支持](#-双平台支持) • [架构与存储](#-系统架构与数据存储) • [开发者指南](#-开发者指南) • [常见问题](#-常见问题)
+[功能特性](#-功能特性) • [模型矩阵](#-多平台与模型矩阵) • [快速开始](#-快速开始) • [多人模式与部署](#-多人团队模式与部署) • [架构与存储](#-系统架构与数据存储) • [开发者指南](#-开发者指南)
 
 </div>
 
 ---
 
-> **设计理念**：工作台美学（深度参考 Google Antigravity 与 OpenAI Codex）。**默认浅色，原生支持深浅双主题，跟随系统自适应无缝切换**。侧栏纯粹导航，居中一体化创作输入框，全局采用低对比层次与系统无衬线排版。界面本身保持克制中性，将所有视觉焦点留给生成内容本身。
+> **设计理念**：工作台美学（深度对标 Google Antigravity 2.0 与 OpenAI Codex）。**原生支持深浅双主题与跟随系统自适应切换**。侧栏纯粹导航，居中一体化创作输入框，全局采用低对比层次与系统无衬线排版。界面本身保持克制中性，将所有视觉焦点留给生成内容本身。
 
 ---
 
 ## 📸 界面预览
 
-> 🌗 **自适应双色主题**：默认浅色，支持深浅双色与系统偏好自适应（下方配图自适应您当前 GitHub 的浅色/深色主题）。
+> 🌗 **自适应双色主题**：下方配图会根据您当前 GitHub 的浅色 / 深色模式自动切换。
 
 <p align="center">
   <picture>
@@ -34,7 +34,7 @@
     <img src="docs/screenshots/workbench-light.png" alt="Innate Studio Workbench" width="100%">
   </picture>
 </p>
-<p align="center"><em>多模态创作工作台：居中一体化输入框、多模态参数集约控制与最近生成记录流（默认浅色，支持深浅主题自适应）</em></p>
+<p align="center"><em>多模态创作工作台：视频、图片、语音、音效、配乐五合一输入框与最近生成流</em></p>
 
 <br />
 
@@ -45,90 +45,131 @@
     <img src="docs/screenshots/canvas-light.png" alt="Innate Studio Infinite Canvas" width="100%">
   </picture>
 </p>
-<p align="center"><em>无限节点画布（React Flow）：文本、图像、视频、音频多节点自由拓扑与流转生成</em></p>
+<p align="center"><em>无限节点画布（React Flow）：文本、图片、视频、音频多节点自由拓扑、@ 引用与工作流复用</em></p>
 
 ---
 
 ## ✨ 功能特性
 
 ### 1. 🌌 无限节点画布 (Infinite Node Canvas)
-- **可视化创意工作流**：基于 `@xyflow/react` 构建无限平移与缩放画布，支持多项目管理、视口记忆与自动保存。
-- **全要素自由拓扑**：提供**文本、图片、视频、音频**四种原生节点，支持拖拽连线驱动生成：
-  - **文本 ➔ 视频/图片**：传递为生成提示词（Prompt）。
-  - **图片 ➔ 视频**：作为全能参考图、首帧（起始画面）或尾帧（结束画面）。
-  - **图片 ➔ 图片**：图生图迭代重绘（火山方舟 Seedream）。
-  - **视频/音频 ➔ 视频**：作为 Seedance 全能参考素材（动作/镜头/节奏/参考音）。
-- **即时创作控制器**：双击空白处快速新建，选中节点即在底部呼出参数控制栏，支持本地文件与素材库直接拖拽入画布。
+- **全要素自由拓扑**：基于 `@xyflow/react` 构建，提供**文本、图片、视频、音频**四种原生节点，支持拖拽连线驱动生成：
+  - **文本 ➔ 视频 / 图片 / 音频**：传递为生成提示词，或驱动下游文本节点继续扩写。
+  - **图片 ➔ 视频**：作为全能参考图、首帧或尾帧。
+  - **图片 ➔ 图片**：多参考图融合与图生图迭代。
+  - **视频 / 音频 ➔ 视频**：作为全能参考素材（动作、运镜、节奏或参考音）。
+- **提示词 `@` 引用与 `/` 斜杠预设**：
+  - 在画布输入面板中输入 `@` 即可将已连接的上游节点（如 `@图片 1`、`@文本 1`）插入提示词并原地高亮；悬停参考格即可双向定位上游节点与连线。
+  - 图片节点支持 `/` 斜杠预设（多机位九宫格、剧情推演四宫格、角色三视图、角色设定图、画面推演、电影级光影、故事板）。
+- **视频续拍与图像本地工具**：
+  - **视频节点**：支持一键截取当前帧 / 首帧 / 尾帧为图片节点，或一键「接着拍」（自动截取尾帧并串联新视频节点续拍）。
+  - **图片节点**：内置交互式自由/定比裁剪、2×2 / 3×3 / 4×4 宫格切图（配合九宫格预设快速拆镜）以及按比例 AI 扩图。
+- **分组执行、工作流与堆叠收纳**：
+  - 支持框选批量操作（批量生成、对齐分布、打组 `⌘G`、堆叠收纳、跨画布复制粘贴）；
+  - 分组支持一键「执行整组」（按连线拓扑从上游到下游依次生成）与「存为工作流」跨项目复用；
+  - 支持四色节点标记与顶栏汇总跳转、自动拓扑整理节点及参考线磁吸对齐。
 
-### 2. 🎥 顶尖多模态矩阵 (Multimodal Matrix)
+### 2. 🎥 全模态创作矩阵 (Multimodal Workbench)
 - **电影级视频生成 (Video)**：
-  - **Seedance 2.5 / 2.0 / 2.0 Fast / 2.0 Mini**：支持全能参考（最多 9 张图片、3 段视频与 3 段音频混合输入）、首尾帧控制、视频接续延长、定向编辑重绘、画质超分与联网搜索增强。
-  - **Grok Video**：支持文生视频与首帧图生视频（480p / 720p，最长 15 秒）。
+  - **Seedance 2.5 / 2.0 / 2.0 Fast / 2.0 Mini**（火山方舟）：支持文生视频、首尾帧控制、全能参考（最多 9 张图片 + 3 段视频 + 3 段本机音频混合输入），Seedance 2.5 最长支持 30 秒生成，2.0 支持最高 4K 分辨率。
+  - **MiniMax H3 / H3 Max**（MiniMax 开放平台）：支持 480P / 768P / 2K 视频生成、首尾帧与全能参考输入。
 - **专业图像生成 (Image)**：
-  - **Seedream 5.0 (Pro / Flash / 标准版)**：支持多图融合条件控制（最高支持 14 张参考图图生图）。
-  - **Grok Imagine**：文生图与一键转视频首帧流转。
-- **全链路声音实验室 (Audio & Music)**：
-  - **智能配乐 (Soundtrack Scoring)**：上传任意视频，AI 自动生成与视频时长精确匹配的背景音乐，提供声画同轨试听面板。
-  - **自然语音合成 (TTS)**：支持火山豆包语音 2.0（230+ 官方音色库）与 ElevenLabs（多语言筛选与实时音色试听）。
-  - **环境音效生成 (SFX)**：依据声音描述与指定秒数生成逼真音效素材。
+  - **Seedream 5.0 Pro / Flash / 标准版**（火山方舟）：支持 1K / 1.5K / 2K / 3K / 4K 多档分辨率与最高 14 张参考图输入。
+  - **GPT Image 2.5 (Sunburst / Flare)** & **Nano Banana 2.1**（AiHubMix）：支持最高 4K 分辨率、多档画质控制与最多 16 张参考图输入。
+- **全链路声音生成 (Speech, SFX & Music)**：
+  - **自然语音合成 (TTS)**：基于豆包语音合成 2.0（`Seed-TTS 2.0`），内置中英及多语种音色筛选与实时试听。
+  - **环境音效 (SFX)** & **智能配乐 (Music)**：基于豆包音频生成 1.0（`Seed-Audio 1.0`），支持按描述生成拟真音效，或上传视频自动生成配乐并在播放器中声画同轨预览。
 
-### 3. 🎭 角色一致性管理 (Consistent Characters)
-- 独立的角色档案管理系统，持久化保存角色名称、背景设定及至多 6 张核心概念图。
-- 创作时支持一键调用角色，带入图像或视频生成流，解决多镜头创作中的面孔与服饰漂移难题。
+### 3. 🎭 角色库与提示词技能 (Characters & Skills)
+- **角色一致性档案**：持久化保存角色名称、外貌描述与最多 6 张参考图；创作时一键带入参考图与外貌描述，保持多镜头角色形象稳定。
+- **提示词技能库 (Skills)**：内置「多镜头成片」「角色设定图」「分镜首帧」等官方技能，支持创建自定义技能与标签筛选。
+- **模型自适应润色**：基于 `Doubao Seed 2.1` 文本模型，根据当前所选生成模型（Seedance 2.5 时间戳分镜规范、Seedance 2.0 运镜与音效标记、Seedream 图生图指令、语音朗读断句规范、音效/配乐描述规范）精准改写提示词，并支持一键撤销。
 
-### 4. 🧠 提示词技能库与自适应润色 (Skills & Prompt Engine)
-- **预设工业级技能 (Skills)**：内置「多镜头成片（视频）」、「角色设定图」、「分镜首帧（图片）」等官方模板，写一句简短意图即可由大模型扩写为专业分镜提示词。
-- **模型自适应润色**：根据下游模型规则（Seedance 动态描述规范、Grok 语义理解、ElevenLabs 语音标签）智能重写提示词，支持模型故障自动切换与一键撤销。
+### 4. 👥 本机优先与多人团队双模式 (Local-First & Team Hosted)
+- **本机模式（默认）**：零外部运行时依赖，无需登录，所有配置、生成记录与媒体文件 100% 存储在本地 `data/` 目录。
+- **多人团队模式**：通过命令行创建账号后自动启用登录认证与多租户空间隔离：
+  - **数据隔离**：每位成员的创作记录、画布、角色、技能与媒体文件独立存储。
+  - **积分核算**：`1 积分 = 0.01 元`（按官方目录价 1:1 折算），提交时预扣积分、完成后按实际用量多退少补、失败全额自动退回。
+  - **权限分层**：「设置」与「管理」分离——API Key、三方平台余额（火山引擎 / MiniMax / AiHubMix）、平台原始报错及成员积分管理仅对管理员可见。
 
-### 5. 🔒 本地优先与自适应体验 (Local-First & Design)
-- **双主题自适应与极简美学**：默认浅色工作台，原生支持浅色与深色双套视觉体系，根据系统偏好实时自适应平滑切换。
-- **本地存储与数据私有化**：所有生成的视频、图片、音频及画布配置均**100% 存储于本机**。
-- **安全隔离**：API 凭证保存在本地或仅通过环境变量注入，服务严格监听环回接口（`127.0.0.1`），拒绝跨站请求，保障数据绝对安全。
+---
+
+## ⚖️ 多平台与模型矩阵
+
+Innate Studio 以**火山引擎**为主线，同时接入 **MiniMax** 与 **AiHubMix**。各平台 API Key 在侧栏底部的「管理」面板（或环境变量）中独立配置，配好哪个即可使用对应模型：
+
+| 平台 | 配置项 / 环境变量 | 涵盖能力 | 支持模型 |
+| :--- | :--- | :--- | :--- |
+| **火山方舟** | `ARK_API_KEY` | 视频生成、图片生成、提示词润色、画布文本节点 | `Seedance 2.5`、`Seedance 2.0 / Fast / Mini`<br>`Seedream 5.0 Pro / Flash / 5.0`<br>`Seed 2.1 Lite / Turbo / Pro` |
+| **豆包语音** | `DOUBAO_SPEECH_API_KEY` | 语音合成 (TTS)、环境音效 (SFX)、视频配乐 (Music) | `Seed-TTS 2.0`<br>`Seed-Audio 1.0` |
+| **MiniMax** | `MINIMAX_CN_API_KEY` | 视频生成（文生视频、首尾帧、全能参考） | `MiniMax H3`、`MiniMax H3 Max` |
+| **AiHubMix** | `AIHUBMIX_API_KEY`<br>`AIHUBMIX_MANAGE_KEY`*(查余额)* | 图片生成（文生图、多图参考）、账户余额查询 | `GPT Image 2.5 Sunburst`<br>`GPT Image 2.5 Flare`<br>`Nano Banana 2.1` |
+| **火山费用中心** | `VOLC_ACCESS_KEY_ID`<br>`VOLC_SECRET_ACCESS_KEY` | 火山引擎账户实时余额查询 | — |
 
 ---
 
 ## 🚀 快速开始
 
 ### 运行环境
-- **Node.js**：`>= 22.18`（推荐下载 [Node.js LTS](https://nodejs.org)）
+- **Node.js**：`>= 22.18`（服务端直接使用 Node.js 原生支持运行共享的 TypeScript 模型定义文件 `shared/models.ts`）
 
-### 安装与启动
+### 安装与启动（本机模式）
 
 ```bash
 # 1. 克隆仓库
 git clone https://github.com/realruian/innate-studio.git
 cd innate-studio
 
-# 2. 安装依赖并启动
+# 2. 安装依赖、构建前端并启动服务
 npm install
 npm start
 ```
 
-构建完成后，在浏览器中打开：**`http://127.0.0.1:5178`**。
+启动后在浏览器打开：**`http://127.0.0.1:5178`**。点击左下角「管理」即可填写各平台 API Key。
 
-> 💡 **提示**：终端进程运行期间服务保持在线。如需指定端口运行：
+> 💡 **环境变量注入（无痕模式）**：若不想在 `data/config.json` 中落盘保存密钥，可通过环境变量直接启动：
 > ```bash
-> PORT=5180 npm start
+> ARK_API_KEY=... DOUBAO_SPEECH_API_KEY=... MINIMAX_CN_API_KEY=... AIHUBMIX_API_KEY=... npm start
 > ```
-
-第一次启动时，系统会自动打开「设置」窗口，粘贴并保存你的平台 API Key 即可使用。
+> 如需修改监听端口或数据目录：
+> ```bash
+> PORT=5180 INNATE_DATA_DIR=/path/to/data npm start
+> ```
 
 ---
 
-## ⚖️ 双平台支持
+## 👥 多人团队模式与部署
 
-Innate Studio 内置双平台驱动，在「设置 ➔ 模型平台」中自由切换，两套 Key 独立保存：
+当数据目录中存在至少一个账号时，服务会自动从「本机模式」切换为「多人模式」，要求登录后访问。
 
-| 功能维度 | 火山方舟 (Volcengine Ark 原生) | Flatkey (聚合网关) |
-| :--- | :--- | :--- |
-| **视频模型** | Seedance 2.5、2.0、2.0 Fast、2.0 Mini | Seedance 2.0、Grok Video |
-| **参考生成** | 全能参考（本地图片/音频）、首尾帧 | 全能参考（素材库模式）、首帧生视频 |
-| **视频编辑** | 原生分辨率、画质超分、联网增强 | 视频后续延长、指定内容重绘编辑 |
-| **图像生成** | Seedream 5.0 (Pro / Flash / 标准)，支持多参考图 | Grok Imagine |
-| **语音合成** | 豆包语音合成 2.0（230+ 官方音色） | ElevenLabs（音色试听与语言筛选） |
-| **声音生成** | 规划支持中 | AI 拟真音效 + 视频智能匹配配乐 |
-| **Prompt 润色** | 豆包大语言模型 | Claude / GLM / Grok 多模型容灾 |
-| **余额查询** | 火山引擎控制台费用中心 | 设置面板内直接查看实时账户余额 |
+### 账号与积分管理 CLI (`npm run user`)
+
+> ⚠️ **注意**：在执行 `npm run user` 修改账号前请先停止正在运行的服务，或确保修改后账号状态同步。首个管理员账号只能通过命令行创建。
+
+```bash
+# 创建首个管理员账号，并将原本机模式下的数据迁移至该账号名下
+npm run user -- add alice --admin --with-local-data
+
+# 创建普通成员账号（可指定密码，不指定则随机生成一次性初始密码）
+npm run user -- add bob --password <密码>
+
+# 为成员发放积分（100 积分 = 1 元，支持负数扣回）
+npm run user -- grant bob 5000
+
+# 重置成员密码
+npm run user -- reset bob
+
+# 查看所有账号状态与积分余额
+npm run user -- list
+```
+
+管理员登录后，也可直接在界面左下角「管理 ➔ 成员」中新建成员、发放积分、重置密码或停用账号，并查看团队总积分与当月总用量。
+
+### 服务器生产部署 (`deploy/`)
+
+仓库 `deploy/` 目录内置了开箱即用的生产环境配置模板：
+- [`deploy/env.example`](deploy/env.example)：服务器环境变量密钥配置文件模板（建议置于 `/etc/innate-studio.env` 并设置 `chmod 600`）。
+- [`deploy/innate-studio.service`](deploy/innate-studio.service)：`systemd` 守护进程配置（含 `ProtectSystem=strict` 等最小权限沙箱隔离）。
+- [`deploy/Caddyfile`](deploy/Caddyfile)：Caddy 反向代理与自动 HTTPS 证书配置（转发至 `127.0.0.1:5178`，放开 70MB 请求体上限以支持 64MB 参考素材上传）。
 
 ---
 
@@ -138,108 +179,85 @@ Innate Studio 内置双平台驱动，在「设置 ➔ 模型平台」中自由�
 
 ```mermaid
 flowchart TD
-    subgraph Client["前端层 (React 19 + TypeScript + Vite)"]
-        UI["工作台 UI (暗色设计规范)"]
+    subgraph Client["前端层 (React 19 + TypeScript + Vite 8)"]
+        UI["多模态创作工作台 & 详情播放器"]
         Canvas["React Flow 无限节点画布"]
-        Store["全局状态、长轮询与任务调度"]
+        AdminUI["按需加载的管理面板 & 消费/积分明细"]
     end
 
-    subgraph Core["本地服务层 (Node.js Gateway)"]
-        Server["server.js (127.0.0.1 安全隔离)"]
-        Registry["shared/models.ts 统一模型规范"]
+    subgraph Core["本地/托管服务层 (Node.js 零外部依赖网关)"]
+        Server["server.js + server/ 模块化路由"]
+        Auth["auth.js / spaces.js / credits.js (账号、多租户与积分账本)"]
+        Registry["shared/models.ts (统一模型规范、计费估算与润色规则)"]
     end
 
     subgraph Cloud["云端模型生态"]
-        Ark["火山方舟官方 (Seedance / Seedream / 豆包)"]
-        FK["Flatkey 聚合 (Seedance / ElevenLabs / Grok)"]
+        Ark["火山方舟 (Seedance / Seedream / Doubao Seed)"]
+        Speech["豆包语音 (Seed-TTS 2.0 / Seed-Audio 1.0)"]
+        MM["MiniMax 开放平台 (MiniMax H3)"]
+        AHM["AiHubMix (GPT Image 2.5 / Nano Banana 2.1)"]
     end
 
-    subgraph Storage["本地持久化存储 (data/)"]
-        Config["config.json (API Key)"]
-        Media["videos/ images/ audio/"]
-        Projects["canvases.json / characters.json"]
+    subgraph Storage["持久化存储 (data/)"]
+        Global["config.json / users.json / credits.jsonl"]
+        Space["单人根目录 或 users/<id>/ 独立空间"]
+        Media["videos/ images/ audio/ uploads/ thumbs/"]
     end
 
-    Client -->|HTTP / 代理| Core
-    Core -->|原生协议| Ark
-    Core -->|聚合协议| FK
+    Client -->|同源 HTTP API & 媒体流| Core
+    Core --> Auth
+    Core --> Registry
+    Core --> Ark & Speech & MM & AHM
     Core --> Storage
 ```
 
 ### 数据目录规范 (`data/`)
 
-所有应用数据均完全保存在本机的 `data/` 目录下：
+所有应用数据均保存在 `data/` 目录（可通过 `INNATE_DATA_DIR` 自定义）：
 
 | 文件 / 目录 | 内容说明 |
 | :--- | :--- |
-| `data/config.json` | 本地 API Key 配置（亦可通过环境变量直接注入） |
-| `data/history.json` | 历史生成任务及元数据记录 |
-| `data/canvases.json` | 画布项目工程数据（节点拓扑、连线关系、视口状态） |
-| `data/characters.json` | 角色库档案（名称、设定及参考图关联） |
+| `data/config.json` | 平台 API Key 与计费配置（环境变量优先） |
+| `data/users.json` / `sessions.json` | 多人模式下的账号信息（scrypt 加盐散列）与登录会话 |
+| `data/credits.jsonl` | 多人模式下的积分变动流水账本（发放、预扣、结算、退回） |
+| `data/users/<id>/` | 多人模式下每位成员的独立数据空间（结构与下方单人模式一致） |
+| `data/history.json` | 历史生成任务、参数、用量及状态记录 |
+| `data/canvases.json` | 无限画布工程数据（节点拓扑、连线、分组、堆叠与视口状态） |
+| `data/workflows.json` | 画布中保存的可复用节点工作流模板 |
+| `data/characters.json` | 角色库档案（名称、外貌设定及参考图关联） |
 | `data/skills.json` | 用户自定义的提示词工程技能 |
-| `data/videos/` | 生成完成自动保存的高清视频文件 |
-| `data/images/` | 生成的图像文件 |
-| `data/audio/` | 生成的语音、音效与配乐音频 |
-| `data/uploads/` | 用户本地上传作为输入条件的素材文件 |
-
-> 🔑 **无痕模式**：若不想在文件中持久化 Key，也可以通过环境变量启动：
-> ```bash
-> FLATKEY_API_KEY=sk-fk-... ARK_API_KEY=... DOUBAO_SPEECH_API_KEY=... npm start
-> ```
+| `data/videos/` `images/` `audio/` | 生成完成自动落盘保存的视频、图像与音频文件 |
+| `data/uploads/` `thumbs/` | 用户上传的参考素材与自动生成的列表缩略图 |
 
 ---
 
 ## 🛠️ 开发者指南
 
-### 本地调试与开发
+### 常用命令
 
 ```bash
-# 启动热更新前端开发环境（默认连接 5178 本地服务）
+# 启动 Vite 前端热更新开发服务器（API 代理至 127.0.0.1:5178）
 npm run dev
 
-# 运行自动化测试与类型检查（包含 Mock 全流程接口测试）
+# 仅运行 TypeScript 类型检查
+npm run typecheck
+
+# 运行全套自动化测试（含类型检查、模型与计费单测、画布逻辑、接口与多人模式测试、CSS 规范检查）
 npm test
 
-# 启动带 Mock 数据与接口的独立测试环境（端口 5179，无需消耗真实 Token）
+# 启动带本地 Mock 服务的独立测试环境（端口 5179，无需真实 API Key 与 Token 消耗）
 npm run dev:mock
+
+# 运行深浅双主题全页面 UI 自动化走查脚本
+npm run walkthrough
 ```
 
 ### 视觉走查与设计规范
-本项目遵循严格的界面视觉规范（对标 Antigravity 2.0 与 Codex 工作台）。在修改界面组件或样式前，请务必参阅 **[DESIGN.md](DESIGN.md)**。
-
----
-
-## 💬 常见问题
-
-<details>
-<summary><b>1. 访问境外接口提示网络连接不稳定？</b></summary>
-
-Node.js 默认不会自动接管系统的全局代理。若访问 Flatkey 时出现连接超时或中断，可通过环境代理开关启动：
-```bash
-NODE_USE_ENV_PROXY=1 npm start
-```
-服务将自动读取终端配置的 `HTTPS_PROXY` / `HTTP_PROXY` 代理通道。
-</details>
-
-<details>
-<summary><b>2. 火山方舟开通与计费前置条件</b></summary>
-
-使用火山方舟前，请先在火山引擎控制台完成以下准备：
-1. **账户充值**：开通 Seedance 2.0 / 2.5 官方通常要求账户余额大于 200 元；
-2. **开通模型**：在火山方舟「开通管理」中激活对应的 Seedance 视频模型与 Seedream 生图模型接入点；
-3. **获取 API Key**：创建方舟 API Key 并填入本应用；
-4. **豆包语音**：语音合成属于「豆包语音」独立产品，需在豆包语音控制台开通并获取独立的语音 Key。
-</details>
-
-<details>
-<summary><b>3. 任务超时与离线查询机制</b></summary>
-
-视频生成等长耗时异步任务会由本地服务自动轮询。若网络波动或单任务超过 6 小时未完成，系统会标记为「查询超时」，随时可以在创作记录中点击「再查一次」恢复状态拉取。
-</details>
+本项目遵循严格的界面视觉与交互规范（色彩 Token、六档字号阶梯、间距阶梯、自绘无原生控件体系）。修改界面组件或样式前请务必阅读 **[DESIGN.md](DESIGN.md)**，提交前请确保 `npm test` 全部通过。
 
 ---
 
 ## 📄 开源许可与致谢
 
 - 核心代码基于 [MIT 许可证](LICENSE) 开源。
-- 图标采用 [Hugeicons](https://hugeicons.com/)（MIT 许可证），详见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
+- 图标采用 [Hugeicons](https://hugeicons.com/)（MIT 许可证）与 [Lucide](https://lucide.dev/)（ISC 许可证），画布基于 [React Flow](https://reactflow.dev/)（MIT 许可证），详见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
