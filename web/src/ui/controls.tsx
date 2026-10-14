@@ -98,9 +98,9 @@ export function Slider({ value, min, max, from = min, marks = [], onChange, labe
 }
 
 // 设置项的一行：左边名称（可带一句说明），右边控件。
-export function FormRow({ label, desc, children }: { label: string; desc?: ReactNode; children: ReactNode }) {
+export function FormRow({ label, desc, className, children }: { label: string; desc?: ReactNode; className?: string; children: ReactNode }) {
   return (
-    <div className="form-row">
+    <div className={`form-row${className ? ` ${className}` : ''}`}>
       <div className="form-label">
         {label}
         {desc && <span className="form-desc">{desc}</span>}

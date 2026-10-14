@@ -3,6 +3,7 @@
 
 import { Icon } from './Icon.tsx';
 import { clipTip } from './controls.tsx';
+import type { HistoryItem } from '../types.ts';
 
 // 平台返回的失败原因：服务端已经把认识的换成了中文，这里只兜住老记录里的英文原话。
 // 认识的换成人话，并说一句可以怎么办；不认识的原样显示，只去掉末尾的请求编号。只登记实际遇到过的。
@@ -19,6 +20,14 @@ export function explainFailure(message?: string) {
   if (legacy && !legacy[1] && /audit|sensitive|moderation|censor/i.test(message)) return '内容未通过审核，请修改提示词或参考素材后重试';
   if (legacy) return legacy[1] || `${legacy[2]}${Number(legacy[3]) >= 500 || legacy[3] === '200' ? ' 服务暂时异常，请稍后重试' : ' 拒绝了这次请求，请检查提示词和参数'}`;
   return message.replace(/\s*Request id:.*$/i, '').trim();
+}
+
+// 失败之后钱怎么算，写在原因下面的那一句。
+// 多人模式下成员的记录带着 credits：扣的积分失败后全退，记录上 charged 变成 0 就是已经退了。
+// 其余的（本机模式、管理员）花的是平台的额度：视频任务提交时平台预扣，失败后平台退回；图片和音频失败不收钱，不用说。
+export function refundNote(item: HistoryItem): string | null {
+  if (item.credits) return item.credits.quote > 0 ? (item.credits.charged === 0 ? '积分已退回' : '积分将自动退回') : null;
+  return item.kind === 'video' ? '预扣额度将自动退回' : null;
 }
 
 export function FailureState({ title, reason, note, extra }: { title: string; reason?: string; note?: string | null; extra?: string | null }) {

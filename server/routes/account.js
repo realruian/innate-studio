@@ -3,12 +3,12 @@
 import { AIHUBMIX, AIHUBMIX_MANAGE, ARK, DOUBAO_SPEECH, MINIMAX, VOLC_BILLING } from '../config.js';
 import { HttpError, readJsonBody, route } from '../http.js';
 import { config, saveConfig } from '../store.js';
-import { aihubmixManageKey, billingKeys, keyState, isUsableKey, badKeyMessage } from '../keys.js';
+import { aihubmixKey, aihubmixManageKey, apiKey, billingKeys, keyState, isUsableKey, badKeyMessage, minimaxKey } from '../keys.js';
 import { isHosted, userView } from '../auth.js';
 import { callArk, forgetAccount } from '../ark.js';
 import { minimaxBalance, queryAihubmixBalance, queryBalance } from '../billing.js';
 import { VIDEO_TASKS_PATH } from '../tasks.js';
-import { VIDEO_MODELS, IMAGE_MODELS, ARK_TEXT_MODELS } from '../../shared/models.ts';
+import { VIDEO_MODELS, IMAGE_MODELS, ARK_TEXT_MODELS, imageProvider, videoProvider } from '../../shared/models.ts';
 
 const KEY_SERVICES = { speech: DOUBAO_SPEECH, minimax: MINIMAX, aihubmix: AIHUBMIX, 'aihubmix-manage': AIHUBMIX_MANAGE };
 
@@ -78,8 +78,11 @@ route('GET', /^\/api\/models$/, async ({ user }) => {
     imageSizes[id] = { options: Object.keys(sizes), default: size };
   }
   // 语音、音效、配乐用的是豆包语音的 Key，没填的话生成时会提示去设置里填，不在这里列。
-  // MiniMax 的视频模型、AiHubMix 的图片模型也列在里面；它们的 Key 没填的话，提交时会提示去设置里填。
-  const base = { models: Object.keys(VIDEO_MODELS), videoSpecs: VIDEO_MODELS, imageModels: Object.keys(IMAGE_MODELS), imageRatios, imageRefs, imageSizes, imageQualities };
+  // MiniMax 的视频模型、AiHubMix 的图片模型也列在里面；它们所在平台的 Key 没填，就放进 unavailable，菜单里标出来、不能选，
+  // 免得提交了才知道。只说哪几个型号用不了，不说是哪个平台缺 Key：成员看不到 Key 的状态。
+  const keyed = { ark: Boolean(apiKey()), minimax: Boolean(minimaxKey()), aihubmix: Boolean(aihubmixKey()) };
+  const unavailable = [...Object.keys(VIDEO_MODELS).filter((id) => !keyed[videoProvider(id)]), ...Object.keys(IMAGE_MODELS).filter((id) => !keyed[imageProvider(id)])];
+  const base = { models: Object.keys(VIDEO_MODELS), videoSpecs: VIDEO_MODELS, imageModels: Object.keys(IMAGE_MODELS), imageRatios, imageRefs, imageSizes, imageQualities, unavailable };
   try {
     await callArk('GET', `${VIDEO_TASKS_PATH}?page_num=1&page_size=1`, { timeoutMs: 20000 });
     return { ...base, polishModels: ARK_TEXT_MODELS, source: 'remote' };

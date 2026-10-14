@@ -152,8 +152,11 @@ test('管理员：配 Key、建成员（初始密码只给这一次）；成员�
     const res = await call('小林', method, url, body);
     assert.equal(res.status, 403, `${method} ${url}`);
   }
-  // 成员照样能用模型。
-  assert.equal((await call('小林', 'GET', '/api/models')).data.source, 'remote');
+  // 成员照样能用模型。没配 Key 的平台上的型号列在 unavailable 里，页面上标成「暂未开通」；配了的不在里面。
+  const models = (await call('小林', 'GET', '/api/models')).data;
+  assert.equal(models.source, 'remote');
+  assert.ok(models.unavailable.includes('MiniMax-H3'));
+  assert.ok(!models.unavailable.includes(models.models[0]));
 });
 
 test('积分：没有积分不能生成；提交时预扣，完成后按用量结算，失败了全退', async () => {
@@ -176,6 +179,14 @@ test('积分：没有积分不能生成；提交时预扣，完成后按用量�
   const gone = await waitFor(async () => (await call('小林', 'GET', '/api/history')).data.items.find((i) => i.id === failed.data.items[0].id && i.status === 'failed'), '图片失败');
   assert.equal(gone.credits.charged, 0);
   assert.equal(await balance(), 100);
+  // 失败的原因：成员只看中文的那一句，平台的原话（detail）只给管理员。
+  assert.equal(gone.error.message, '火山方舟 服务暂时异常，请稍后重试');
+  assert.equal(gone.error.detail, undefined);
+  // 管理员看得到原话。
+  const own = await call('owner', 'POST', '/api/images', { payload: { model: IMAGE, prompt: 'FAIL 管理员的', n: 1, aspect_ratio: '16:9' } });
+  const ownFailed = await waitFor(async () => (await call('owner', 'GET', '/api/history')).data.items.find((i) => i.id === own.data.items[0].id && i.status === 'failed'), '管理员的图片失败');
+  assert.match(ownFailed.error.detail, /^火山方舟（InternalServiceError）：/);
+  assert.equal((await call('owner', 'DELETE', `/api/history/${ownFailed.id}`)).status, 204);
   // 四张要 120，余额只有 100：一张都不提交。
   assert.equal((await draw('太多了', 4)).status, 402);
   assert.equal(await balance(), 100);

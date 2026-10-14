@@ -90,6 +90,8 @@ function showPassword(name: string, password: string) {
   const modal = openModal({
     title: `${name} 的初始密码`,
     size: 'sm',
+    // 关掉就再也看不到了，只能重置：只留「复制并关闭」。
+    dismissible: false,
     content: (
       <>
         <p className="mono confirm-text">{password}</p>
@@ -143,6 +145,8 @@ function GrantDialog({ member, done }: { member: Member; done: () => void }) {
 function MembersSection() {
   const [members, setMembers] = useState<Member[] | null>(null);
   const [adding, setAdding] = useState(false);
+  // 填了名字，「添加成员」才是主按钮。
+  const [named, setNamed] = useState(false);
   const name = useRef<HTMLInputElement>(null);
   const me = state.app.user!;
   const load = () =>
@@ -160,6 +164,7 @@ function MembersSection() {
     try {
       const { user, password } = await api('POST', '/api/users', { name: value });
       name.current!.value = '';
+      setNamed(false);
       showPassword(user.name, password);
       await load();
     } catch (err) {
@@ -191,6 +196,12 @@ function MembersSection() {
     }
   }
 
+  // 停用会让这个人立刻退出登录，先问一句。能再启用回来，所以不是危险操作的红色。
+  async function disable(member: Member) {
+    const ok = await confirmDialog({ title: `停用成员「${member.name}」？`, message: '停用后立即退出登录，无法再登录和生成；可随时重新启用。', okText: '停用' });
+    if (ok) change(member, { disabled: true }, '已停用');
+  }
+
   function grant(member: Member) {
     const modal = openModal({
       title: `为「${member.name}」发放积分`,
@@ -210,7 +221,7 @@ function MembersSection() {
   function more(button: HTMLElement, member: Member) {
     const acts: Record<string, () => void> = {
       reset: () => change(member, { resetPassword: true }),
-      toggle: () => change(member, { disabled: !member.disabled }, member.disabled ? '已启用' : '已停用'),
+      toggle: () => (member.disabled ? change(member, { disabled: false }, '已启用') : disable(member)),
       remove: () => remove(member),
     };
     openMenu(button, {
@@ -232,21 +243,31 @@ function MembersSection() {
     <section className="settings-group">
       <h3>成员{members ? ` · 团队剩余 ${fmtCredits(totalCredits)} · 本月已用 ${fmtCredits(totalMonthUsed)}` : ''}</h3>
       <div className="settings-card">
-        {(members || []).map((member) => (
-          <FormRow key={member.id} label={member.name} desc={[member.role === 'admin' ? '管理员' : '成员', member.disabled ? '已停用' : member.lastSeenAt ? `最近使用 ${fmtTime(member.lastSeenAt)}` : '尚未登录', `本月 ${fmtCredits(member.monthUsed)}`].join(' · ')}>
-            <span className="muted amount">{fmtCredits(member.credits)}</span>
-            <button className="btn btn-sm" type="button" onClick={() => grant(member)}>
-              发放积分
-            </button>
-            <button className="btn btn-sm" type="button" aria-haspopup="menu" aria-expanded="false" onClick={(e) => more(e.currentTarget, member)}>
-              管理
-            </button>
-          </FormRow>
-        ))}
+        {(members || []).map((member) => {
+          // 管理员生成不扣积分：不写余额和本月用量，也不给发积分。
+          const admin = member.role === 'admin';
+          return (
+            <FormRow key={member.id} className={member.disabled ? 'is-off' : undefined} label={member.name} desc={[admin ? '管理员' : '成员', member.disabled ? '已停用' : member.lastSeenAt ? `最近使用 ${fmtTime(member.lastSeenAt)}` : '尚未登录', !admin && `本月 ${fmtCredits(member.monthUsed)}`].filter(Boolean).join(' · ')}>
+              {admin ? (
+                <span className="muted">不扣积分</span>
+              ) : (
+                <>
+                  <span className="muted amount">{fmtCredits(member.credits)}</span>
+                  <button className="btn btn-sm" type="button" onClick={() => grant(member)}>
+                    发放积分
+                  </button>
+                </>
+              )}
+              <button className="btn btn-sm" type="button" aria-haspopup="menu" aria-expanded="false" onClick={(e) => more(e.currentTarget, member)}>
+                管理
+              </button>
+            </FormRow>
+          );
+        })}
         <div className="form-row">
           <div className="form-control key-edit">
-            <input ref={name} className="input" type="text" placeholder="新成员的名称" maxLength={30} aria-label="新成员的名称" onKeyDown={(e) => e.key === 'Enter' && add()} />
-            <button className="btn btn-primary" type="button" disabled={adding} onClick={add}>
+            <input ref={name} className="input" type="text" placeholder="新成员的名称" maxLength={30} aria-label="新成员的名称" onInput={(e) => setNamed(Boolean(e.currentTarget.value.trim()))} onKeyDown={(e) => e.key === 'Enter' && add()} />
+            <button className={`btn${named ? ' btn-primary' : ''}`} type="button" disabled={adding} onClick={add}>
               添加成员
             </button>
           </div>

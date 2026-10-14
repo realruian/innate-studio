@@ -397,19 +397,22 @@ interface Modal {
   el: HTMLElement | null;
   // 已经在关了，只是出场动效还没播完。
   leaving: boolean;
+  // false：点遮罩、按 Esc、右上角的叉都关不掉，只能用弹窗里自己的按钮。只给关掉就会丢东西的弹窗用（只显示一次的初始密码）。
+  dismissible: boolean;
   close: () => void;
 }
 
 const modals = createList<Modal>();
 
-// 打开弹窗，返回 { close }。点遮罩或按 Esc 关闭。
-export function openModal({ title, subtitle, content, size = 'md', onClose }: { title: string; subtitle?: string; content: ReactNode; size?: Modal['size']; onClose?: () => void }) {
+// 打开弹窗，返回 { close }。点遮罩或按 Esc 关闭（dismissible: false 时不行）。
+export function openModal({ title, subtitle, content, size = 'md', dismissible = true, onClose }: { title: string; subtitle?: string; content: ReactNode; size?: Modal['size']; dismissible?: boolean; onClose?: () => void }) {
   const modal: Modal = {
     id: nextId++,
     title,
     subtitle,
     content,
     size,
+    dismissible,
     el: null,
     leaving: false,
     close() {
@@ -439,7 +442,8 @@ export function openModal({ title, subtitle, content, size = 'md', onClose }: { 
 document.addEventListener('keydown', (e) => {
   // 这次 Esc 已经用来关掉弹窗里的菜单了，就不再关弹窗。
   if (e.key !== 'Escape' || e.timeStamp === lastLayerEscape) return;
-  modals.get().findLast((m) => !m.leaving)?.close();
+  const top = modals.get().findLast((m) => !m.leaving);
+  if (top?.dismissible) top.close();
 });
 
 function ModalView({ modal }: { modal: Modal }) {
@@ -451,16 +455,18 @@ function ModalView({ modal }: { modal: Modal }) {
     enter(overlay.current!.firstElementChild, { y: 8, scale: 0.97, duration: 220 });
   }, [modal]);
   return (
-    <div ref={overlay} className="modal-overlay" onMouseDown={(e) => e.target === e.currentTarget && modal.close()}>
+    <div ref={overlay} className="modal-overlay" onMouseDown={(e) => e.target === e.currentTarget && modal.dismissible && modal.close()}>
       <div className={`modal modal-${modal.size}`} role="dialog" aria-modal="true" aria-label={modal.title}>
         <header className="modal-head">
           <div>
             <h2>{modal.title}</h2>
             {modal.subtitle && <p className="muted small">{modal.subtitle}</p>}
           </div>
-          <button className="icon-btn icon-btn-sm modal-close" type="button" aria-label="关闭" onClick={modal.close}>
-            <Icon name="x" size={16} />
-          </button>
+          {modal.dismissible && (
+            <button className="icon-btn icon-btn-sm modal-close" type="button" aria-label="关闭" onClick={modal.close}>
+              <Icon name="x" size={16} />
+            </button>
+          )}
         </header>
         <div className="modal-body">{modal.content}</div>
       </div>

@@ -18,6 +18,8 @@ export function Login() {
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    // 不用浏览器自带的必填提示（英文，样子由浏览器定），空着的在这里说。
+    if (!name.current!.value.trim() || !password.current!.value) return setError('请输入名称和密码');
     setBusy(true);
     setError('');
     try {
@@ -35,8 +37,8 @@ export function Login() {
       <div className="brand">
         <Logo />
       </div>
-      <input ref={name} className="input" type="text" placeholder="名称" aria-label="名称" autoComplete="username" autoFocus required />
-      <input ref={password} className="input" type="password" placeholder="密码" aria-label="密码" autoComplete="current-password" required />
+      <input ref={name} className="input" type="text" placeholder="名称" aria-label="名称" autoComplete="username" autoFocus />
+      <input ref={password} className="input" type="password" placeholder="密码" aria-label="密码" autoComplete="current-password" />
       <button className="btn btn-primary" type="submit" disabled={busy}>
         登录
       </button>
@@ -49,18 +51,23 @@ export function Login() {
 
 // ---------- 设置里的「账号」 ----------
 
+// 出错的原因和登录页一样写在表单里，不用轻提示：连点几次不会叠起来，改着的时候也一直看得到。
 function PasswordDialog({ close }: { close: () => void }) {
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
   const current = useRef<HTMLInputElement>(null);
   const next = useRef<HTMLInputElement>(null);
   async function submit() {
+    if (!current.current!.value) return setError('请输入当前密码');
+    if (next.current!.value.length < 6) return setError('新密码至少 6 位');
     setBusy(true);
+    setError('');
     try {
       await api('PUT', '/api/me/password', { current: current.current!.value, next: next.current!.value });
       toast('密码已修改', 'success');
       close();
     } catch (err) {
-      toast(message(err), 'error', 6000);
+      setError(message(err));
       setBusy(false);
     }
   }
@@ -70,6 +77,9 @@ function PasswordDialog({ close }: { close: () => void }) {
       <input ref={current} className="input" type="password" autoComplete="current-password" aria-label="当前密码" />
       <label className="field-label">新密码</label>
       <input ref={next} className="input" type="password" autoComplete="new-password" placeholder="至少 6 位" aria-label="新密码" onKeyDown={(e) => e.key === 'Enter' && submit()} />
+      <p className="form-error" role="alert">
+        {error}
+      </p>
       <div className="modal-actions">
         <button className="btn btn-primary" disabled={busy} onClick={submit}>
           保存

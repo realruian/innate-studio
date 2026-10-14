@@ -11,7 +11,7 @@ import { Icon } from './ui/Icon.tsx';
 import { Segmented, SearchBox, tip, clipTip } from './ui/controls.tsx';
 import { toast, openModal, openMenu, confirmDialog, copyText } from './ui/layers.tsx';
 import { enter } from './ui/motion.ts';
-import { FailureState, explainFailure } from './ui/states.tsx';
+import { FailureState, explainFailure, refundNote } from './ui/states.tsx';
 import { setForm, setStudio, submit, useImageForVideo, useVideoForMusic } from './composer/state.ts';
 import { openCharacterEditor } from './characters.tsx';
 import { IMAGE_QUALITY_LABELS, REFERENCE_MODE_LABEL, estimateCost } from '../../shared/models.ts';
@@ -232,7 +232,7 @@ function MediaBox({ item, large = false }: { item: HistoryItem; large?: boolean 
           title={timedOut ? '查询超时' : `${typeLabel(item)}生成失败`}
           reason={item.error?.message}
           extra={large ? null : item.prompt}
-          note={item.kind === 'video' && !timedOut ? '预扣额度将自动退回' : null}
+          note={timedOut ? null : refundNote(item)}
         />
       </div>
     );
@@ -280,7 +280,7 @@ function Elapsed({ since }: { since: number }) {
 }
 
 // 画面要不要重画，看这几项有没有变。视频存到本机后地址会变，但画面不用重画：重画会打断正在播放的视频。
-const mediaSignature = (i: HistoryItem) => JSON.stringify([i.status, i.progress, Boolean(i.mediaUrl), i.error?.message, i.pollError, i.prompt]);
+const mediaSignature = (i: HistoryItem) => JSON.stringify([i.status, i.progress, Boolean(i.mediaUrl), i.error?.message, i.pollError, i.prompt, i.credits?.charged]);
 const CardMedia = memo(
   ({ item }: { item: HistoryItem; signature: string }) => <MediaBox item={item} />,
   (before, after) => before.signature === after.signature,

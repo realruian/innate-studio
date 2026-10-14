@@ -96,20 +96,20 @@ function minimaxVideoRequest(payload) {
 // ---------- 生成记录 ----------
 
 // 多人模式下带上这个人剩多少积分：页面本来就一直在读记录，余额跟着它更新。
-route('GET', /^\/api\/history$/, async ({ space, user }) => ({ items: space.history.map(historyView), ...(user ? { credits: balanceOf(user.id) } : {}) }));
+route('GET', /^\/api\/history$/, async ({ space, user }) => ({ items: space.history.map((item) => historyView(item, user)), ...(user ? { credits: balanceOf(user.id) } : {}) }));
 
-route('POST', /^\/api\/history\/([^/]+)\/refresh$/, async ({ params, space }) => {
+route('POST', /^\/api\/history\/([^/]+)\/refresh$/, async ({ params, space, user }) => {
   const item = space.history.find((h) => h.id === params[0]);
   if (!item) throw new HttpError(404, 'not_found', '记录不存在');
   // direct 的记录没有任务可查；别的平台留下的记录也查不了。
-  if (item.direct || isLegacy(item)) return historyView(item);
+  if (item.direct || isLegacy(item)) return historyView(item, user);
   if (isPending(item) || isTimedOut(item)) {
     await pollTask(space, item);
   } else if (item.status === 'completed' && !item.localFile) {
     item.downloadAttempts = 0;
     await downloadResult(space, item);
   }
-  return historyView(item);
+  return historyView(item, user);
 });
 
 route('DELETE', /^\/api\/history\/([^/]+)$/, async ({ params, space }) => {

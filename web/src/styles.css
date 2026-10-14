@@ -367,6 +367,8 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 
 .form-row { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-16); min-height: 40px; }
 .form-label { display: flex; flex-direction: column; min-width: 0; font-size: var(--text-ui); }
+/* 停用了的成员：名字淡一档，一眼和别的分开。 */
+.form-row.is-off > .form-label { color: var(--text-3); }
 .form-desc { font-size: var(--text-caption); color: var(--text-3); }
 .form-control { display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-8); flex: none; min-width: 0; font-size: var(--text-ui); }
 .form-control .input { width: 190px; }
@@ -379,6 +381,8 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 .login .brand { justify-content: center; padding: 0 0 var(--sp-12); }
 .login .btn { justify-content: center; }
 .login-error { min-height: 1lh; font-size: var(--text-caption); color: var(--danger); text-align: center; }
+/* 弹窗表单里的出错原因：和登录页同一种红字，靠左，空着时也占一行，出错时下面的按钮不跳。 */
+.form-error { min-height: 1lh; margin: var(--sp-8) 0 0; font-size: var(--text-caption); color: var(--danger); }
 
 .settings { display: flex; flex-direction: column; gap: var(--sp-32); }
 .settings-group > h3 { font-size: var(--text-caption); color: var(--text-3); }

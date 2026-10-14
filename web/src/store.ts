@@ -75,7 +75,7 @@ export const state = {
   modelsInfo: { source: 'default', error: '', note: '' },
   // 视频之外账号还能用什么。known 为 false 表示还没读到模型列表，这时不拦任何一种创作。
   // imageRatios 是每个图片模型收哪些画面比例，imageRefs 是最多收几张参考图，imageSizes 是能选的几档分辨率和默认的那一档，imageQualities 是分画质的模型能选的几档画质和默认的那一档。
-  catalog: { known: false, image: [] as string[], imageRatios: {} as Record<string, string[]>, imageRefs: {} as Record<string, number>, imageSizes: {} as Record<string, { options: string[]; default: string }>, imageQualities: {} as Record<string, { options: string[]; default: string }>, polish: [] as string[] },
+  catalog: { known: false, image: [] as string[], imageRatios: {} as Record<string, string[]>, imageRefs: {} as Record<string, number>, imageSizes: {} as Record<string, { options: string[]; default: string }>, imageQualities: {} as Record<string, { options: string[]; default: string }>, polish: [] as string[], unavailable: [] as string[] },
   voices: null as Voice[] | null,
   history: [] as HistoryItem[],
   historyLoaded: false,
@@ -139,6 +139,12 @@ export const needsLogin = () => state.app.hosted && !state.app.user;
 export const isAdmin = () => state.app.user?.role === 'admin';
 // 能不能管 Key：本机模式谁都能，多人模式只有管理员能。
 export const canManage = () => !state.app.hosted || isAdmin();
+
+// 模型菜单里的一项：所在平台没配 Key 的型号标出来、不能选。附注说成员能懂的话：管理员去「管理」里配，成员只知道还没开通。
+export function modelOption(id: string, label: string, note?: string | null) {
+  if (!state.catalog.unavailable.includes(id)) return { value: id, label, note: note || undefined };
+  return { value: id, label, note: canManage() ? '未配置 Key' : '暂未开通', disabled: true };
+}
 // 多人模式下的成员：看到的是积分，看不到元和各平台的余额。
 export const usesCredits = () => state.app.hosted && !isAdmin();
 
@@ -173,7 +179,7 @@ export async function loadModels() {
   state.models = data.models;
   state.videoSpecs = data.videoSpecs || {};
   state.modelsInfo = { source: data.source, error: data.error || '', note: data.note || '' };
-  state.catalog = { known: !data.error, image: data.imageModels || [], imageRatios: data.imageRatios || {}, imageRefs: data.imageRefs || {}, imageSizes: data.imageSizes || {}, imageQualities: data.imageQualities || {}, polish: data.polishModels || [] };
+  state.catalog = { known: !data.error, image: data.imageModels || [], imageRatios: data.imageRatios || {}, imageRefs: data.imageRefs || {}, imageSizes: data.imageSizes || {}, imageQualities: data.imageQualities || {}, polish: data.polishModels || [], unavailable: data.unavailable || [] };
   emit('models');
 }
 
@@ -207,7 +213,7 @@ let historySignature = '';
 
 export async function loadHistory() {
   const data = await api<{ items: HistoryItem[]; credits?: number }>('GET', '/api/history');
-  const signature = JSON.stringify(data.items.map((i) => [i.id, i.status, i.progress, i.mediaUrl, i.thumbUrl, i.pollError, i.downloadError, i.error?.message]));
+  const signature = JSON.stringify(data.items.map((i) => [i.id, i.status, i.progress, i.mediaUrl, i.thumbUrl, i.pollError, i.downloadError, i.error?.message, i.credits?.charged]));
   state.history = data.items;
   if (data.credits !== undefined && data.credits !== state.credits) {
     state.credits = data.credits;

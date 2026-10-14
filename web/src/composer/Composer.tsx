@@ -2,7 +2,7 @@
 // 状态和动作在 state.ts。
 
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { state, useStore, KINDS, goTo, loadCharacters, canManage, usesCredits } from '../store.ts';
+import { state, useStore, KINDS, goTo, loadCharacters, canManage, usesCredits, modelOption } from '../store.ts';
 import { IMAGE_QUALITY_LABELS, modelLabel, modelNote, REFERENCE_MODE_LABEL, SPEECH_MODEL, AUDIO_MODEL } from '../../../shared/models.ts';
 import { musicSeconds } from '../request.ts';
 import { Icon, type IconName } from '../ui/Icon.tsx';
@@ -17,7 +17,7 @@ import { SkillPanel } from '../skills.tsx';
 import type { Kind, Ref, VideoForm } from '../types.ts';
 import {
   composer, RATIOS,
-  TYPES, typeOf, draftPrompt, specOf, hasLastFrame, imageRatios, imageSizes, imageQualities, imageRefLimit, currentRequest, currentCredits,
+  TYPES, typeOf, draftPrompt, specOf, hasLastFrame, imageRatios, imageSizes, imageQualities, imageRefLimit, currentCredits, submitProblem,
   update, setMode, swapFrames, updateStudio, setType, typePrompt, polish, undoPolish, submit, registerPrompt,
   voiceName, voiceNote, togglePreview, setVoiceFilter, pickVoice, stopPreview, useCharacter, activeSkill, setSkill,
   addableKinds, mediaRoom, usedMediaUrls, addMedia, addFiles, dismissSubmitError,
@@ -258,7 +258,7 @@ function VideoToolbar() {
         options={modes.map((m) => ({ value: m.value, label: m.label, note: m.note }))}
         onChange={(value) => setMode(value as VideoForm['mode'])}
       />
-      <Dropdown key="model" variant="tool" control="model" icon="cube" label="模型" value={form.model} options={models.map((m) => ({ value: m, label: modelLabel(m), note: modelNote(m) || undefined }))} onChange={(model) => update({ model })} />
+      <Dropdown key="model" variant="tool" control="model" icon="cube" label="模型" value={form.model} options={models.map((m) => modelOption(m, modelLabel(m), modelNote(m)))} onChange={(model) => update({ model })} />
       <PanelButton key="frame" name="frame" label="画面" ariaLabel={`画面：${ratio.label}，${form.resolution}`} className="frame-popover" panel={() => <FramePanel />}>
         <span className="ratio-box">
           <RatioShape value={form.ratio} />
@@ -350,7 +350,7 @@ function ImageToolbar() {
   const models = known.includes(sub.model) || !known.length ? known : [sub.model, ...known];
   return (
     <>
-      <Dropdown key="image-model" variant="tool" control="model" icon="cube" label="模型" value={sub.model} options={(models.length ? models : [sub.model]).map((m) => ({ value: m, label: modelLabel(m) }))} onChange={(model) => updateStudio('image', { model })} />
+      <Dropdown key="image-model" variant="tool" control="model" icon="cube" label="模型" value={sub.model} options={(models.length ? models : [sub.model]).map((m) => modelOption(m, modelLabel(m)))} onChange={(model) => updateStudio('image', { model })} />
       <ImageRatioButton key="image-ratio" />
       <Dropdown key="count" variant="tool" control="count" icon="layers" label="数量" value={String(sub.count)} options={IMAGE_COUNTS.map((n) => ({ value: String(n), label: `${n} 张` }))} onChange={(value) => updateStudio('image', { count: Number(value) })} />
     </>
@@ -612,7 +612,7 @@ function SendArea() {
     );
   }
   const type = typeOf();
-  const blocked = currentRequest().problems[0] || '';
+  const blocked = submitProblem();
   const { beforePolish, polishing, submitting, submitError } = composer;
   const canSkill = type.value === 'image' || type.value === 'video';
   const skill = activeSkill();
@@ -686,7 +686,7 @@ function SubmitNotice() {
 }
 
 export function Composer() {
-  useStore('composer', 'app');
+  useStore('composer', 'app', 'balance');
   const { studio } = composer;
   const type = typeOf();
   const text = draftPrompt();

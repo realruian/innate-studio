@@ -5,13 +5,13 @@
 
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { BaseEdge, Handle, NodeToolbar, Position, getBezierPath, useConnection, useEdges, useInternalNode, useReactFlow, useStore as useFlowStore, useUpdateNodeInternals, type ConnectionLineComponentProps, type EdgeProps, type Node, type NodeProps } from '@xyflow/react';
-import { state, useStore, loadVoices, isPendingTask, polishModel, KINDS as MEDIA } from '../store.ts';
+import { state, useStore, loadVoices, isPendingTask, polishModel, modelOption, KINDS as MEDIA } from '../store.ts';
 import { RATIOS, fitImageQuality, fitImageSize, hasLastFrame, imageQualities, imageRatios, imageRefLimit, imageSizes, specOf, voiceName } from '../composer/state.ts';
 import { IMAGE_QUALITY_LABELS, modelLabel, modelNote } from '../../../shared/models.ts';
 import { recordName, uploadLocalFile } from '../media.ts';
 import { openAssetPicker } from '../assets.tsx';
 import { Icon, type IconName } from '../ui/Icon.tsx';
-import { FailureState } from '../ui/states.tsx';
+import { FailureState, refundNote } from '../ui/states.tsx';
 import { Dropdown, tip } from '../ui/controls.tsx';
 import { MediaTile, AddTile } from '../ui/tiles.tsx';
 import { openMenu, openModal, openPopover, toast } from '../ui/layers.tsx';
@@ -445,7 +445,7 @@ function Result({ kind, data, onShape }: { kind: NodeKind; data: MediaData; onSh
   if (!record) return blank(data.recordId && state.historyLoaded ? '生成记录已删除' : <Icon name={NODE_ICONS[kind]} size={28} stroke={1.2} />);
   if (isPendingTask(record)) return waiting(record.status === 'queued' ? '排队中' : record.progress ? `生成中 ${Math.round(record.progress)}%` : '生成中');
   // 和创作页的失败卡片同一个样子。节点标题已经写着是什么，这里不再带提示词；重新生成就点输入面板的发送键。
-  if (record.status === 'failed') return blank(<FailureState title="生成失败" reason={record.error?.message} note={record.kind === 'video' ? '预扣额度将自动退回' : null} />, true);
+  if (record.status === 'failed') return blank(<FailureState title="生成失败" reason={record.error?.message} note={refundNote(record)} />, true);
   if (!record.mediaUrl) return waiting('已生成，保存中…');
   if (kind === 'image') return <img className="cnode-pic" src={record.mediaUrl} alt={record.prompt || '生成的图片'} draggable={false} onLoad={measure} />;
   if (kind === 'video') return <Clip src={record.mediaUrl} label={record.prompt || '生成的视频'} onShape={onShape} />;
@@ -781,7 +781,7 @@ export function ImageNode({ id, data: raw, selected, dragging }: NodeProps) {
           <Prompt id={id} value={data.prompt} placeholder={promptHint(linked, hasRefs ? '描述修改要求，例如：把背景改成雪夜' : '描述主体、环境、构图、光线与风格')} presets={{ refs: inputs.filter((i) => i.link.kind === 'image').length + (usesSelfRef ? 1 : 0), limit: refLimit, run: (prompt) => generate(flow, id, snap, { prompt }) }} />
           {data.error && !data.busy && <p className="cnode-error">{data.error}</p>}
           <Bar working={working} ready={Boolean(data.prompt.trim()) || linked || hasRefs} action="生成图片" onSend={() => generate(flow, id, snap)}>
-            <Dropdown variant="tool" chevron label="模型" value={data.model} options={models.map((m) => ({ value: m, label: modelLabel(m) }))} onChange={(model) => flow.updateNodeData(id, { model, ratio: imageRatios(model).includes(data.ratio) ? data.ratio : imageRatios(model)[0] || data.ratio, resolution: fitImageSize(model, data.resolution), quality: fitImageQuality(model, data.quality) })} />
+            <Dropdown variant="tool" chevron label="模型" value={data.model} options={models.map((m) => modelOption(m, modelLabel(m)))} onChange={(model) => flow.updateNodeData(id, { model, ratio: imageRatios(model).includes(data.ratio) ? data.ratio : imageRatios(model)[0] || data.ratio, resolution: fitImageSize(model, data.resolution), quality: fitImageQuality(model, data.quality) })} />
             <Params
               label="参数"
               groups={[
@@ -1022,7 +1022,7 @@ export function VideoNode({ id, data: raw, selected, dragging }: NodeProps) {
           <Prompt id={id} value={data.prompt} placeholder={promptHint(linked, data.selfFrame ? '描述接续动作与剧情，例如：主角转身上车，车辆向远方驶去' : '描述主体、动作、场景、运镜、光线与风格')} />
           {data.error && !data.busy && <p className="cnode-error">{data.error}</p>}
           <Bar working={working} ready={Boolean(data.prompt.trim()) || inputs.length > 0 || hasSelfRef} action="生成视频" onSend={() => generate(flow, id, snap)}>
-            <Dropdown variant="tool" chevron label="模型" value={data.model} options={models.map((m) => ({ value: m, label: modelLabel(m), note: modelNote(m) || undefined }))} onChange={(model) => set(fitVideo({ ...data, model }))} />
+            <Dropdown variant="tool" chevron label="模型" value={data.model} options={models.map((m) => modelOption(m, modelLabel(m), modelNote(m)))} onChange={(model) => set(fitVideo({ ...data, model }))} />
             <Params
               label="参数"
               groups={[

@@ -168,11 +168,15 @@ export function startPolling() {
 }
 
 // mediaUrl 是结果文件的地址，三种类型都有；videoUrl 只有视频有，页面上放视频的地方用它；thumbUrl 是列表里用的小图，没做出来就没有。
-export function historyView(item) {
+// user 是来看的人。多人模式下平台的原话（error.detail、状态查询失败的原因）只给管理员看，成员只看中文的原因。
+export function historyView(item, user) {
   const kind = item.kind || 'video';
   const mediaUrl = item.localFile ? `/media/${MEDIA_DIRS[kind]}/${item.localFile}` : item.remoteUrl || null;
+  const hidden = user && user.role !== 'admin';
   return {
     ...item,
+    ...(hidden && item.error?.detail && { error: { message: item.error.message, code: item.error.code } }),
+    ...(hidden && item.pollError && { pollError: '平台暂时无法查询' }),
     kind,
     mediaUrl,
     videoUrl: kind === 'video' ? mediaUrl : null,

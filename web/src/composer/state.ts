@@ -1,7 +1,8 @@
 // 创作输入框的状态和动作：正在编辑的表单、润色、音色试听、提交。界面在 Composer.tsx，把表单拼成请求的逻辑在 request.ts。
 // 这里改完状态都要调 changed()，输入框才会重画。
 
-import { api, state, on, emit, KINDS, startHistoryLoop, loadVoices, polishModel, goTo, type ApiError } from '../store.ts';
+import { api, state, on, emit, KINDS, startHistoryLoop, loadVoices, polishModel, goTo, usesCredits, type ApiError } from '../store.ts';
+import { fmtCredits } from '../format.ts';
 import { exclusive } from '../playback.ts';
 import { refFromRecord, kindOfFile, uploadLocalFile } from '../media.ts';
 import { toast } from '../ui/layers.tsx';
@@ -84,9 +85,14 @@ function mergeStudio(saved: Partial<Studio> | null): Studio {
   };
 }
 
+// 输入框的内容存在浏览器里。多人模式下按账号分开存（键名后面接账号 id）：同一台电脑换个人登录，看不到上一个人写到一半的东西。
+// 读到账号之前（initComposer 之前）先按本机模式的键读，登录、退出都会整页重新加载，所以不会写错地方。
+let owner = '';
+const keyOf = (key: string) => (owner ? `${key}:${owner}` : key);
+
 function load<T>(key: string, merge: (saved: any) => T): T {
   try {
-    return merge(JSON.parse(localStorage.getItem(key)!));
+    return merge(JSON.parse(localStorage.getItem(keyOf(key))!));
   } catch {
     return merge(null);
   }
@@ -125,8 +131,8 @@ function persist() {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
     try {
-      localStorage.setItem(FORM_KEY, JSON.stringify(composer.form));
-      localStorage.setItem(STUDIO_KEY, JSON.stringify(composer.studio));
+      localStorage.setItem(keyOf(FORM_KEY), JSON.stringify(composer.form));
+      localStorage.setItem(keyOf(STUDIO_KEY), JSON.stringify(composer.studio));
     } catch {
       /* 存不下就不存，不影响使用 */
     }
@@ -148,6 +154,18 @@ export function currentRequest(prompt?: string): BuiltRequest {
   if (studio.type === 'music') return buildMusicRequest(studio.music);
   const form = prompt === undefined ? composer.form : { ...composer.form, prompt };
   return buildVideoRequest(form, specOf(form.model));
+}
+
+// 现在为什么不能提交：表单本身的问题在前；多人模式下估出来的积分比剩下的多，也不能提交（服务端预扣时同样会拦）。
+// 没有问题是空字符串。发送键变淡、悬停说明原因，和表单的问题一个样子。
+export function submitProblem(): string {
+  const problem = currentRequest().problems[0];
+  if (problem) return problem;
+  if (usesCredits() && state.credits != null) {
+    const need = currentCredits();
+    if (need != null && need > state.credits) return `积分不足：本次约需 ${fmtCredits(need)}，剩余 ${fmtCredits(state.credits)}`;
+  }
+  return '';
 }
 
 // 这次生成大约要多少积分，写在发送键旁边。和服务端预扣用的是同一个算法（shared/models.ts 的 quoteCost）。估不出来是 null。
@@ -537,7 +555,8 @@ export async function submit() {
   const { studio, form } = composer;
   const { type } = studio;
   let request = currentRequest();
-  if (request.problems.length) return toast(request.problems[0], 'info');
+  const problem = submitProblem();
+  if (problem) return toast(problem, 'info');
   const skill = activeSkill();
   if (skill && !polishModel()) return toast('暂无可用的文本模型，请取消技能后重试', 'info');
   composer.submitting = true;
@@ -580,6 +599,20 @@ export function focusComposer() {
 
 // 读到 Key 的状态之后调一次，然后才画输入框。
 export function initComposer() {
+  // 多人模式：换成这个账号自己的那份。不分账号的那份是以前谁留下的说不准，删掉。
+  const user = state.app.user;
+  if (user) {
+    owner = user.id;
+    composer.form = load(FORM_KEY, mergeForm);
+    composer.studio = load(STUDIO_KEY, mergeStudio);
+    state.createType = composer.studio.type;
+    try {
+      localStorage.removeItem(FORM_KEY);
+      localStorage.removeItem(STUDIO_KEY);
+    } catch {
+      /* 读写不了就算了 */
+    }
+  }
   const { studio } = composer;
   fitModel();
   if (studio.type === 'speech') ensureVoices();
@@ -589,10 +622,13 @@ export function initComposer() {
   });
   on('models', () => {
     const info = state.modelsInfo;
-    // 选着的型号不在列表里（以前别的平台的型号、已经下线的型号）就换成第一个。
-    if (!state.models.includes(composer.form.model) && state.models.length) composer.form.model = state.models[0];
+    // 选着的型号不在列表里（以前别的平台的型号、已经下线的型号），或者它所在的平台没配 Key，就换成第一个能用的。
+    const usable = (list: string[]) => list.filter((m) => !state.catalog.unavailable.includes(m));
+    const videos = usable(state.models);
+    if (!videos.includes(composer.form.model) && videos.length) composer.form.model = videos[0];
     fitModel();
-    if (state.catalog.image.length && !state.catalog.image.includes(composer.studio.image.model)) composer.studio.image.model = state.catalog.image[0];
+    const images = usable(state.catalog.image);
+    if (images.length && !images.includes(composer.studio.image.model)) composer.studio.image.model = images[0];
     fitImage();
     persist();
     if (state.app.hasKey && info.source === 'default' && info.error) toast(`模型列表加载失败，已显示默认模型。${info.error}`, 'error', 6000);
