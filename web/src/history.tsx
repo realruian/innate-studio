@@ -8,7 +8,7 @@ import { stopPlaying } from './playback.ts';
 import { VideoPlayer, AudioPlayer } from './player.tsx';
 import { Thumb } from './assets.tsx';
 import { Icon } from './ui/Icon.tsx';
-import { Segmented, SearchBox, tip } from './ui/controls.tsx';
+import { Segmented, SearchBox, tip, clipTip } from './ui/controls.tsx';
 import { toast, openModal, openMenu, confirmDialog, copyText } from './ui/layers.tsx';
 import { enter } from './ui/motion.ts';
 import { FailureState, explainFailure } from './ui/states.tsx';
@@ -247,12 +247,36 @@ function MediaBox({ item, large = false }: { item: HistoryItem; large?: boolean 
   // 只有视频任务会报进度；其余的只知道还在生成。
   const video = item.kind === 'video';
   const progress = Math.max(0, Math.min(100, item.progress || 0));
+  // 下面写上是哪一条、等了多久：一屏好几张生成中的卡片时分得开，等得久了也知道不是卡住了。详情里有提示词，不重复。
   return (
     <div className="card-state is-pending">
       <div className="state-chip cursor-text">{item.status === 'queued' ? '排队中' : video ? `生成中 ${progress}%` : '生成中'}</div>
       {item.pollError && <div className="small muted">状态查询失败：{item.pollError}</div>}
+      {!large && (
+        <div className="pending-info">
+          {item.prompt && (
+            <div className="pending-prompt" {...clipTip(item.prompt)}>
+              {item.prompt}
+            </div>
+          )}
+          <div className="pending-meta">
+            {typeLabel(item)}
+            {item.createdAt ? <Elapsed since={item.createdAt} /> : null}
+          </div>
+        </div>
+      )}
     </div>
   );
+}
+
+// 等了多久，每秒走一下。只有生成中的卡片上有，自己走自己的，不带着整张卡片重画。
+function Elapsed({ since }: { since: number }) {
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  return <span> · 已等待 {fmtDuration(now - since)}</span>;
 }
 
 // 画面要不要重画，看这几项有没有变。视频存到本机后地址会变，但画面不用重画：重画会打断正在播放的视频。

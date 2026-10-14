@@ -42,7 +42,7 @@ function Settings() {
               <Dropdown
                 label="润色模型"
                 value={models.includes(polish) ? polish : polishModel()}
-                options={models.map((m) => ({ value: m, label: m }))}
+                options={models.map((m) => ({ value: m, label: textModelName(m) }))}
                 onChange={(model) => {
                   setPolishModel(model);
                   setPolish(model);
@@ -56,6 +56,13 @@ function Settings() {
       </section>
     </div>
   );
+}
+
+// 文本模型的型号（doubao-seed-2-1-lite-260915）在菜单里写成 Seed 2.1 Lite，和生成模型的写法一样，去掉前缀和版本日期。
+// 只在这里换：别处（费用明细）要的是型号本身，shared/models.ts 的 modelLabel 对文本模型也原样返回。认不出来的原样显示。
+function textModelName(id: string) {
+  const m = /^doubao-seed-(\d+)-(\d+)-([a-z]+)-\d{6}$/i.exec(id);
+  return m ? `Seed ${m[1]}.${m[2]} ${m[3][0].toUpperCase()}${m[3].slice(1)}` : id;
 }
 
 export function openSettings() {

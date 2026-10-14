@@ -98,7 +98,9 @@ function Frame({ id, kind, no, pins = [], selected, dragging, width, tools, pane
       {fits && <Handle id="body" type={wants} position={wants === 'target' ? Position.Left : Position.Right} className="cnode-drop" isConnectableStart={false} />}
       {/* 输入面板画在画布的缩放之外，所以大小不变；位置仍然贴着节点。 */}
       <NodeToolbar isVisible={alone} position={Position.Bottom} offset={20}>
-        <div className="cnode-panel nowheel">{panel}</div>
+        <div className="cnode-panel nowheel" onKeyDown={sendOnShortcut}>
+          {panel}
+        </div>
       </NodeToolbar>
     </div>
   );
@@ -343,12 +345,19 @@ function Prompt({ id, value, placeholder, presets }: { id: string; value: string
   );
 }
 
+// 和创作页的输入框一样，⌘ Enter（Windows 上是 Ctrl Enter）就是点生成键；生成键不能点时不发。
+function sendOnShortcut(e: React.KeyboardEvent<HTMLElement>) {
+  if (!(e.metaKey || e.ctrlKey) || e.key !== 'Enter' || e.nativeEvent.isComposing || !(e.target as Element).closest('textarea')) return;
+  e.preventDefault();
+  e.currentTarget.querySelector<HTMLButtonElement>('.cnode-bar .send-btn:not(:disabled)')?.click();
+}
+
 // 输入面板最下面一行：左边是模型和参数，右边是生成键。ready：有没有东西可以发（写了提示词，或者连了能用的节点），没有就是灰的。
 function Bar({ working, ready, action, onSend, children }: { working: boolean; ready: boolean; action: string; onSend: () => void; children: ReactNode }) {
   return (
     <div className="cnode-bar">
       <div className="cnode-params">{children}</div>
-      <button className="send-btn" type="button" {...tip(working ? '正在生成' : action)} aria-label={action} disabled={working || !ready} onClick={onSend}>
+      <button className="send-btn" type="button" {...tip(working ? '正在生成' : `${action}（⌘ Enter）`)} aria-label={action} disabled={working || !ready} onClick={onSend}>
         {working ? <span className="spinner" /> : <Icon name="arrowUp" size={18} />}
       </button>
     </div>

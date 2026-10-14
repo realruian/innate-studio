@@ -553,7 +553,7 @@ export async function submit() {
     if (type === 'video') await api('POST', '/api/videos', { payload: request.payload, form });
     else if (type === 'image') await api('POST', '/api/images', { payload: request.payload, form: { type, ...studio.image } });
     else await api('POST', `/api/audio/${type}`, { ...request.body, form: { type, ...studio[type] } });
-    toast('已提交，正在生成', 'success');
+    toast('已提交', 'success');
     startHistoryLoop();
   } catch (err) {
     composer.submitError = (err as Error).message;

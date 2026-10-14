@@ -260,6 +260,18 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
     [flow],
   );
 
+  // 选着的节点变宽了（图片、视频出了结果，按画面的比例重新定宽），输入面板跟着往右挪，可能又露到窗口外面：再看一次。
+  // 只管同一个节点自己变宽；换了选中的节点、拖动、缩放视野都不算，免得视野自己乱动。
+  const shaped = useRef<{ id: string; width: number } | null>(null);
+  useEffect(() => {
+    const picked = nodes.filter((n) => n.selected);
+    const node = picked.length === 1 ? picked[0] : null;
+    const width = node?.measured?.width;
+    const last = shaped.current;
+    shaped.current = node && width ? { id: node.id, width } : null;
+    if (node && width && last?.id === node.id && width > last.width + 1 && !isGroup(node)) reveal(node.position, width);
+  }, [nodes, reveal]);
+
   // link 是新节点要和哪个节点连上：from 是它的上游，to 是它的下游。extra 是节点一出来就带着的内容：上传的文件、一条生成记录。
   const addNode = useCallback(
     (kind: NodeKind, at?: { x: number; y: number }, link?: { from?: Node; also?: Node[]; to?: Node }, extra?: Record<string, unknown>, role?: FrameRole) => {
