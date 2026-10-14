@@ -8,11 +8,11 @@ import { composer, imageRefLimit } from '../composer/state.ts';
 import { kindOfFile, uploadLocalFile } from '../media.ts';
 import { Icon, type IconName } from '../ui/Icon.tsx';
 import { tip } from '../ui/controls.tsx';
-import { openMenu, openPopover, toast } from '../ui/layers.tsx';
+import { openMenu, openPopover, promptName, toast } from '../ui/layers.tsx';
 import { reducedMotion } from '../ui/motion.ts';
 import type { HistoryItem } from '../types.ts';
 import { BOX_HEIGHT, NODE_LABELS, TITLE_ROOM, canLink, MAX_STACK, PINS, PIN_LABELS, alignNodes, clipOf, distributeNodes, groupFrame, isGroup, isStack, nodeWidth, numbered, pasteClip, runOrder, snapTo, sourcesOf, stripNodeData, targetsOf, tidy, type AlignDirection, type Clip, type FrameRole, type GroupData, type Guide, type LinkData, type NodeKind, type Pin, type Rect } from './model.ts';
-import { coverOf, generate, newNodeData, outputOf, recordOf } from './run.ts';
+import { confirmRun, coverOf, generate, newNodeData, outputOf, recordOf } from './run.ts';
 import { AudioNode, CanvasActions, DragLine, GroupNode, ImageNode, LinkEdge, NODE_ICONS, StackNode, TextNode, VideoNode } from './nodes.tsx';
 import { Finder, HistoryPicker, WorkflowPicker } from './panels.tsx';
 import { grabFrame } from './edit.tsx';
@@ -457,7 +457,7 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
     const el = anchor.current!;
     el.style.left = `${bar.right + 12}px`;
     el.style.top = `${bar.top - 6}px`;
-    openPopover(el, content, { label });
+    return openPopover(el, content, { label });
   }
 
   // ---------- 对齐 ----------
@@ -588,7 +588,7 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
       const copied = Object.fromEntries(['model', 'ratio', 'resolution', 'duration'].map((key) => [key, source.data[key]]));
       const [image, video] = numbered(
         [
-          { id: crypto.randomUUID(), type: 'image', position: { x, y }, data: { ...newNodeData('image', seed()), upload: frame, aspect: source.data.aspect } } as Node,
+          { id: crypto.randomUUID(), type: 'image', position: { x, y }, data: { ...newNodeData('image', seed()), upload: frame, aspect: source.data.aspect, derivedFrom: source.id } } as Node,
           { id: crypto.randomUUID(), type: 'video', position: { x: x + nodeWidth('image', { aspect: source.data.aspect as number | undefined }) + 120, y }, data: { ...newNodeData('video', seed()), ...copied, prompt: '' }, selected: true } as Node,
         ],
         flow.getNodes(),
@@ -682,9 +682,12 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
       const ids = new Set(membersOf(made));
       const clip = clipOf(savedNodes(flow.getNodes().filter((node) => ids.has(node.id))), savedEdges(flow.getEdges()));
       const data = made.data as unknown as GroupData;
+      // 先起个名字：默认是分组的名字，不问的话一排工作流都叫「分组 1」。
+      const name = await promptName({ title: '存为工作流', label: '工作流名称', value: data.name?.trim() || `分组 ${data.no || ''}`.trim() });
+      if (!name) return;
       try {
-        await api('POST', '/api/workflows', { name: data.name?.trim() || `分组 ${data.no || ''}`.trim(), ...clip });
-        toast('已存为工作流', 'success');
+        await api('POST', '/api/workflows', { name, ...clip });
+        toast(`已存为工作流「${name}」`, 'success');
       } catch (err) {
         toast((err as Error).message, 'error', 6000);
       }
@@ -1009,7 +1012,7 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
             note: '图生图',
             icon: 'image',
             disabled: !downstreamImageOk,
-            title: downstreamImageOk ? undefined : '默认图片模型不支持参考图',
+            title: downstreamImageOk ? undefined : '模型不支持参考图',
           });
           options.push({
             value: 'img-to-video-ref',
@@ -1028,7 +1031,7 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
             note: '分镜续拍',
             icon: 'workflow',
             disabled: !out?.url,
-            title: out?.url ? undefined : '视频尚未生成完成，完成后可截取尾帧接续拍摄',
+            title: out?.url ? undefined : '视频未生成',
             onExecute: async (at) => {
               if (!out?.url) return toast('视频尚未准备好', 'info');
               toast('正在截取最后一帧…', 'info', 1800);
@@ -1103,7 +1106,7 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
             note: '垫图参考',
             icon: 'image',
             disabled: !upstreamImageOk,
-            title: upstreamImageOk ? undefined : '当前模型不支持参考图，或已达上限',
+            title: upstreamImageOk ? undefined : '不支持参考图或已达上限',
           });
         } else if (type === 'video') {
           options.push({
@@ -1247,7 +1250,7 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
     const ids = selectedSolid.filter((n) => ['text', 'image', 'video', 'audio'].includes(n.type || '')).map((n) => n.id);
     if (!ids.length) return toast('没有可执行的节点', 'info');
     const todo = runOrder(ids, flow.getEdges());
-    toast(`开始批量生成，共 ${todo.length} 个节点`, 'info', 2400);
+    if (!(await confirmRun(flow, todo))) return;
     const setIds = new Set(todo);
     const hasInternalDeps = flow.getEdges().some((e) => setIds.has(e.source) && setIds.has(e.target));
     if (!hasInternalDeps) {
@@ -1543,7 +1546,20 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
               <Icon name="history" size={18} />
               <span className="canvas-tool-name">生成历史</span>
             </button>
-            <button className="icon-btn" type="button" aria-label="工作流" aria-haspopup="dialog" aria-expanded="false" onClick={(e) => openBeside(e.currentTarget, <WorkflowPicker onPick={applyWorkflow} />, '工作流')}>
+            <button className="icon-btn" type="button" aria-label="工作流" aria-haspopup="dialog" aria-expanded="false" onClick={(e) => {
+                // 放上一份就收起：一般一次只放一份，面板开着时焦点在它里面，⌘ Z 也不归画布管。生成历史常要连着放几条，不收。
+                const layer = openBeside(
+                  e.currentTarget,
+                  <WorkflowPicker
+                    onPick={(id) => {
+                      layer?.close();
+                      applyWorkflow(id);
+                    }}
+                  />,
+                  '工作流',
+                );
+              }}
+            >
               <Icon name="workflow" size={18} />
               <span className="canvas-tool-name">工作流</span>
             </button>
@@ -1576,30 +1592,24 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
             <Panel position="bottom-center" className="canvas-batch-bar nodrag">
               <span className="batch-badge">已选 {selectedNodes.length} 个节点</span>
               <button className="batch-btn is-primary" type="button" onClick={batchRun} {...tip('按顺序批量生成所选节点')}>
-                <Icon name="arrowUp" size={14} />
                 <span>批量生成</span>
               </button>
               <span className="batch-split" />
               <button className="batch-btn" type="button" onClick={(e) => openAlignMenu(e.currentTarget)} {...tip('对齐与等间距分布')}>
-                <Icon name="grid" size={14} />
                 <span>对齐分布</span>
                 <Icon name="chevron" size={12} />
               </button>
               <button className="batch-btn" type="button" onClick={group} {...tip('将所选节点打成一组（⌘ G）')}>
-                <Icon name="workflow" size={14} />
                 <span>打组</span>
               </button>
               <button className="batch-btn" type="button" onClick={stack} {...tip('收为一叠，节省画布空间')}>
-                <Icon name="history" size={14} />
                 <span>堆叠</span>
               </button>
               <button className="batch-btn" type="button" onClick={duplicate} {...tip('创建副本并继承上游连线（⌘ D）')}>
-                <Icon name="image" size={14} />
                 <span>复制</span>
               </button>
               <span className="batch-split" />
               <button className="batch-btn is-danger" type="button" onClick={batchDelete} {...tip('删除所选节点（⌫）')}>
-                <Icon name="x" size={14} />
                 <span>删除</span>
               </button>
             </Panel>

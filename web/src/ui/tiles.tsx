@@ -21,9 +21,11 @@ interface MediaTileProps {
   style?: CSSProperties;
   // 写到节点上的 data-*。
   data?: Record<string, string | number | undefined>;
+  // 鼠标进出这一格：画布上用来高亮它对应的那个节点。
+  onHover?: (on: boolean) => void;
 }
 
-export function MediaTile({ children, tag, state, error, tipText, onRemove, face, className = '', style, data }: MediaTileProps) {
+export function MediaTile({ children, tag, state, error, tipText, onRemove, face, className = '', style, data, onHover }: MediaTileProps) {
   const inner = (
     <>
       {children}
@@ -31,7 +33,7 @@ export function MediaTile({ children, tag, state, error, tipText, onRemove, face
     </>
   );
   return (
-    <div className={`ref-tile ${error ? 'tone-error' : ''} ${className}`} style={style} {...data} {...tip(tipText)}>
+    <div className={`ref-tile ${error ? 'tone-error' : ''} ${className}`} style={style} {...data} {...tip(tipText)} onMouseEnter={onHover && (() => onHover(true))} onMouseLeave={onHover && (() => onHover(false))}>
       {face ? (
         <button className="ref-face" type="button" {...face}>
           {inner}

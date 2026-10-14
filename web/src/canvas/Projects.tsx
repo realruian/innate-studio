@@ -1,12 +1,12 @@
 // 画布的项目列表：一个项目是一张画布，在新标签页里打开，整个窗口都是那张画布，侧栏收起来。
 // 开着哪张画布看地址（#/canvas/<id>）：刷新之后还在那张画布里，浏览器的后退回到列表。
 
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { api, canvasInPath, canvasPath, setImmersive } from '../store.ts';
 import { fmtTime } from '../format.ts';
 import { Icon } from '../ui/Icon.tsx';
 import { SearchBox, tip, clipTip } from '../ui/controls.tsx';
-import { confirmDialog, openMenu, openModal, toast } from '../ui/layers.tsx';
+import { confirmDialog, openMenu, promptName, toast } from '../ui/layers.tsx';
 
 // 画布用到的库比较大，第一次点进项目时才加载。
 const Editor = lazy(() => import('./Canvas.tsx'));
@@ -16,26 +16,6 @@ export interface ProjectMeta {
   name: string;
   cover: { url: string; kind: 'image' | 'video' } | null;
   updatedAt: number;
-}
-
-function Rename({ project, done }: { project: ProjectMeta; done: (name?: string) => void }) {
-  const input = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    const timer = setTimeout(() => input.current?.select(), 0);
-    return () => clearTimeout(timer);
-  }, []);
-  const submit = () => done(input.current!.value.trim() || project.name);
-  return (
-    <>
-      <label className="field-label">画布名称</label>
-      <input ref={input} className="input" type="text" defaultValue={project.name} maxLength={60} onKeyDown={(e) => e.key === 'Enter' && submit()} />
-      <div className="modal-actions">
-        <button className="btn btn-primary" onClick={submit}>
-          保存
-        </button>
-      </div>
-    </>
-  );
 }
 
 export function Projects() {
@@ -106,20 +86,9 @@ export function Projects() {
       onSelect: async (action) => {
         try {
           if (action === 'rename') {
-            const modal = openModal({
-              title: '重命名',
-              size: 'sm',
-              content: (
-                <Rename
-                  project={project}
-                  done={async (name) => {
-                    modal.close();
-                    if (name && name !== project.name) await api('PUT', `/api/canvases/${project.id}`, { name });
-                    load();
-                  }}
-                />
-              ),
-            });
+            const name = await promptName({ title: '重命名', label: '画布名称', value: project.name });
+            if (name && name !== project.name) await api('PUT', `/api/canvases/${project.id}`, { name });
+            load();
             return;
           }
           if (!(await confirmDialog({ title: '删除这张画布？', message: `删除「${project.name}」后无法恢复，已生成的内容不受影响。`, okText: '删除', danger: true }))) return;

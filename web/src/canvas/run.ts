@@ -6,7 +6,7 @@ import { api, state, KINDS, startHistoryLoop, loadHistory, polishModel, canManag
 import { defaults, fitImageQuality, fitImageSize, hasLastFrame, imageRefLimit, specOf } from '../composer/state.ts';
 import { buildVideoRequest, buildImageRequest, buildSpeechRequest, buildSfxRequest } from '../request.ts';
 import { recordName } from '../media.ts';
-import { toast } from '../ui/layers.tsx';
+import { confirmDialog, toast } from '../ui/layers.tsx';
 import type { HistoryItem, Kind, Ref } from '../types.ts';
 import { BOX_HEIGHT, NODE_LABELS, TITLE_ROOM, joinPrompt, nodeWidth, numbered, placeResults, resolveMentions, runOrder, stripNodeData, videoFormFrom, type AudioData, type ImageData, type LinkData, type MediaInput, type NodeKind, type TextData, type VideoData } from './model.ts';
 
@@ -237,6 +237,18 @@ const RUN_WAIT_MS = 20 * 60 * 1000;
 
 // 把一批节点按上游到下游的顺序挨个生成。只动还没有内容的节点：已经有内容的当作现成的输入，不重新生成。
 // 每个节点要等它出了结果才轮到下一个，因为下游要拿它的结果当输入。中途有一个失败就停下。
+// 一次要生成好几个节点之前问一句：要生成几个、各是什么，已经有结果的几个会不会被重新生成。只有文本节点（不花钱）时不问。
+export async function confirmRun(flow: Flow, ids: string[]) {
+  const all = ids.map((id) => flow.getNode(id)).filter((node): node is Node => Boolean(node));
+  const nodes = all.filter((node) => node.type !== 'text');
+  if (!nodes.length) return true;
+  // 列出来的个数要和标题对得上，文本节点也算进去。
+  const counts = (['video', 'image', 'audio', 'text'] as NodeKind[]).map((kind) => [kind, all.filter((n) => n.type === kind).length] as const).filter(([, n]) => n);
+  const redo = nodes.filter((n) => isFilled(n.data as AnyData)).length;
+  const what = `${counts.map(([kind, n]) => `${NODE_LABELS[kind]} ${n} 个`).join('、')}，按连线的先后依次生成。`;
+  return confirmDialog({ title: `生成 ${ids.length} 个节点？`, message: redo ? `${what}其中 ${redo} 个已有结果，会重新生成。` : what, okText: '开始生成' });
+}
+
 export async function runAll(flow: Flow, ids: string[], snap: () => void) {
   const todo = runOrder(ids, flow.getEdges()).filter((id) => {
     const node = flow.getNode(id);
@@ -245,7 +257,7 @@ export async function runAll(flow: Flow, ids: string[], snap: () => void) {
     return node.type !== 'text' || Boolean(((node.data as AnyData).prompt || '').trim());
   });
   if (!todo.length) return toast('该分组没有待生成的节点', 'info');
-  toast(`开始执行，共 ${todo.length} 个节点`, 'info', 2400);
+  if (!(await confirmRun(flow, todo))) return;
   for (const [index, id] of todo.entries()) {
     await generate(flow, id, snap);
     const deadline = Date.now() + RUN_WAIT_MS;

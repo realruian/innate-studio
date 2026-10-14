@@ -21,6 +21,7 @@ import type { Kind, Ref } from '../types.ts';
 import { BOX_HEIGHT, IMAGE_PRESETS, NODE_LABELS, OUTPAINT_PROMPT, ROLE_LABELS, canLink, nodeWidth, linkLabel, PINS, PIN_LABELS, type AudioData, type FrameRole, type GroupData, type ImageData, type Pin, type Preset, type StackData, type LinkData, type NodeKind, type TextData, type VideoData } from './model.ts';
 import { fitVideo, generate, nameOf, outputOf, recordOf, runAll } from './run.ts';
 import { Cropper, cropImage, grabFrame, padImage, splitGrid, type Made } from './edit.tsx';
+import { reducedMotion } from '../ui/motion.ts';
 
 // 画布页交给节点用的几件事。snap：会改动画布结构的操作，动手之前调一下，撤销时回到这一刻。
 // addInput：在某个节点左边加一个节点并连进它，extra 是新节点一出来就带着的内容（上传的文件）。
@@ -62,6 +63,10 @@ function useAlone(selected?: boolean) {
 // dragging：正被拖着走。这时候不显示输入面板和名字行右端的操作，松手再出来，拖起来才轻。
 function Frame({ id, kind, no, pins = [], selected, dragging, width, tools, panel, children }: { id: string; kind: NodeKind; no?: number; pins?: Pin[]; selected?: boolean; dragging?: boolean; width: number; tools?: ReactNode; panel: ReactNode; children: ReactNode }) {
   const flow = useReactFlow();
+  const { jumpTo } = useContext(CanvasActions);
+  // 这个节点是从别的节点截出来的（接着拍截的尾帧）：标题旁写上来自哪里，点一下跳过去。它们之间连不了线（视频不能连给图片），只能这样标出来。
+  const derived = (flow.getNode(id)?.data as { derivedFrom?: string } | undefined)?.derivedFrom;
+  const origin = derived ? flow.getNode(derived) : undefined;
   const alone = useAlone(selected) && !dragging;
   // 正从别的节点拉一条线过来：这个节点接得住，就把整个框变成落点，不用对准小加号。
   // 从右边的加号拉出来的线要找下游，从左边的加号拉出来的要找上游。
@@ -72,6 +77,24 @@ function Frame({ id, kind, no, pins = [], selected, dragging, width, tools, pane
   // 落点是拉线时才加进来的，要让 React Flow 重新量一遍这个节点，它才认得这个落点（线拖上来时才会把它标成可以连）。
   const remeasure = useUpdateNodeInternals();
   useEffect(() => remeasure(id), [fits, wants]);
+  // 输入面板长高了（多连了素材、提示词写长了），底部的发送键可能被挤到窗口外面：视野往上挪刚好够的距离。
+  // 只看它自己长高，不管视野怎么动：用户拖着看别处时不去抢视野。
+  const panelRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = panelRef.current;
+    if (!alone || !el) return;
+    let height = el.offsetHeight;
+    const observer = new ResizeObserver(() => {
+      const grew = el.offsetHeight > height + 1;
+      height = el.offsetHeight;
+      const over = el.getBoundingClientRect().bottom - (window.innerHeight - 24);
+      if (!grew || over <= 0) return;
+      const view = flow.getViewport();
+      flow.setViewport({ ...view, y: view.y - over }, { duration: reducedMotion() ? 0 : 200 });
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [alone, flow]);
   return (
     <div className={`cnode cnode-${kind} ${selected ? 'selected' : ''}`} style={{ width }}>
       {/* 名字在左，只选中这一个节点时右端是它的几个操作（上传、看详情）。删除用键盘或右键菜单。 */}
@@ -82,6 +105,11 @@ function Frame({ id, kind, no, pins = [], selected, dragging, width, tools, pane
           {pins.map((pin) => (
             <span key={pin} className={`cpin is-${pin}`} role="img" aria-label={`${PIN_LABELS[pin]}标记`} />
           ))}
+          {origin && (
+            <button type="button" className="cnode-origin nodrag" {...tip(`定位 ${nameOf(origin)}`)} onClick={() => jumpTo(origin.id)}>
+              {nameOf(origin)} 的尾帧
+            </button>
+          )}
         </span>
         {alone && (
           <span className="cnode-acts nodrag">
@@ -98,7 +126,7 @@ function Frame({ id, kind, no, pins = [], selected, dragging, width, tools, pane
       {fits && <Handle id="body" type={wants} position={wants === 'target' ? Position.Left : Position.Right} className="cnode-drop" isConnectableStart={false} />}
       {/* 输入面板画在画布的缩放之外，所以大小不变；位置仍然贴着节点。 */}
       <NodeToolbar isVisible={alone} position={Position.Bottom} offset={20}>
-        <div className="cnode-panel nowheel" onKeyDown={sendOnShortcut}>
+        <div ref={panelRef} className="cnode-panel nowheel" onKeyDown={sendOnShortcut}>
           {panel}
         </div>
       </NodeToolbar>
@@ -194,7 +222,8 @@ function useDraft(value: string, commit: (next: string) => void) {
   };
 }
 
-// 提示词输入框。打一个 @，会列出连进这个节点的节点，选一个就插进一段「@图片 1」；生成时它会被换成模型看得懂的说法。
+// 提示词输入框。打一个 @，会列出连进这个节点的节点，选一个就插进一段「@图片 1」，在框里标出底色；生成时它会被换成模型看得懂的说法。
+// 定位、高亮连着的节点在上面那排参考格上做（格子上写着节点名），提示词里不另放一排胶囊。
 // 面板右下角的 @ 按钮是同一件事，插在光标的位置。
 // presets：这个节点有斜杠预设（图片节点）。提示词还空着的时候打一个 /，或点右下角的 /，列出这些预设。
 // 选了之后提示词换成预设的那一段；节点已经连了东西就直接开始生成，否则先停下等着补内容。
@@ -203,7 +232,6 @@ function Prompt({ id, value, placeholder, presets }: { id: string; value: string
   const inputs = useInputs(id);
   const area = useRef<HTMLTextAreaElement>(null);
   const { set, ...draft } = useDraft(value, (prompt) => flow.updateNodeData(id, { prompt }));
-  const { jumpTo, hoverNode } = useContext(CanvasActions);
 
   const mentions = useMemo(() => {
     const list: { label: string; no: string; name: string; node?: Node; kind: NodeKind }[] = [];
@@ -228,13 +256,6 @@ function Prompt({ id, value, placeholder, presets }: { id: string; value: string
     }
     return list;
   }, [draft.value, inputs]);
-
-  const removeMention = (label: string, no: string) => {
-    const regex = new RegExp(`@${label}\\s*${no}\\s*`, 'g');
-    const next = draft.value.replace(regex, '').trim();
-    set(next);
-    hoverNode(null);
-  };
 
   useEffect(() => {
     const rawData = flow.getNode(id)?.data as AnyData | undefined;
@@ -267,7 +288,7 @@ function Prompt({ id, value, placeholder, presets }: { id: string; value: string
 
   function preset(typed: boolean) {
     const el = area.current!;
-    const why = (item: Preset) => (!item.needsRef ? null : !presets!.limit ? '当前模型不支持参考图，请更换模型' : !presets!.refs ? '请先连接参考图' : null);
+    const why = (item: Preset) => (!item.needsRef ? null : !presets!.limit ? '模型不支持参考图' : !presets!.refs ? '未连接参考图' : null);
     openMenu(el, {
       label: '预设',
       items: IMAGE_PRESETS.map((item) => ({ value: item.id, label: item.label, note: item.note, disabled: Boolean(why(item)), title: why(item) })),
@@ -286,39 +307,37 @@ function Prompt({ id, value, placeholder, presets }: { id: string; value: string
     });
   }
 
+  // 引用的节点直接在提示词里标出来：输入框底下垫一层同样的字，只给「@文本 1」这几个字垫上底色，字本身还是输入框里的。
+  // 连进来的是蓝底；写了但没连进来的（连线删了、编号写错）是红底，生成时不会被换成节点的内容。
+  const mirror = useRef<HTMLDivElement>(null);
+  const marked = useMemo(() => {
+    const parts: ReactNode[] = [];
+    let last = 0;
+    const regex = /@(文本|图片|视频|音频)\s*(\d+)/g;
+    let m: RegExpExecArray | null;
+    while ((m = regex.exec(draft.value)) !== null) {
+      parts.push(draft.value.slice(last, m.index));
+      const linked = mentions.find((item) => item.name === `${m![1]} ${m![2]}`)?.node;
+      parts.push(
+        <mark key={m.index} className={linked ? 'is-linked' : 'is-missing'}>
+          {m[0]}
+        </mark>,
+      );
+      last = m.index + m[0].length;
+    }
+    // 末尾是换行时补一个字，不然垫的这一层比输入框矮一行。
+    parts.push(`${draft.value.slice(last)} `);
+    return parts;
+  }, [draft.value, mentions]);
+
   return (
     <>
-      {mentions.length > 0 && (
-        <div className="cnode-pills nodrag" role="list" aria-label="引用的节点">
-          {mentions.map((item) => (
-            <div
-              key={item.name}
-              className={`cnode-pill is-${item.kind}`}
-              role="button"
-              tabIndex={0}
-              {...tip(item.node ? `点击定位 ${item.name}` : `${item.name}（未连入）`)}
-              onClick={() => item.node && jumpTo(item.node.id)}
-              onMouseEnter={() => item.node && hoverNode(item.node.id)}
-              onMouseLeave={() => hoverNode(null)}
-            >
-              <Icon name={NODE_ICONS[item.kind]} size={12} />
-              <span className="cnode-pill-name">@{item.name}</span>
-              <button
-                type="button"
-                className="cnode-pill-del"
-                {...tip('移除引用')}
-                aria-label={`移除引用 ${item.name}`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  removeMention(item.label, item.no);
-                }}
-              >
-                <Icon name="x" size={10} />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
+      <div className="cnode-prompt-wrap">
+        {mentions.length > 0 && (
+          <div ref={mirror} className="cnode-prompt cnode-prompt-mirror" aria-hidden="true">
+            {marked}
+          </div>
+        )}
       <textarea
         ref={area}
         className="cnode-prompt"
@@ -332,7 +351,9 @@ function Prompt({ id, value, placeholder, presets }: { id: string; value: string
           // 提示词还空着时打的 /：出预设。写到一半的 / 只是个斜杠。
           if (presets && e.target.value === '/' && !(e.nativeEvent as InputEvent).isComposing) requestAnimationFrame(() => preset(true));
         }}
+        onScroll={(e) => mirror.current && (mirror.current.scrollTop = e.currentTarget.scrollTop)}
       />
+      </div>
       {presets && (
         <button className="cnode-at is-slash" type="button" {...tip('预设')} aria-label="预设" aria-haspopup="menu" onClick={() => preset(false)}>
           /
@@ -835,7 +856,7 @@ function pickRole(anchor: HTMLElement, model: string | undefined, current: Frame
 function Refs({ id, kind, model = '', limit = 0 }: { id: string; kind: NodeKind; model?: string; limit?: number }) {
   const forImage = kind === 'image';
   const flow = useReactFlow();
-  const { snap, addInput, continueVideo } = useContext(CanvasActions);
+  const { snap, addInput, continueVideo, jumpTo, hoverNode } = useContext(CanvasActions);
   useStore('history', 'app');
   const inputs = useInputs(id);
   const selfNode = flow.getNode(id);
@@ -957,10 +978,14 @@ function Refs({ id, kind, model = '', limit = 0 }: { id: string; kind: NodeKind;
         </MediaTile>
       )}
       {media.map(({ edgeId, link, node }) => {
+        // 每一格写着它连的是哪个节点（「文本 1」），和提示词里的「@文本 1」对得上；指上去画布上那个节点和连线亮起来。
+        const hover = (on: boolean) => hoverNode(on ? node.id : null);
         if (link.kind === 'text') {
           const text = ((node.data as unknown as TextData).text || '').trim();
+          // 文本格点一下跳到那个文本节点。
+          const locate = { 'aria-label': `定位 ${nameOf(node)}`, onClick: () => (hoverNode(null), jumpTo(node.id)) };
           return (
-            <MediaTile key={edgeId} className="is-text" tag="文本" tipText={text ? (text.length > 80 ? `${text.slice(0, 80)}…` : text) : '上游文本节点为空'} onRemove={() => unlink(edgeId)}>
+            <MediaTile key={edgeId} className="is-text" tag={nameOf(node)} face={locate} onHover={hover} tipText={text ? (text.length > 80 ? `${text.slice(0, 80)}…` : text) : '上游文本节点为空'} onRemove={() => unlink(edgeId)}>
               <Icon name="type" size={18} />
             </MediaTile>
           );
@@ -983,7 +1008,7 @@ function Refs({ id, kind, model = '', limit = 0 }: { id: string; kind: NodeKind;
               }
             : undefined;
         return (
-          <MediaTile key={edgeId} tag={label} face={face} onRemove={() => unlink(edgeId)}>
+          <MediaTile key={edgeId} tag={label} face={face} onHover={hover} tipText={`${nameOf(node)} · ${label}`} onRemove={() => unlink(edgeId)}>
             {thumb ? <img className="thumb-img" src={thumb} alt="" draggable={false} /> : <Icon name={NODE_ICONS[link.kind]} size={18} />}
           </MediaTile>
         );

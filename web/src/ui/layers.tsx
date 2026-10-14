@@ -302,6 +302,17 @@ function PopoverView({ layer }: { layer: Layer }) {
     else if (e.key === 'Home') next = enabled[0];
     else if (e.key === 'End') next = enabled.at(-1);
     else if (e.key === 'Tab') layer.close();
+    // 刚打开、还没用方向键挑的时候按回车：就是选第一项（或当前选着的那项）。
+    else if (e.key === 'Enter' && index === -1 && start) {
+      e.preventDefault();
+      start.click();
+      return;
+    }
+    // 接着打字（比如打完 @ 不想引用、继续写）：菜单收起，焦点回到原来的输入框，这个字照常落进去。
+    else if (((e.key.length === 1 && !(e.key === ' ' && index !== -1)) || e.key === 'Backspace') && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      layer.close({ restoreFocus: true });
+      return;
+    }
     if (next) {
       e.preventDefault();
       next.focus();
@@ -374,7 +385,8 @@ export function openMenu(anchor: HTMLElement, { label, heading, items, onSelect,
           >
             {item.icon && <Icon name={item.icon} size={16} />}
             <span className="menu-item-label">{item.label}</span>
-            {item.note && <span className="menu-item-note">{item.note}</span>}
+            {/* 不能选的项，原因写在附注的位置：按钮禁用后鼠标指上去出不了提示。 */}
+            {(item.disabled && item.title ? item.title : item.note) && <span className="menu-item-note">{item.disabled && item.title ? item.title : item.note}</span>}
             {picking && <span className="menu-item-check">{item.selected && <Icon name="check" size={14} />}</span>}
           </button>
         ))}
@@ -504,6 +516,52 @@ export function confirmDialog({ title, message, okText = '确定', cancelText = 
             </button>
           </div>
         </>
+      ),
+    });
+  });
+}
+
+// 起一个名字：弹窗里一个输入框，默认值选中，回车或点按钮确定。取消返回 null，空着就用默认值。
+function NameField({ label, value, okText, done }: { label: string; value: string; okText: string; done: (name: string) => void }) {
+  const input = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    const timer = setTimeout(() => input.current?.select(), 0);
+    return () => clearTimeout(timer);
+  }, []);
+  const submit = () => done(input.current!.value.trim() || value);
+  return (
+    <>
+      <label className="field-label">{label}</label>
+      <input ref={input} className="input" type="text" defaultValue={value} maxLength={60} onKeyDown={(e) => e.key === 'Enter' && !e.nativeEvent.isComposing && submit()} />
+      <div className="modal-actions">
+        <button className="btn btn-primary" onClick={submit}>
+          {okText}
+        </button>
+      </div>
+    </>
+  );
+}
+
+export function promptName({ title, label, value, okText = '保存' }: { title: string; label: string; value: string; okText?: string }) {
+  return new Promise<string | null>((resolve) => {
+    let answered = false;
+    const modal = openModal({
+      title,
+      size: 'sm',
+      onClose: () => {
+        if (!answered) resolve(null);
+      },
+      content: (
+        <NameField
+          label={label}
+          value={value}
+          okText={okText}
+          done={(name) => {
+            answered = true;
+            modal.close();
+            resolve(name);
+          }}
+        />
       ),
     });
   });

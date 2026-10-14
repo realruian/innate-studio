@@ -872,7 +872,9 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
   .canvas-tools:hover .canvas-tool-name { opacity: 1; translate: 0 -50%; }
   .canvas-tools .icon-btn:hover .canvas-tool-name { color: var(--text); }
 }
-.canvas-tools:focus-within .canvas-tool-name { opacity: 1; translate: 0 -50%; }
+/* 用键盘走到工具栏时也显示名字；用鼠标点过之后焦点留在按钮上，不能因此一直盖在节点上，所以只认 :focus-visible。 */
+.canvas-tools:has(:focus-visible)::after { opacity: 1; }
+.canvas-tools:has(:focus-visible) .canvas-tool-name { opacity: 1; translate: 0 -50%; }
 .canvas-tools-split { width: var(--sp-16); height: 1px; margin: var(--sp-4) 0; background: var(--border-strong); }
 /* 左下角：撤销、重做、小地图、缩放比例 */
 .canvas-foot .icon-btn, .canvas-zoom { height: var(--h-sm); border-radius: var(--r-xs); }
@@ -886,8 +888,9 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 .batch-split { width: 1px; height: var(--sp-16); margin: 0 var(--sp-2); background: var(--border-strong); }
 .batch-btn { display: inline-flex; align-items: center; gap: var(--sp-4); height: var(--h-sm); padding: 0 var(--sp-8); border: 0; border-radius: var(--r-xs); background: transparent; color: var(--text); font-size: var(--text-ui); font-weight: var(--fw-medium); cursor: pointer; white-space: nowrap; transition: background-color var(--t-fast) var(--ease), color var(--t-fast) var(--ease); }
 @media (hover: hover) { .batch-btn:hover { background: var(--hover); } }
-.batch-btn.is-primary { background: var(--accent); color: var(--on-accent); }
-@media (hover: hover) { .batch-btn.is-primary:hover { background: var(--accent-hover); } }
+/* 主要操作和别处一样是反色，不用强调色：按钮保持黑白。批量栏里都是动作，只有文字、不带图标。 */
+.batch-btn.is-primary { background: var(--text); color: var(--bg); }
+@media (hover: hover) { .batch-btn.is-primary:hover { background: var(--text-strong); } }
 .batch-btn.is-danger { color: var(--danger); }
 @media (hover: hover) { .batch-btn.is-danger:hover { background: color-mix(in srgb, var(--danger) 12%, transparent); } }
 /* 空画布正中间的一句提示，加了第一个节点就消失 */
@@ -990,6 +993,9 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
    宽度先乘上缩放，抵消之后正好和框一样宽，右端的操作才对得齐框的右边。 */
 .cnode-title { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-8); width: calc(100% * var(--zoom, 1)); height: var(--sp-16); padding: 0; color: var(--text-3); font-size: var(--text-ui); line-height: var(--lh-snug); white-space: nowrap; cursor: grab; transform-origin: left bottom; scale: var(--inv, 1); translate: 0 calc(var(--sp-8) - var(--sp-12) * var(--inv, 1)); }
 .cnode-name { display: flex; align-items: center; gap: var(--sp-4); min-width: 0; }
+/* 标题旁的「视频 1 的尾帧」：比名字淡一档的小字，指上去变亮，点了跳到那个视频。 */
+.cnode-origin { margin-left: var(--sp-4); padding: 0; border: 0; background: none; color: var(--text-4); font-size: var(--text-caption); white-space: nowrap; cursor: pointer; transition: color var(--t-fast) var(--ease); }
+@media (hover: hover) { .cnode-origin:hover { color: var(--text); } }
 .cnode-acts { display: flex; align-items: center; gap: var(--sp-2); flex: none; cursor: default; animation: fade var(--t-quick) var(--ease-out); }
 .cnode-box { display: grid; height: 240px; overflow: hidden; background: var(--surface-1); border-radius: var(--r-lg); box-shadow: 0 0 0 1px var(--border); outline: var(--ring, 1.5px) solid transparent; outline-offset: var(--ring-gap, 3px); }
 @media (hover: hover) { .cnode:not(.selected):hover .cnode-box { box-shadow: 0 0 0 1px var(--border-strong); } }
@@ -1017,17 +1023,7 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 .cnode-refs { --tile: 64px; display: flex; flex-wrap: wrap; gap: var(--sp-8); padding: var(--sp-20) var(--sp-20) 0; }
 .cnode-refs .ref-tile.is-text { background: color-mix(in srgb, var(--accent) 14%, var(--surface-2)); color: var(--accent); }
 /* 提示词里的 @ 引用胶囊 */
-.cnode-pills { display: flex; flex-wrap: wrap; gap: var(--sp-4); padding: var(--sp-12) var(--sp-20) 0; }
-.cnode-pill { display: inline-flex; align-items: center; gap: var(--sp-4); height: 24px; padding: 0 var(--sp-8); border: 1px solid var(--border-float); border-radius: 999px; background: var(--surface-2); color: var(--text-2); font-size: var(--text-caption); font-weight: var(--fw-medium); cursor: pointer; user-select: none; transition: background-color var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease), color var(--t-fast) var(--ease); }
-@media (hover: hover) { .cnode-pill:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--surface-2)); color: var(--accent); } }
-.cnode-pill.is-image { border-color: color-mix(in srgb, var(--accent) 30%, transparent); background: color-mix(in srgb, var(--accent) 10%, var(--surface-2)); color: var(--accent); }
-.cnode-pill.is-video { border-color: color-mix(in srgb, #8b5cf6 30%, transparent); background: color-mix(in srgb, #8b5cf6 10%, var(--surface-2)); color: #8b5cf6; }
-.cnode-pill.is-audio { border-color: color-mix(in srgb, #ec4899 30%, transparent); background: color-mix(in srgb, #ec4899 10%, var(--surface-2)); color: #ec4899; }
-.cnode-pill.is-text { border-color: color-mix(in srgb, var(--accent) 24%, transparent); background: color-mix(in srgb, var(--accent) 8%, var(--surface-2)); color: var(--text-2); }
-.cnode-pill-name { line-height: 1; }
-.cnode-pill-del { display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; margin-left: var(--sp-2); padding: 0; border: 0; border-radius: 50%; background: transparent; color: inherit; opacity: 0.6; cursor: pointer; transition: opacity var(--t-fast) var(--ease); }
-@media (hover: hover) { .cnode-pill-del:hover { opacity: 1; background: color-mix(in srgb, currentColor 16%, transparent); } }
-.cnode-pills + .cnode-prompt { padding-top: var(--sp-8); }
+.cnode-prompt { padding-top: var(--sp-8); }
 .cnode-prompt { display: block; width: 100%; min-height: 104px; max-height: 280px; padding: var(--sp-20) var(--sp-20) var(--sp-8); border: 0; outline: 0; background: transparent; color: var(--text); font-size: var(--text-body); line-height: var(--lh-body); resize: none; field-sizing: content; cursor: text; }
 /* 引用连进来的节点：提示词右下角的一个 @ */
 .cnode-panel { position: relative; }
@@ -1035,6 +1031,12 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 .cnode-at.is-slash { right: 96px; }
 @media (hover: hover) { .cnode-at:hover { background: var(--hover); color: var(--text); } }
 .cnode-prompt::placeholder { color: var(--text-3); }
+/* 提示词里引用的节点：底下垫一层同样排版的字，只给引用那几个字上底色；字是透明的，看到的还是输入框里的字。 */
+.cnode-prompt-wrap { position: relative; }
+.cnode-prompt-wrap > textarea.cnode-prompt { position: relative; z-index: 1; }
+.cnode-prompt-mirror { position: absolute; inset: 0; min-height: 0; overflow: hidden; color: transparent; white-space: pre-wrap; overflow-wrap: break-word; pointer-events: none; }
+.cnode-prompt-mirror mark { border-radius: var(--r-xs); background: color-mix(in srgb, var(--accent) 22%, transparent); color: transparent; box-shadow: 0 0 0 var(--sp-2) color-mix(in srgb, var(--accent) 22%, transparent); }
+.cnode-prompt-mirror mark.is-missing { background: color-mix(in srgb, var(--danger) 22%, transparent); box-shadow: 0 0 0 var(--sp-2) color-mix(in srgb, var(--danger) 22%, transparent); }
 .cnode-error { padding: 0 var(--sp-20) var(--sp-4); color: var(--danger); font-size: var(--text-caption); overflow-wrap: anywhere; }
 .cnode-bar { display: flex; align-items: center; gap: var(--sp-8); padding: var(--sp-8) var(--sp-12) var(--sp-12); }
 .cnode-bar .send-btn { width: var(--h-lg); height: var(--h-lg); }
