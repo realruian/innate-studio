@@ -648,7 +648,8 @@ export function Records() {
             className="filters"
           />
         </div>
-        <SearchBox label="搜索提示词" onQuery={setQuery} />
+        {/* 一条都没有时没什么可搜的，不放搜索。 */}
+        {(from.length > 0 || query) && <SearchBox label="搜索提示词" onQuery={setQuery} />}
       </div>
       <CardGrid
         list={list}

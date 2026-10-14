@@ -392,6 +392,8 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 /* Key 那一行换成输入框时，输入框占满右边 */
 .form-control.key-edit { flex: 1; }
 .form-control.key-edit .input { flex: 1; width: auto; min-width: 0; }
+/* 填 Key 的几行：名称一栏定宽，各行的输入框从同一条竖线开始，不因为名称下面的说明长短参差。 */
+.form-row:has(> .key-edit) > .form-label { flex: none; width: 200px; }
 .field-label { display: block; font-size: var(--text-caption); color: var(--text-2); }
 .modal-body > .field-label, .tab-pane > .field-label { margin-top: var(--sp-8); }
 
@@ -736,7 +738,8 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 .project-cover { display: grid; place-items: center; width: 100%; aspect-ratio: 16 / 9; padding: 0; overflow: hidden; border: 0; border-radius: var(--r-md); background: var(--surface-1); color: var(--text-off); cursor: pointer; transition: scale var(--t-quick) var(--ease-out); }
 .project-cover > img, .project-cover > video { display: block; width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
 .project-cover:active { scale: 0.98; }
-.project-new { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--sp-8); background: var(--surface-2); color: var(--text); font-size: var(--text-ui); font-weight: var(--fw-medium); }
+/* 和别的封面同一种底色：--surface-2 和叠了底图的页面几乎一样，格子看不出来。 */
+.project-new { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--sp-8); background: var(--surface-1); color: var(--text); font-size: var(--text-ui); font-weight: var(--fw-medium); }
 .project-name { margin-top: var(--sp-12); font-size: var(--text-body); font-weight: var(--fw-medium); }
 .project-date { margin-top: var(--sp-4); color: var(--text-3); font-size: var(--text-caption); font-variant-numeric: tabular-nums; }
 /* 卡片右上角的「更多」：鼠标移上来才出现，盖在封面上所以用半透明黑底白字 */

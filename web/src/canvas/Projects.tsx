@@ -139,7 +139,7 @@ export function Projects() {
         <div>
           <h1>画布</h1>
         </div>
-        <SearchBox label="搜索画布" onQuery={setQuery} />
+        {(list?.length || query) && <SearchBox label="搜索画布" onQuery={setQuery} />}
       </header>
       <div className="project-grid">
         {!query && (

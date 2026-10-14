@@ -52,7 +52,7 @@ export default function Admin() {
             name={platform}
             label={`${platform} API Key`}
             desc="Seedance、Seedream、提示词润色"
-            placeholder={`粘贴${platform}的 API Key`}
+            placeholder="粘贴 API Key"
             copyHint={`请从${platform}控制台重新复制。`}
             hasKey={hasKey}
             keyHint={keyHint}
@@ -265,6 +265,8 @@ function KeyRow({ name, label = 'API Key', desc, placeholder, copyHint = '', has
   // 输入框默认遮住内容；显示出来是为了核对粘贴的到底是不是 Key。
   const [masked, setMasked] = useState(true);
   const [saving, setSaving] = useState(false);
+  // 填了内容，「保存」才是反色的主按钮：一屏好几行没填的 Key，不该同时亮着好几个主按钮。
+  const [filled, setFilled] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (editing) input.current?.focus();
@@ -281,6 +283,7 @@ function KeyRow({ name, label = 'API Key', desc, placeholder, copyHint = '', has
     try {
       if (!(await onSave(value))) return;
       if (input.current) input.current.value = '';
+      setFilled(false);
       setMasked(true);
       setEditing(false);
     } finally {
@@ -311,13 +314,17 @@ function KeyRow({ name, label = 'API Key', desc, placeholder, copyHint = '', has
   }
   return (
     <div className="form-row">
-      <div className="form-label">{label}</div>
+      {/* 用途在还没填的时候最需要看到，所以输入状态下也写着。 */}
+      <div className="form-label">
+        {label}
+        {desc && <span className="form-desc">{desc}</span>}
+      </div>
       <div className="form-control key-edit">
-        <input ref={input} className={`input mono${masked ? ' masked' : ''}`} type="text" placeholder={placeholder} autoComplete="off" data-1p-ignore="" data-lpignore="true" aria-label={`${name}API Key`} onKeyDown={(e) => e.key === 'Enter' && submit()} />
+        <input ref={input} className={`input mono${masked ? ' masked' : ''}`} type="text" placeholder={placeholder} autoComplete="off" data-1p-ignore="" data-lpignore="true" aria-label={`${name}API Key`} onInput={(e) => setFilled(Boolean(e.currentTarget.value.trim()))} onKeyDown={(e) => e.key === 'Enter' && submit()} />
         <button className="btn" type="button" onClick={() => setMasked(!masked)}>
           {masked ? '显示' : '隐藏'}
         </button>
-        <button className="btn btn-primary" type="button" disabled={saving} onClick={submit}>
+        <button className={`btn${filled ? ' btn-primary' : ''}`} type="button" disabled={saving} onClick={submit}>
           保存
         </button>
         {hasKey && (
@@ -364,7 +371,7 @@ function MinimaxKey() {
       name={label}
       label={`${label} API Key`}
       desc="MiniMax H3"
-      placeholder={`粘贴 ${label} 的 API Key`}
+      placeholder="粘贴 API Key"
       hasKey={hasKey}
       keyHint={keyHint}
       keySource={keySource}
@@ -408,7 +415,7 @@ function AihubmixKey() {
       name={label}
       label={`${label} API Key`}
       desc="GPT Image 2.5、Nano Banana 2.1"
-      placeholder={`粘贴 ${label} 的 API Key`}
+      placeholder="粘贴 API Key"
       hasKey={hasKey}
       keyHint={keyHint}
       keySource={keySource}
@@ -452,7 +459,7 @@ function SpeechKey() {
       name={label}
       label={`${label} API Key`}
       desc="语音、音效、配乐"
-      placeholder={`粘贴${label}的 API Key`}
+      placeholder="粘贴 API Key"
       hasKey={hasKey}
       keyHint={keyHint}
       keySource={keySource}
@@ -470,6 +477,7 @@ function BillingKey() {
   const { label } = VOLC_BILLING;
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [filled, setFilled] = useState(false);
   const id = useRef<HTMLInputElement>(null);
   const secret = useRef<HTMLInputElement>(null);
 
@@ -483,6 +491,7 @@ function BillingKey() {
       await loadApp();
       await loadBalance();
       setEditing(false);
+      setFilled(false);
       toast('Access Key 已保存', 'success');
     } catch (err) {
       toast(message(err), 'error', 8000);
@@ -534,14 +543,21 @@ function BillingKey() {
           </>
         ) : (
           <>
-            <FormRow label="Access Key ID">
-              <input ref={id} className="input mono" type="text" placeholder="AKLT…" autoComplete="off" data-1p-ignore="" data-lpignore="true" aria-label="Access Key ID" />
-            </FormRow>
+            {/* ID 和 Secret 是一对，一起保存：保存键放在第二行的 Secret 后面。 */}
+            <div className="form-row">
+              <div className="form-label">
+                Access Key ID
+                <span className="form-desc">查询火山引擎余额</span>
+              </div>
+              <div className="form-control key-edit">
+                <input ref={id} className="input mono" type="text" placeholder="AKLT…" autoComplete="off" data-1p-ignore="" data-lpignore="true" aria-label="Access Key ID" />
+              </div>
+            </div>
             <div className="form-row">
               <div className="form-label">Secret Access Key</div>
               <div className="form-control key-edit">
-                <input ref={secret} className="input mono masked" type="text" placeholder="粘贴 Secret Access Key" autoComplete="off" data-1p-ignore="" data-lpignore="true" aria-label="Secret Access Key" onKeyDown={(e) => e.key === 'Enter' && save()} />
-                <button className="btn btn-primary" type="button" disabled={saving} onClick={save}>
+                <input ref={secret} className="input mono masked" type="text" placeholder="粘贴 Secret Access Key" autoComplete="off" data-1p-ignore="" data-lpignore="true" aria-label="Secret Access Key" onInput={(e) => setFilled(Boolean(e.currentTarget.value.trim()))} onKeyDown={(e) => e.key === 'Enter' && save()} />
+                <button className={`btn${filled ? ' btn-primary' : ''}`} type="button" disabled={saving} onClick={save}>
                   保存
                 </button>
                 {hasKey && (
@@ -567,6 +583,7 @@ function OtherBalances() {
   const { hasKey, keyHint, keySource } = state.app.aihubmixManage;
   const minimax = state.minimaxBalance;
   const [saving, setSaving] = useState(false);
+  const [filled, setFilled] = useState(false);
   const [unit, setUnit] = useState<'credits' | 'cny'>(minimax?.unit || 'credits');
   const [editing, setEditing] = useState(false);
   const input = useRef<HTMLInputElement>(null);
@@ -579,6 +596,7 @@ function OtherBalances() {
       await api('PUT', '/api/balance/minimax', { amount: Number(value), unit });
       await loadBalance();
       setEditing(false);
+      setFilled(false);
       toast('MiniMax 余额已更新', 'success');
     } catch (err) {
       toast(message(err), 'error');
@@ -637,7 +655,10 @@ function OtherBalances() {
           </FormRow>
         ) : (
           <div className="form-row">
-            <div className="form-label">MiniMax 余额</div>
+            <div className="form-label">
+              MiniMax 余额
+              <span className="form-desc">手动填写，按估算扣减</span>
+            </div>
             <div className="form-control key-edit">
               <Segmented
                 options={[
@@ -647,8 +668,8 @@ function OtherBalances() {
                 value={unit}
                 onChange={setUnit}
               />
-              <input ref={input} className="input" type="text" inputMode="decimal" placeholder={unit === 'credits' ? '当前积分' : '当前余额'} aria-label="MiniMax 余额" onKeyDown={(e) => e.key === 'Enter' && saveMinimax()} />
-              <button className="btn btn-primary" type="button" disabled={saving} onClick={saveMinimax}>
+              <input ref={input} className="input" type="text" inputMode="decimal" placeholder={unit === 'credits' ? '当前积分' : '当前余额'} aria-label="MiniMax 余额" onInput={(e) => setFilled(Boolean(e.currentTarget.value.trim()))} onKeyDown={(e) => e.key === 'Enter' && saveMinimax()} />
+              <button className={`btn${filled ? ' btn-primary' : ''}`} type="button" disabled={saving} onClick={saveMinimax}>
                 保存
               </button>
               {minimax && (
@@ -663,7 +684,7 @@ function OtherBalances() {
           name="AiHubMix Manage "
           label="AiHubMix Manage Key"
           desc="查询 AiHubMix 余额"
-          placeholder="粘贴 AiHubMix 的 Manage Key"
+          placeholder="粘贴 Manage Key"
           hasKey={hasKey}
           keyHint={keyHint}
           keySource={keySource}

@@ -122,7 +122,7 @@ export function Characters() {
         <div>
           <h1>角色</h1>
         </div>
-        <SearchBox label="搜索角色" onQuery={setQuery} />
+        {(list?.length || query) && <SearchBox label="搜索角色" onQuery={setQuery} />}
       </header>
       <div className="project-grid character-grid">
         {!query && (

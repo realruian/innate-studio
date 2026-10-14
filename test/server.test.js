@@ -732,6 +732,10 @@ test('画布：新建、保存、读回、改名、删除', async () => {
   assert.match(created.data.id, /^cv_/);
   assert.equal(created.data.name, '未命名画布');
   const { id } = created.data;
+  // 没起名字的接着编号，不重名。
+  const second = await call('POST', '/api/canvases', {});
+  assert.equal(second.data.name, '未命名画布 2');
+  assert.equal((await call('DELETE', `/api/canvases/${second.data.id}`)).status, 204);
 
   const nodes = [{ id: 'n1', type: 'text', position: { x: 10, y: 20 }, data: { text: '一只猫' } }, { id: 'n2', type: 'video', position: { x: 400, y: 20 }, data: { prompt: '', model: 'seedance-2.0' } }];
   const edges = [{ id: 'e1', source: 'n1', target: 'n2', type: 'link', data: { kind: 'text' } }];

@@ -21,10 +21,18 @@ function findCanvas(space, id) {
 
 route('GET', /^\/api\/canvases$/, async ({ space }) => ({ items: space.canvases.map(canvasMeta).sort((a, b) => b.updatedAt - a.updatedAt) }));
 
+// 没起名字的新画布：已经有「未命名画布」了就叫「未命名画布 2」「未命名画布 3」，列表里一排同名的分不开。
+function freshName(space) {
+  const taken = new Set(space.canvases.map((c) => c.name));
+  let n = 1;
+  while (taken.has(n === 1 ? '未命名画布' : `未命名画布 ${n}`)) n += 1;
+  return n === 1 ? '未命名画布' : `未命名画布 ${n}`;
+}
+
 route('POST', /^\/api\/canvases$/, async ({ req, space }) => {
   const { name } = await readJsonBody(req);
   const now = Date.now();
-  const canvas = { id: newId('cv'), name: canvasName(name), nodes: [], edges: [], viewport: null, cover: null, createdAt: now, updatedAt: now };
+  const canvas = { id: newId('cv'), name: String(name || '').trim() ? canvasName(name) : freshName(space), nodes: [], edges: [], viewport: null, cover: null, createdAt: now, updatedAt: now };
   space.canvases.push(canvas);
   space.save('canvases');
   return canvas;
