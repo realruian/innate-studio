@@ -393,7 +393,9 @@ export function setStudio(type: 'image' | 'speech' | 'sfx' | 'music', next: Reco
 // 拿一张生成的图片去生成视频：当作参考图（全能参考）。模型照着图里的人和物另拍一段，不要求视频从这张图原样开始；
 // 想让视频严格从这张图开始，再手动改成首尾帧。
 export async function useImageForVideo(item: HistoryItem) {
-  Object.assign(composer.form, { mode: 'reference', refs: { image: [await refFromRecord(item)], video: [], audio: [] } });
+  // 从卡片拿过来的是一件新的事：上一次写到一半的提示词不带着，免得连着旧字一起发出去。
+  Object.assign(composer.form, { mode: 'reference', refs: { image: [await refFromRecord(item)], video: [], audio: [] }, prompt: '' });
+  composer.beforePolish = null;
   setType('video');
   goTo('create');
 }
@@ -401,8 +403,16 @@ export async function useImageForVideo(item: HistoryItem) {
 // 把角色的参考图变成一组本机的参考素材。
 export const refsFromCharacter = (character: Character): Ref[] => character.images.map((url) => ({ uid: crypto.randomUUID(), kind: 'image', source: 'local', url, name: character.name, thumb: url }));
 
-// 拿一个角色去生成图片或视频：把它的参考图加进输入框，已经加好的素材留着；提示词空着的话，先填上角色的描述。
+// 拿一个角色去生成图片或视频：把它的参考图加进输入框，已经加好的素材留着；角色的描述接在提示词后面（空着就是它本身），
+// 常见的顺序是先写要做什么、再选角色，只在空着时才填的话描述就用不上了。已经写进去的不重复加。
 // 图片：当参考图（图生图），当前模型不收参考图就换成第一个收的。视频：当参考图。
+const withDescription = (prompt: string, description: string) => {
+  const text = prompt.trim();
+  const extra = (description || '').trim();
+  if (!extra || text.includes(extra)) return prompt;
+  return text ? `${text}\n${extra}` : extra;
+};
+
 export function useCharacter(character: Character, type: 'image' | 'video') {
   const refs = refsFromCharacter(character);
   if (!refs.length) throw new Error('该角色暂无参考图，请先添加');
@@ -413,11 +423,11 @@ export function useCharacter(character: Character, type: 'image' | 'video') {
     const model = [studio.image.model, ...state.catalog.image].find((id) => imageRefLimit(id) > 0);
     if (!model) throw new Error('暂无支持参考图的图片模型');
     Object.assign(studio.image, { model, refs: merged(studio.image.refs || []).slice(0, imageRefLimit(model)) });
-    if (!studio.image.prompt.trim()) studio.image.prompt = character.description;
+    studio.image.prompt = withDescription(studio.image.prompt, character.description);
     fitImage();
   } else {
     Object.assign(form, { mode: 'reference', refs: { ...form.refs, image: merged(form.refs.image).slice(0, KINDS.image.max) } });
-    if (!form.prompt.trim()) form.prompt = character.description;
+    form.prompt = withDescription(form.prompt, character.description);
     fitModel();
   }
   setType(type);
@@ -426,7 +436,9 @@ export function useCharacter(character: Character, type: 'image' | 'video') {
 
 // 给一条已经存到本机的视频配乐：把它放进配乐的输入框，等用户写上要什么样的音乐再提交。
 export async function useVideoForMusic(item: HistoryItem) {
-  composer.studio.music = { ...composer.studio.music, video: await refFromRecord(item) };
+  // 同上：换了一条要配的视频，旧的描述不留。
+  composer.studio.music = { ...composer.studio.music, video: await refFromRecord(item), prompt: '' };
+  composer.beforePolish = null;
   setType('music');
   goTo('create');
 }

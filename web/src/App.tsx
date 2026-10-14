@@ -74,13 +74,13 @@ function Workbench() {
         <div className="sidebar-foot">
           {/* 管理入口：Key、余额、成员和积分。多人模式下只有管理员有。缺少 API Key 时带一个提醒点。 */}
           {canManage() && (
-            <button className="nav-item" type="button" onClick={openAdmin}>
+            <button className="nav-item" type="button" aria-label="管理" onClick={openAdmin}>
               <Icon name="sliders" stroke={NAV_STROKE} />
               <span>管理</span>
               {!state.app.hasKey && <span className="dot dot-warn nav-dot" {...tip(NO_KEY)} aria-label={NO_KEY} />}
             </button>
           )}
-          <button className="nav-item" type="button" onClick={openSettings}>
+          <button className="nav-item" type="button" aria-label="设置" onClick={openSettings}>
             <Icon name="gear" stroke={NAV_STROKE} />
             <span>设置</span>
           </button>

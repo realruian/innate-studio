@@ -20,6 +20,8 @@ function Editor({ character, done }: { character: Partial<Character>; done: () =
   const description = useRef<HTMLTextAreaElement>(null);
   const [images, setImages] = useState(character.images || []);
   const [saving, setSaving] = useState(false);
+  // 出错的原因写在表单里，和改密码一样。
+  const [error, setError] = useState('');
   useEffect(() => {
     const timer = setTimeout(() => name.current?.focus(), 0);
     return () => clearTimeout(timer);
@@ -27,14 +29,18 @@ function Editor({ character, done }: { character: Partial<Character>; done: () =
 
   async function save() {
     const body = { name: name.current!.value, description: description.current!.value, images };
-    if (!body.name.trim()) return toast('请输入角色名称', 'info');
+    if (!body.name.trim()) {
+      name.current!.focus();
+      return setError('请输入角色名称');
+    }
     setSaving(true);
+    setError('');
     try {
       await (character.id ? api('PUT', `/api/characters/${character.id}`, body) : api('POST', '/api/characters', body));
       await loadCharacters();
       done();
     } catch (err) {
-      toast(message(err), 'error', 6000);
+      setError(message(err));
       setSaving(false);
     }
   }
@@ -62,6 +68,9 @@ function Editor({ character, done }: { character: Partial<Character>; done: () =
         )}
       </div>
       <p className="muted small">建议上传正脸、全身、侧面各一张</p>
+      <p className="form-error" role="alert">
+        {error}
+      </p>
       <div className="modal-actions">
         <button className="btn btn-primary" disabled={saving} onClick={save}>
           保存

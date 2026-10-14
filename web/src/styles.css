@@ -1115,6 +1115,15 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
   .more-popover, .frame-popover, .duration-popover, .voice-popover { width: calc(100vw - 16px); }
 }
 
+/* 手机：顶栏只占两行。第一行品牌在左，管理、设置在右，只留图标；第二行是导航，放不下就横着滑，不折行。 */
+@media (max-width: 560px) {
+  .sidebar { flex-wrap: wrap; }
+  .sidebar-foot { display: flex; gap: var(--sp-2); order: 1; }
+  .sidebar-foot .nav-item > span:not(.icon, .dot) { display: none; }
+  .nav { flex-wrap: nowrap; order: 2; width: 100%; overflow-x: auto; scrollbar-width: none; }
+  .nav::-webkit-scrollbar { display: none; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }

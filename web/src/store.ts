@@ -134,6 +134,18 @@ export function setImmersive(on: boolean) {
   emit('immersive');
 }
 
+// 地址自己变了（粘贴了画布链接、浏览器的后退和前进）：页面跟着走。goTo 用 replaceState 改地址，不会走到这里。
+// 画布里面换哪一张由画布列表自己听；这里只管进出画布页。
+if (typeof window !== 'undefined') {
+  window.addEventListener('hashchange', () => {
+    const onCanvas = hash().startsWith('#/canvas');
+    if (onCanvas === (state.view === 'canvas')) return;
+    state.view = onCanvas ? 'canvas' : 'create';
+    setImmersive(Boolean(canvasInPath()));
+    emit('view');
+  });
+}
+
 // 多人模式下还没登录：这时只显示登录页。
 export const needsLogin = () => state.app.hosted && !state.app.user;
 export const isAdmin = () => state.app.user?.role === 'admin';
