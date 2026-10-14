@@ -2,7 +2,8 @@
 // 改了任何界面代码之后都要跑，深色、浅色各一遍。
 //
 // 前提：npm run dev:mock 已在运行（http://127.0.0.1:5179，接的是模拟接口）。它启动时会构建页面，改了界面要重新运行。
-// 用法：aside repl "$(sed 's/__THEME__/light/' test/ui-walkthrough.aside.js)"
+// 用法：npm run walkthrough（用 Ego 跑，深色、浅色各一遍，见 test/ui-walkthrough.mjs）。
+// 也能直接给 Aside：aside repl "$(sed 's/__THEME__/light/' test/ui-walkthrough.aside.js)"
 //
 // 每个状态都检查：
 // - 没有页面报错
@@ -755,9 +756,15 @@ const cardSounding = await pg.evaluate(() => {
   audio.loop = true;
   return !audio.paused && audio.readyState >= 2;
 });
-if (cardSounding) {
-  await must('再打开音色面板', click('[data-control=voice]'));
-  await sleep(300);
+// 豆包语音的音色没有试听地址（2026-10-09 起），面板里没有「试听」键时这一项不查。
+await must('再打开音色面板', click('[data-control=voice]'));
+await sleep(300);
+const canPreview = (await count('.voice-popover .voice-row .entry-action-btn')) > 0;
+if (!canPreview) {
+  await escape();
+  await sleep(200);
+}
+if (cardSounding && canPreview) {
   await pg.locator('.voice-popover .voice-row .entry-action-btn').first().click();
   await sleep(300);
   const quiet = await pg.evaluate(() => { const audio = document.querySelector('.view-create .card audio'); return { paused: audio.paused, time: audio.currentTime }; });
@@ -937,43 +944,7 @@ const failed = await pg.evaluate((v) => {
 if (!failed) problems.push('记录里没有失败的任务，失败卡片的样子没有测到');
 else if (failed.mark !== 1 || !failed.title || !failed.reason || !failed.inside || failed.titleColour === failed.markColour) problems.push(`失败卡片不对：${JSON.stringify(failed)}`);
 
-// 7. 素材库
-await must('进入素材库', clickText('.nav-item', '素材库'));
-await sleep(500);
-if (!(await count('.asset-card'))) problems.push('素材库里没有刚上传的素材');
-await audit('素材库');
-await shot('09-library');
-await must('打开添加素材', click('.page-head .btn-primary'));
-await sleep(300);
-await must('切到用链接创建', click('.modal .tabs .seg', 1));
-await sleep(200);
-await audit('添加素材弹窗');
-await escape();
-await sleep(200);
-await must('点素材的删除', click('.asset-card .entry-action-btn.danger', 0));
-await sleep(300);
-await audit('删除素材弹窗');
-await must('取消', clickText('.modal .btn', '取消'));
-await sleep(200);
-
-// 8. 真人档案：新建 → 认证链接 → 列表与详情
-await must('进入真人档案', clickText('.nav-item', '真人档案'));
-await sleep(900);
-await audit('真人档案');
-await must('打开新建档案', clickText('.page-head .btn', '新建档案'));
-await sleep(300);
-await pg.locator('.modal input[type=text]').fill(`走查档案 ${THEME}`);
-await must('创建档案', clickText('.modal .btn', '创建档案'));
-await sleep(1200);
-if (!(await pg.evaluate(() => document.querySelector('.modal input[readonly]')?.value.startsWith('https://')))) problems.push('创建档案后没有显示认证链接');
-await audit('认证链接弹窗');
-await escape();
-await sleep(300);
-if (!(await count('.person-item'))) problems.push('档案列表里没有新建的档案');
-await must('选中档案', click('.person-item', 0));
-await sleep(900);
-await audit('真人档案详情');
-await shot('10-persons');
+// 7、8 原来是素材库和真人档案：只有 Flatkey 有，2026-10-09 去掉 Flatkey 时一起去掉了。
 
 // 9. 设置：只有一个入口；外观在设置里；切换主题整页生效
 if ((await count('.sidebar-foot .nav-item')) !== 1 || (await count('.sidebar-foot > *')) !== 1) problems.push('侧栏底部不是只有「设置」一项');

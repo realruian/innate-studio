@@ -395,10 +395,10 @@
 
 ```bash
 # 给三个示例文件，模拟出来的视频、图片、音频才能真的显示和播放。dev:mock 会先把页面构建一遍，所以改了界面要重新运行它
-# 走查脚本要在 Aside 的两分钟限制内跑完，所以把模拟的任务和素材处理时间调短
+# 把模拟的任务和素材处理时间调短，走查不用干等
 MOCK_TASK_SECONDS=8 MOCK_ASSET_SECONDS=4 MOCK_SAMPLE=/path/to/video.mp4 MOCK_IMAGE=/path/to/image.jpg MOCK_AUDIO=/path/to/audio.mp3 npm run dev:mock
-aside repl "$(sed 's/__THEME__/light/' test/ui-walkthrough.aside.js)"
-aside repl "$(sed 's/__THEME__/dark/' test/ui-walkthrough.aside.js)"
+# 用 Ego 跑，深色、浅色各一遍，截图在 test/.tmp/walkthrough/。Ego 要停在走查的任务空间上，标签页在后台时不渲染、会超时
+npm run walkthrough
 ```
 
 脚本会把创作页、三种模式、每个菜单和浮层、选素材弹窗、提交、详情、素材库、真人档案、设置依次打开，并在每个状态检查：
