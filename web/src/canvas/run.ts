@@ -2,7 +2,9 @@
 // 结果是一条普通的生成记录，节点只记它的 id，进度跟着「创作记录」的轮询走。
 
 import type { Edge, Node, ReactFlowInstance } from '@xyflow/react';
-import { api, state, KINDS, startHistoryLoop, loadHistory, polishModel, canManage } from '../store.ts';
+import { api, state, KINDS, startHistoryLoop, loadHistory, polishModel, canManage, usesCredits } from '../store.ts';
+import { fmtCredits, fmtYuan } from '../format.ts';
+import { quoteCost, toCredits } from '../../../shared/models.ts';
 import { defaults, fitImageQuality, fitImageSize, hasLastFrame, imageRefLimit, specOf } from '../composer/state.ts';
 import { buildVideoRequest, buildImageRequest, buildSpeechRequest, buildSfxRequest } from '../request.ts';
 import { recordName } from '../media.ts';
@@ -25,7 +27,8 @@ export function outputOf(node: Node): { url: string; kind: Kind; name: string } 
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-async function submitVideo(node: Node, sources: { link: LinkData; node: Node }[], prompt: string, say: (text: string) => void) {
+// 拼视频节点的请求。forQuote：只是为了估价，上游还没生成的素材先用一个占位顶上（批量生成时下游要等上游出结果），只要知道有几份就行。
+function videoRequest(node: Node, sources: { link: LinkData; node: Node }[], prompt: string, forQuote = false) {
   const data = node.data as unknown as VideoData;
   const media = sources.filter((s) => s.link.kind !== 'text');
   const counts: Record<Kind, number> = { image: 0, video: 0, audio: 0 };
@@ -45,7 +48,7 @@ async function submitVideo(node: Node, sources: { link: LinkData; node: Node }[]
 
   for (const { link, node: source } of media) {
     const kind = link.kind as Kind;
-    const output = outputOf(source);
+    const output = outputOf(source) || (forQuote ? { url: '', name: '' } : null);
     if (!output) throw new Error(`上游${NODE_LABELS[kind]}节点尚未生成`);
     if (++counts[kind] > KINDS[kind].max) throw new Error(`参考${NODE_LABELS[kind]}最多 ${KINDS[kind].max} 个`);
     const role = kind === 'image' ? link.role || 'reference' : 'reference';
@@ -55,15 +58,20 @@ async function submitVideo(node: Node, sources: { link: LinkData; node: Node }[]
   const { form, problems } = videoFormFrom(defaults(), data, prompt, inputs);
   const request = buildVideoRequest(form, specOf(data.model));
   const problem = problems[0] || request.problems[0];
-  if (problem) throw new Error(problem);
+  if (problem && !forQuote) throw new Error(problem);
+  return { form, payload: request.payload };
+}
+
+async function submitVideo(node: Node, sources: { link: LinkData; node: Node }[], prompt: string, say: (text: string) => void) {
+  const { form, payload } = videoRequest(node, sources, prompt);
   say('正在提交');
-  return (await api<HistoryItem>('POST', '/api/videos', { payload: request.payload, form: { ...form, ...FROM_CANVAS } })).id;
+  return (await api<HistoryItem>('POST', '/api/videos', { payload, form: { ...form, ...FROM_CANVAS } })).id;
 }
 
 // 画布上提交的记录带着这个记号：创作页的「最近生成」不列它们，记录页里切到「画布」才看。
 const FROM_CANVAS = { from: 'canvas' };
 
-async function submitImage(node: Node, sources: { link: LinkData; node: Node }[], prompt: string, given?: { url: string; name: string }[]) {
+function imageRequest(node: Node, sources: { link: LinkData; node: Node }[], prompt: string, given?: { url: string; name: string }[], forQuote = false) {
   const data = node.data as unknown as ImageData;
   const selfOutput = outputOf(node);
   const hasWireImages = sources.some((s) => s.link.kind === 'image');
@@ -78,7 +86,7 @@ async function submitImage(node: Node, sources: { link: LinkData; node: Node }[]
     refs = sources
       .filter((s) => s.link.kind === 'image')
       .map((s) => {
-        const output = outputOf(s.node);
+        const output = outputOf(s.node) || (forQuote ? { url: '', name: '' } : null);
         if (!output) throw new Error('上游图片节点尚未生成');
         return { uid: crypto.randomUUID(), kind: 'image' as const, source: 'local' as const, url: output.url, name: output.name, thumb: null };
       });
@@ -86,29 +94,33 @@ async function submitImage(node: Node, sources: { link: LinkData; node: Node }[]
     refs = [{ uid: crypto.randomUUID(), kind: 'image' as const, source: 'local' as const, url: selfOutput.url, name: selfOutput.name, thumb: null }];
   }
 
-  if (limit > 0 && refs.length > limit) {
-    refs = refs.slice(0, limit);
-    toast(`已自动取前 ${limit} 张参考图`, 'info', 3000);
-  }
+  const trimmed = limit > 0 && refs.length > limit;
+  if (trimmed) refs = refs.slice(0, limit);
 
   const form = { prompt, model: data.model, ratio: data.ratio, resolution: fitImageSize(data.model, data.resolution), quality: fitImageQuality(data.model, data.quality), count: data.count || 1, refs };
   const request = buildImageRequest(form, limit);
-  if (request.problems.length) throw new Error(request.problems[0]);
-  return (await api<{ items: HistoryItem[] }>('POST', '/api/images', { payload: request.payload, form: { type: 'image', ...form, ...FROM_CANVAS } })).items.map((item) => item.id);
+  if (request.problems.length && !forQuote) throw new Error(request.problems[0]);
+  return { form, payload: request.payload, trimmed: trimmed ? limit : 0 };
+}
+
+async function submitImage(node: Node, sources: { link: LinkData; node: Node }[], prompt: string, given?: { url: string; name: string }[]) {
+  const { form, payload, trimmed } = imageRequest(node, sources, prompt, given);
+  if (trimmed) toast(`已自动取前 ${trimmed} 张参考图`, 'info', 3000);
+  return (await api<{ items: HistoryItem[] }>('POST', '/api/images', { payload, form: { type: 'image', ...form, ...FROM_CANVAS } })).items.map((item) => item.id);
+}
+
+function audioRequest(node: Node, prompt: string, forQuote = false) {
+  const data = node.data as unknown as AudioData;
+  const tool = data.tool === 'sfx' ? 'sfx' : 'speech';
+  const form = tool === 'sfx' ? { prompt, duration: 'auto' } : { prompt, voiceId: data.voiceId, voiceName: data.voiceName };
+  const request = tool === 'sfx' ? buildSfxRequest(form as { prompt: string; duration: string }) : buildSpeechRequest(form as { prompt: string; voiceId: string; voiceName: string });
+  if (request.problems.length && !forQuote) throw new Error(request.problems[0]);
+  return { tool, form, body: request.body };
 }
 
 async function submitAudio(node: Node, prompt: string) {
-  const data = node.data as unknown as AudioData;
-  if (data.tool === 'sfx') {
-    const form = { prompt, duration: 'auto' };
-    const request = buildSfxRequest(form);
-    if (request.problems.length) throw new Error(request.problems[0]);
-    return (await api<HistoryItem>('POST', '/api/audio/sfx', { ...request.body, form: { type: 'sfx', ...form, ...FROM_CANVAS } })).id;
-  }
-  const form = { prompt, voiceId: data.voiceId, voiceName: data.voiceName };
-  const request = buildSpeechRequest(form);
-  if (request.problems.length) throw new Error(request.problems[0]);
-  return (await api<HistoryItem>('POST', '/api/audio/speech', { ...request.body, form: { type: 'speech', ...form, ...FROM_CANVAS } })).id;
+  const { tool, form, body } = audioRequest(node, prompt);
+  return (await api<HistoryItem>('POST', `/api/audio/${tool}`, { ...body, form: { type: tool, ...form, ...FROM_CANVAS } })).id;
 }
 
 // 一个节点显示出来的名字：图片 1。提示词里 @ 的就是它。
@@ -237,6 +249,35 @@ const RUN_WAIT_MS = 20 * 60 * 1000;
 
 // 把一批节点按上游到下游的顺序挨个生成。只动还没有内容的节点：已经有内容的当作现成的输入，不重新生成。
 // 每个节点要等它出了结果才轮到下一个，因为下游要拿它的结果当输入。中途有一个失败就停下。
+// 这个节点生成一次大约多少钱（元），和创作页、服务端预扣用的是同一个算法（shared/models.ts 的 quoteCost）。
+// 估不出来（没登记价格的型号、拼不出请求）是 null。视频要几段就算几段，图片要几张就算几张。
+export function quoteNode(flow: Flow, id: string): number | null {
+  const node = flow.getNode(id);
+  if (!node || node.type === 'text') return 0;
+  const sources = flow
+    .getEdges()
+    .filter((edge) => edge.target === id)
+    .map((edge) => ({ link: edge.data as unknown as LinkData, node: flow.getNode(edge.source)! }))
+    .filter((s) => s.node);
+  const prompt = promptOf(sources, (node.data as AnyData).prompt || '');
+  try {
+    if (node.type === 'video') {
+      const payload = videoRequest(node, sources, prompt, true).payload || {};
+      const yuan = quoteCost({ kind: 'video', model: String(payload.model || ''), payload });
+      return yuan == null ? null : yuan * Math.max(1, Number((node.data as AnyData).count) || 1);
+    }
+    if (node.type === 'image') {
+      const payload = imageRequest(node, sources, prompt, undefined, true).payload || {};
+      const yuan = quoteCost({ kind: 'image', model: String(payload.model || ''), payload });
+      return yuan == null ? null : yuan * (Number(payload.n) || 1);
+    }
+    const { tool, body } = audioRequest(node, prompt, true);
+    return quoteCost({ tool, prompt: String(body?.text || ''), payload: { duration_seconds: body?.duration } });
+  } catch {
+    return null;
+  }
+}
+
 // 一次要生成好几个节点之前问一句：要生成几个、各是什么，已经有结果的几个会不会被重新生成。只有文本节点（不花钱）时不问。
 export async function confirmRun(flow: Flow, ids: string[]) {
   const all = ids.map((id) => flow.getNode(id)).filter((node): node is Node => Boolean(node));
@@ -246,7 +287,14 @@ export async function confirmRun(flow: Flow, ids: string[]) {
   const counts = (['video', 'image', 'audio', 'text'] as NodeKind[]).map((kind) => [kind, all.filter((n) => n.type === kind).length] as const).filter(([, n]) => n);
   const redo = nodes.filter((n) => isFilled(n.data as AnyData)).length;
   const what = `${counts.map(([kind, n]) => `${NODE_LABELS[kind]} ${n} 个`).join('、')}，按连线的先后依次生成。`;
-  return confirmDialog({ title: `生成 ${ids.length} 个节点？`, message: redo ? `${what}其中 ${redo} 个已有结果，会重新生成。` : what, okText: '开始生成' });
+  // 合计大约要花多少：多人模式的成员说积分（和发送键旁边一样），其余说元。有估不出来的单独说。
+  const quotes = nodes.map((node) => quoteNode(flow, node.id));
+  const known = quotes.filter((q): q is number => q != null);
+  const total = known.reduce((sum, q) => sum + q, 0);
+  const unknown = quotes.length - known.length;
+  const cost = known.length ? `预计花费约 ${usesCredits() ? fmtCredits(known.reduce((sum, q) => sum + toCredits(q), 0)) : fmtYuan(total)}${unknown ? `，另有 ${unknown} 个无法估算` : ''}。` : '';
+  const short = usesCredits() && state.credits != null && known.length ? known.reduce((sum, q) => sum + toCredits(q), 0) > state.credits : false;
+  return confirmDialog({ title: `生成 ${ids.length} 个节点？`, message: `${redo ? `${what}其中 ${redo} 个已有结果，会重新生成。` : what}${cost}${short ? `剩余 ${fmtCredits(state.credits!)}，可能不够全部生成。` : ''}`, okText: '开始生成' });
 }
 
 export async function runAll(flow: Flow, ids: string[], snap: () => void) {
