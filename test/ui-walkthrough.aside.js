@@ -251,7 +251,7 @@ if (pinned) {
   }, P);
   if (!cardMenu) problems.push('点卡片的「更多」没有打开菜单');
   else {
-    if (cardMenu.items !== '下载|复用|延长|编辑|配乐|详情|删除') problems.push(`已完成视频卡片的菜单项不对：${cardMenu.items}`);
+    if (cardMenu.items !== '下载|复用参数|配乐|详情|删除') problems.push(`已完成视频卡片的菜单项不对：${cardMenu.items}`);
     if (!cardMenu.aligned) problems.push('「更多」的菜单没有和按钮右对齐');
   }
   if (await count('.modal')) problems.push('点「更多」不应该打开详情');
@@ -295,8 +295,9 @@ if ((await count('.menu .menu-item')) < 2) problems.push('模型菜单没有出�
 if ((await count('.menu .menu-item.selected .menu-item-check svg')) !== 1) problems.push('模型菜单没有标出当前项');
 // 型号后面的附注说的是它在同一代里是哪一档：同一族的要么都标，要么都不标，不能只标其中一个
 const modelNotes = Object.fromEntries(await pg.evaluate(() => [...document.querySelectorAll('.menu .menu-item')].map((e) => [e.querySelector('.menu-item-label').textContent, e.querySelector('.menu-item-note')?.textContent || ''])));
-if (modelNotes['seedance-2.0'] !== '' || modelNotes['seedance-2.0-fast'] !== '快速版' || modelNotes['grok-imagine-video'] !== '') problems.push(`型号的附注不对：${JSON.stringify(modelNotes)}`);
-if ('seedance2.0-pro' in modelNotes) problems.push('模型菜单里列出了走不通的型号 seedance2.0-pro');
+// 菜单里写的是官方叫法（Seedance 2.0 Fast），不是型号本身。所在平台没配 Key 的型号附注是「未配置 Key」。
+if (modelNotes['Seedance 2.0'] !== '' || modelNotes['Seedance 2.0 Fast'] !== '快速版' || modelNotes['Seedance 2.0 Mini'] !== '轻量版') problems.push(`型号的附注不对：${JSON.stringify(modelNotes)}`);
+if (Object.keys(modelNotes).some((name) => /^doubao-/.test(name))) problems.push('模型菜单里出现了型号原名');
 await audit('模型菜单');
 await shot('02-model-menu');
 await escape();
@@ -339,15 +340,13 @@ if (!(await count('.more-popover'))) problems.push('更多面板没有出现');
 if (await pg.evaluate(() => /请求/.test(document.querySelector('.more-popover')?.textContent || '') || Boolean(document.querySelector('.more-popover pre')))) problems.push('更多面板里不应该出现请求预览');
 if ((await layout()) !== layoutBefore) problems.push(`打开面板后输入框或记录的位置变了：${layoutBefore} → ${await layout()}`);
 await audit('更多面板');
-await must('打开画质超分', click('.more-popover .switch input', 3));
+// Seedance 2.0 的「更多」里是生成有声视频和随机种子。拨一下开关，面板不能因此关掉。
+await must('拨生成有声视频', click('.more-popover .switch input', 0));
 await sleep(250);
-await must('打开场景菜单', click('.more-popover .sub-panel .dropdown', 0));
-await sleep(250);
-await audit('更多面板里的菜单');
 await shot('04-more');
-await must('选短剧', clickText('.menu .menu-item', '短剧'));
-await sleep(250);
-if (!(await count('.more-popover'))) problems.push('在更多面板里选完菜单后，面板被一起关掉了');
+if (!(await count('.more-popover'))) problems.push('在更多面板里拨开关后，面板被一起关掉了');
+await must('拨回生成有声视频', click('.more-popover .switch input', 0));
+await sleep(200);
 if (await count('.more-dot')) problems.push('「更多」上不应该再有提示点');
 await outsideClick();
 await sleep(200);
@@ -366,9 +365,9 @@ await sleep(350);
 if (await count('.menu')) problems.push('点添加参考不应该先出一个选类型的菜单');
 if ((await text('.modal .modal-head h2')).join('') !== '添加参考素材') problems.push(`选素材弹窗的标题不对：${(await text('.modal .modal-head h2')).join('')}`);
 await audit('选素材弹窗');
-await must('切到真人素材', clickText('.modal .tabs .seg', '真人素材'));
-await sleep(900);
-await audit('选素材弹窗·真人素材');
+await must('切到角色', clickText('.modal .tabs .seg', '角色'));
+await sleep(500);
+await audit('选素材弹窗·角色');
 await must('切回本地上传', click('.modal .tabs .seg', 0));
 await sleep(200);
 // 超过大小上限的文件：不发出去，直接说明原因（不能显示成"连不上本地服务"）
@@ -421,7 +420,7 @@ if ((await text('.view-create .feed-head h2')).join('') !== '最近生成') prob
 if ((await count('.view-create h1')) !== 1) problems.push('创作页应该只有一个一级标题（首屏问句），「最近生成」是二级标题');
 const sideText = (await text('.sidebar')).join('');
 if ((await count('.side-list, .side-row')) || sideText.includes('最近生成')) problems.push('侧栏里不应该有「最近生成」列表');
-if ((await text('.sidebar .nav-item')).join('|') !== '创作|画布|创作记录|角色|技能|素材库|真人档案|设置') problems.push(`侧栏的入口不对：${(await text('.sidebar .nav-item')).join('|')}`);
+if ((await text('.sidebar .nav-item')).join('|') !== '创作|画布|创作记录|角色|技能|管理|设置') problems.push(`侧栏的入口不对：${(await text('.sidebar .nav-item')).join('|')}`);
 await audit('提交后');
 await shot('06-submitted');
 
@@ -439,7 +438,7 @@ await escape();
 await sleep(200);
 await must('打开生成中卡片的更多', click('.view-create .card:first-child .card-more', 0));
 await sleep(300);
-if ((await text('.menu .menu-item')).join('|') !== '刷新|复用|详情|删除') problems.push(`生成中卡片的菜单项不对：${(await text('.menu .menu-item')).join('|')}`);
+if ((await text('.menu .menu-item')).join('|') !== '刷新|复用参数|详情|删除') problems.push(`生成中卡片的菜单项不对：${(await text('.menu .menu-item')).join('|')}`);
 await escape();
 await sleep(200);
 await must('点生成中卡片的画面', click('.card .card-state.is-pending', 0));
@@ -473,7 +472,7 @@ const detail = await pg.evaluate(() => {
 });
 // 「参考素材」这一组只有用了素材的记录才有。
 if (!['提示词|参考素材|生成参数|任务信息', '提示词|生成参数|任务信息'].includes(detail.titles)) problems.push(`详情右侧的分组不对：${detail.titles}`);
-if (detail.actions !== '下载视频|复用参数|延长|编辑|配乐' || detail.buttonsOutside || !detail.actionsAtBottom) problems.push(`详情的操作应该都在右栏最下面：${detail.actions}，别处的按钮 ${detail.buttonsOutside} 个`);
+if (detail.actions !== '下载视频|复用参数|配乐' || detail.buttonsOutside || !detail.actionsAtBottom) problems.push(`详情的操作应该都在右栏最下面：${detail.actions}，别处的按钮 ${detail.buttonsOutside} 个`);
 if (detail.nav !== '上一条|下一条') problems.push(`详情里应该有上一条、下一条：${detail.nav}`);
 // 上一条、下一条：换了内容，弹窗的大小不变；方向键也能换
 const detailStep = async (how) => {
@@ -582,7 +581,7 @@ if (await count('.modal')) problems.push('点「复用参数」后详情弹窗�
 if (!(await count('.view-create:not([hidden])'))) problems.push('点「复用参数」后没有回到创作页');
 if (!(await pg.evaluate(() => document.querySelector('textarea.prompt').value.includes('工作室')))) problems.push('点「复用参数」后提示词没有填回输入框');
 
-// 6c. 视频之外的四种创作：图片、语音、音效、配乐；以及提示词润色、Grok 视频
+// 6c. 视频之外的四种创作：图片、语音、音效、配乐；以及提示词润色、没配 Key 的型号、首尾帧
 const typeSeg = (label) => clickText('.type-switch .seg', label);
 const composer = () =>
   pg.evaluate(() => ({
@@ -647,10 +646,12 @@ await sleep(200);
 await audit('图片·数量菜单');
 await must('选 2 张', clickText('.menu .menu-item', '2 张'));
 await sleep(200);
-await must('打开比例菜单', click('[data-control=ratio]'));
+// 图片的画面是比例加分辨率的面板，和视频的一样。
+await must('打开画面面板', click('.composer-params [data-control=frame]'));
 await sleep(200);
 await shot('12-image');
-await must('选 9:16', clickText('.menu .menu-item', '9:16'));
+await must('选 9:16', clickText('.frame-popover .ratio-option', '9:16'));
+await escape();
 await sleep(200);
 await markOld();
 await must('生成图片', click('.send-btn'));
@@ -660,7 +661,7 @@ await pg.locator('.view-create .card .card-media').first().hover();
 await sleep(350);
 await must('打开图片卡片的更多', click('.view-create .card .card-more', 0));
 await sleep(300);
-if ((await text('.menu .menu-item')).join('|') !== '下载|复用|生成视频|存为角色|详情|删除') problems.push(`图片卡片的菜单项不对：${(await text('.menu .menu-item')).join('|')}`);
+if ((await text('.menu .menu-item')).join('|') !== '下载|复用参数|生成视频|存为角色|详情|删除') problems.push(`图片卡片的菜单项不对：${(await text('.menu .menu-item')).join('|')}`);
 await escape();
 await sleep(200);
 await openFirstCard();
@@ -713,18 +714,18 @@ if ((await count('.ref-row .ref-tile:not(.ref-add)')) !== 1 || (await count('.fr
 await must('移除参考图', click('.ref-row .ref-remove'));
 await sleep(200);
 
-// 语音：一个入口（音色）；面板里能筛语言、能试听；没有润色
+// 语音：两个入口（模型、音色）；面板里能筛语言；有试听地址的音色能试听（豆包语音的音色都没有）；有润色（只改得适合朗读）
 await must('切到语音', typeSeg('语音'));
 await sleep(900);
 await strangers('.player, .image-view', '语音');
 face = await composer();
-if (face.title !== '想让它读什么？' || face.tools.length !== 1 || face.stray || (await count('[data-control=polish]'))) problems.push(`语音的输入框不对：${JSON.stringify(face)}`);
+if (face.title !== '想让它读什么？' || face.tools.length !== 2 || face.stray || !(await count('[data-control=polish]'))) problems.push(`语音的输入框不对：${JSON.stringify(face)}`);
 const beforeVoices = await layout();
 await must('打开音色面板', click('[data-control=voice]'));
 await sleep(400);
 if ((await layout()) !== beforeVoices) problems.push('打开音色面板后输入框或记录的位置变了');
 const voicePanel = await pg.evaluate(() => ({ rows: document.querySelectorAll('.voice-popover .voice-row').length, previews: [...document.querySelectorAll('.voice-popover .voice-row .entry-action-btn')].filter((b) => b.textContent === '试听').length, selected: document.querySelectorAll('.voice-popover .voice-row.selected').length, filters: [...document.querySelectorAll('.voice-popover .seg')].map((e) => e.textContent).join('|') }));
-if (voicePanel.rows < 2 || voicePanel.previews !== voicePanel.rows || voicePanel.selected !== 1 || voicePanel.filters !== '全部|中文|英语|其他') problems.push(`音色面板不对：${JSON.stringify(voicePanel)}`);
+if (voicePanel.rows < 2 || (voicePanel.previews && voicePanel.previews !== voicePanel.rows) || voicePanel.selected !== 1 || voicePanel.filters !== '全部|中文|英语|其他') problems.push(`音色面板不对：${JSON.stringify(voicePanel)}`);
 await audit('音色面板');
 await shot('14-voices');
 await must('只看中文', clickText('.voice-popover .seg', '中文'));
@@ -782,14 +783,14 @@ await shot('15-speech-detail');
 await escape();
 await sleep(200);
 
-// 音效：两个入口
+// 音效：两个入口（模型、时长）
 await must('切到音效', typeSeg('音效'));
 await sleep(300);
 face = await composer();
 if (face.title !== '想要什么声音？' || face.tools.length !== 2 || face.stray) problems.push(`音效的输入框不对：${JSON.stringify(face)}`);
-await must('打开贴合度菜单', click('[data-control=influence]'));
+await must('打开时长面板', click('.composer-params [data-control=duration]'));
 await sleep(200);
-await audit('音效·贴合度菜单');
+await audit('音效·时长面板');
 await escape();
 await sleep(150);
 await pg.locator('textarea.prompt').fill('厚重的关门声');
@@ -798,42 +799,9 @@ await must('生成音效', click('.send-btn'));
 await sleep(700);
 await waitNew('audio-player', '音效没有生成出来');
 
-// 延长和编辑：从视频卡片的菜单进来。视频先传进素材库，然后切到全能参考，提示词填好开头的句式和结尾的约束，光标停在两者之间
-await must('进入创作记录', clickText('.nav-item', '创作记录'));
-await sleep(500);
-await searchFor('');
-await must('看全部类型', clickText(`${V} .filters .seg`, '全部'));
-await sleep(300);
-for (const [label, lead, keep] of [['延长', '向后延长视频1：', '镜头和景别保持不变。'], ['编辑', '严格编辑视频1，', '其他内容、动作和运镜保持不变。']]) {
-  const at = await pg.evaluate((v) => [...document.querySelectorAll(`${v} .card`)].findIndex((c) => c.querySelector('.player')), V);
-  await must(`打开视频卡片的更多（${label}）`, click(`${V} .card .card-more`, at));
-  await sleep(300);
-  await must(`点${label}`, clickText('.menu .menu-item', label));
-  const arrived = () => pg.evaluate((want) => Boolean(document.querySelector('.view-create:not([hidden]) .ref-row .ref-tile:not(.ref-add)')) && document.querySelector('textarea.prompt').value.startsWith(want), lead);
-  for (let i = 0; i < 30 && !(await arrived()); i += 1) await sleep(500);
-  await sleep(300);
-  const reworked = await pg.evaluate(() => {
-    const prompt = document.querySelector('textarea.prompt');
-    return { prompt: prompt.value, caret: prompt.selectionStart, focused: document.activeElement === prompt, mode: document.querySelector('[data-control=mode]')?.textContent.trim(), videos: document.querySelectorAll('.ref-row .ref-tile:not(.ref-add)').length, index: document.querySelector('.ref-row .ref-tile[data-ref]')?.dataset.ref };
-  });
-  if (reworked.prompt !== `${lead}\n${keep}` || reworked.caret !== lead.length || !reworked.focused || reworked.mode !== '全能参考' || reworked.videos !== 1 || reworked.index !== '视频1') problems.push(`从视频卡片点「${label}」后输入框不对：${JSON.stringify(reworked)}`);
-  // 视频素材的汇总状态是「失败」，但要用的模型在可用列表里：不能显示成处理失败，等它处理完就能提交
-  for (let i = 0; i < 30 && (await count('.ref-state')); i += 1) await sleep(500);
-  if (await count('.ref-state')) problems.push(`${label}：视频素材没有变成可用：${(await text('.ref-state')).join('')}`);
-  if ((await pg.evaluate(() => document.querySelector('.send-btn').dataset.tip)) !== '生成视频（⌘ Enter）') problems.push(`${label}：素材可用后还是不能提交：${await pg.evaluate(() => document.querySelector('.send-btn').dataset.tip)}`);
-  await audit(`${label}视频`);
-  if (label === '延长') await shot('20-extend');
-  await must('回到创作记录', clickText('.nav-item', '创作记录'));
-  await sleep(400);
-}
-// 收拾一下，免得影响后面的检查：移除视频素材，清空提示词
-await must('回到创作', clickText('.nav-item', '创作'));
-await sleep(300);
-await must('移除视频素材', click('.ref-row .ref-remove'));
-await sleep(200);
-await pg.locator('textarea.prompt').fill('');
+// 延长和编辑只有 Flatkey 上的 Seedance 能做，2026-10-09 去掉 Flatkey 时一起去掉了。
 
-// 配乐：从视频卡片的菜单进来，视频已经选好；没有提示词输入框
+// 配乐：从视频卡片的菜单进来，视频已经选好；描述框是空的（上一次写的不带过来），写上要什么样的音乐再提交
 // 这时创作页最新的几条已经是图片和音频了，视频到记录页里找。
 await must('进入创作记录', clickText('.nav-item', '创作记录'));
 await sleep(500);
@@ -846,71 +814,71 @@ await sleep(300);
 await must('点配乐', clickText('.menu .menu-item', '配乐'));
 await sleep(1800);
 face = await composer();
-if (face.title !== '给哪段视频配乐？' || !face.promptHidden || face.stray || face.extraRows) problems.push(`配乐的输入框不对：${JSON.stringify(face)}`);
+if (face.title !== '想要什么配乐？' || face.promptHidden || face.stray || face.extraRows) problems.push(`配乐的输入框不对：${JSON.stringify(face)}`);
+if (await pg.evaluate(() => document.querySelector('textarea.prompt').value)) problems.push('从视频卡片点「配乐」后，描述框里还留着上一次写的字');
+await pg.locator('textarea.prompt').fill('轻快的钢琴与弦乐');
 if ((await count('.frame-slot .ref-tile:not(.ref-add)')) !== 1 || !/\d+ 秒/.test((await text('.frame-slot')).join(''))) problems.push(`从视频卡片点「配乐」后，视频没有选好：${(await text('.frame-slot')).join('')}`);
 await audit('配乐');
 await shot('16-music');
 await markOld();
 await must('生成配乐', click('.send-btn'));
 await sleep(700);
-if (!(await feedFirst()).includes('is-pending')) problems.push('提交配乐后没有出现生成中的卡片');
-// 配乐是异步任务：模拟接口要十几秒才出结果，再加上本地服务的轮询间隔。
+// 配乐一次请求直接返回（豆包语音的音频生成），模拟接口很快：最前面是一张新卡片就行，生成中或者已经出来了都可以。
+if (await pg.evaluate(() => document.querySelector('.view-create .card')?.dataset.old === '1')) problems.push('提交配乐后最前面没有出现新的卡片');
 await waitNew('audio-player', '配乐没有生成出来', 120);
 await openFirstCard();
 await sleep(400);
 view = await detailOf();
-// 配乐的详情：原视频和音乐一起放，所以左边是带画面的播放器；没有提示词这一组
-if (!view || view.titles !== '生成参数|任务信息' || !view.media.split(' ').includes('player') || !(await count('.modal .player audio'))) problems.push(`配乐的详情不对：${JSON.stringify(view)}`);
+// 配乐的详情：原视频和音乐一起放，所以左边是带画面的播放器
+if (!view || view.titles !== '提示词|生成参数|任务信息' || !view.media.split(' ').includes('player') || !(await count('.modal .player audio'))) problems.push(`配乐的详情不对：${JSON.stringify(view)}`);
 await audit('配乐详情');
 await shot('17-music-detail');
 await escape();
 await sleep(200);
 if (await pg.evaluate(() => [...document.querySelectorAll('video, audio')].some((m) => m.isConnected && !m.paused))) problems.push('关掉配乐详情后还有声音在放');
 
-// Grok 视频：只有文生和图生两种方式，没有「更多」；不支持的比例和分辨率不能选
+// 没配 Key 的平台（本地走查里 MiniMax 没配）：型号在菜单里，是灰的，附注写「未配置 Key」，点不了
 await must('切回视频', typeSeg('视频'));
 await sleep(300);
 await strangers('.image-view, .audio-player', '视频');
 await must('打开模型菜单', click(control('model')));
 await sleep(200);
-await must('选 Grok', clickText('.menu .menu-item', 'grok-imagine-video'));
-await sleep(300);
-face = await composer();
-if (face.tools.length !== 4 || face.tools.some((t) => t === '更多')) problems.push(`Grok 的工具栏不对：${face.tools.join(' | ')}`);
+const minimax = await pg.evaluate(() => {
+  const item = [...document.querySelectorAll('.menu .menu-item')].find((e) => e.querySelector('.menu-item-label')?.textContent === 'MiniMax H3');
+  return item ? { disabled: item.disabled, note: item.querySelector('.menu-item-note')?.textContent || '' } : null;
+});
+if (!minimax || !minimax.disabled || minimax.note !== '未配置 Key') problems.push(`没配 Key 的型号在菜单里不对：${JSON.stringify(minimax)}`);
+await escape();
+await sleep(150);
+
+// 首尾帧：首帧、尾帧各一个格子，首帧从生成记录里选
 await must('打开生成方式', click(control('mode')));
 await sleep(200);
-if ((await text('.menu .menu-item .menu-item-label')).join('|') !== '文生视频|图生视频') problems.push(`Grok 的生成方式不对：${(await text('.menu .menu-item .menu-item-label')).join('|')}`);
-await must('选图生视频', clickText('.menu .menu-item', '图生视频'));
+if ((await text('.menu .menu-item .menu-item-label')).join('|') !== '全能参考|首尾帧') problems.push(`生成方式不对：${(await text('.menu .menu-item .menu-item-label')).join('|')}`);
+await must('选首尾帧', clickText('.menu .menu-item', '首尾帧'));
 await sleep(300);
-if ((await count('.frame-slot')) !== 1) problems.push('Grok 的图生视频应该只有首帧一个格子');
+if ((await count('.frame-slot')) !== 2) problems.push(`首尾帧应该有首帧、尾帧两个格子：${await count('.frame-slot')}`);
 await must('点添加首帧', click('.frame-slot .ref-add'));
 await sleep(300);
-if ((await text('.modal .tabs .seg')).join('|') !== '本地上传|生成记录|角色') problems.push(`Grok 选首帧的来源不对：${(await text('.modal .tabs .seg')).join('|')}`);
+if ((await text('.modal .tabs .seg')).join('|') !== '本地上传|生成记录|角色') problems.push(`选首帧的来源不对：${(await text('.modal .tabs .seg')).join('|')}`);
 await must('切到生成记录', clickText('.modal .tabs .seg', '生成记录'));
 await sleep(300);
 await audit('选首帧·生成记录');
-await shot('18-grok-frame-picker');
+await shot('18-frame-picker');
 await must('选一张生成的图', click('.modal .pick-card', 0));
 await sleep(900);
 if ((await count('.modal')) || (await count('.frame-slot .ref-tile:not(.ref-add)')) !== 1) problems.push('从生成记录选首帧没有成功');
-await must('打开画面面板', click(control('frame')));
-await sleep(250);
-const grokFrame = await pg.evaluate(() => ({ ratios: [...document.querySelectorAll('.frame-popover .ratio-option:disabled')].map((e) => e.textContent.trim()).join('|'), res: [...document.querySelectorAll('.frame-popover .seg:disabled')].map((e) => e.textContent).join('|') }));
-if (grokFrame.ratios !== '21:9|自适应' || grokFrame.res !== '1080p') problems.push(`Grok 的画面面板没有禁用不支持的选项：${JSON.stringify(grokFrame)}`);
-await audit('Grok·画面面板');
-await must('收起画面面板', click(control('frame')));
-await sleep(200);
-// 换回 Seedance，免得影响后面的检查
-await must('移除首帧', click('.frame-slot .ref-remove'));
+await audit('首尾帧·有首帧');
+// 换回全能参考，免得影响后面的检查（首帧会跟着挪成参考图，移除掉）
 await must('打开生成方式', click(control('mode')));
 await sleep(200);
-await must('选文生视频', clickText('.menu .menu-item', '文生视频'));
-await sleep(200);
-await must('打开模型菜单', click(control('model')));
-await sleep(200);
-await must('选回 Seedance', clickText('.menu .menu-item', 'seedance-2.0'));
+await must('选回全能参考', clickText('.menu .menu-item', '全能参考'));
 await sleep(300);
-if ((await composer()).tools.length !== 5) problems.push('换回 Seedance 后工具栏不是 5 个入口');
+for (let i = 0; i < 4 && (await count('.ref-row .ref-remove')); i += 1) {
+  await click('.ref-row .ref-remove');
+  await sleep(150);
+}
+if ((await composer()).tools.length !== 5) problems.push('换回全能参考后工具栏不是 5 个入口');
 
 // 记录页：按类型筛选（先清掉前面留在搜索框里的字）
 await must('进入创作记录', clickText('.nav-item', '创作记录'));
@@ -946,14 +914,15 @@ else if (failed.mark !== 1 || !failed.title || !failed.reason || !failed.inside 
 
 // 7、8 原来是素材库和真人档案：只有 Flatkey 有，2026-10-09 去掉 Flatkey 时一起去掉了。
 
-// 9. 设置：只有一个入口；外观在设置里；切换主题整页生效
-if ((await count('.sidebar-foot .nav-item')) !== 1 || (await count('.sidebar-foot > *')) !== 1) problems.push('侧栏底部不是只有「设置」一项');
+// 9. 侧栏底部是「管理」和「设置」（本机模式两个都有，多人模式的成员只有设置）。
+// 设置里是主题和润色模型，切换主题整页生效；管理里是 Key 和余额
+if ((await text('.sidebar-foot .nav-item')).join('|') !== '管理|设置') problems.push(`侧栏底部不对：${(await text('.sidebar-foot .nav-item')).join('|')}`);
 if ((await text('.sidebar-foot')).join('').includes('sk-')) problems.push('侧栏底部还显示着 Key');
-await must('打开设置', click('.sidebar-foot .nav-item'));
-await sleep(900);
+await must('打开设置', clickText('.sidebar-foot .nav-item', '设置'));
+await sleep(600);
 const settingRows = (await text('.modal h3, .modal .form-label')).join('|');
-if (!settingRows.includes('提示词润色') || !settingRows.includes('账户余额')) problems.push(`设置里缺少润色模型或余额：${settingRows}`);
-if (!/剩余 [\d.,]+/.test((await text('.modal .form-row')).join(' '))) problems.push('设置里没有读到余额');
+if (!settingRows.includes('主题') || !settingRows.includes('提示词润色')) problems.push(`设置里缺少主题或润色模型：${settingRows}`);
+if (await pg.evaluate(() => [...document.querySelectorAll('.modal .menu-item-label, .modal .dropdown')].some((e) => /doubao-/.test(e.textContent)))) problems.push('设置里的润色模型显示的是型号原名');
 await audit('设置');
 await shot('11-settings');
 const other = THEME === 'light' ? '深色' : '浅色';
@@ -962,6 +931,14 @@ await sleep(300);
 if ((await pg.evaluate(() => document.documentElement.dataset.theme)) === THEME) problems.push('在设置里切换主题没有生效');
 await must('切回原主题', clickText('.modal .segmented .seg', THEME === 'light' ? '浅色' : '深色'));
 await sleep(300);
+await escape();
+await sleep(200);
+await must('打开管理', clickText('.sidebar-foot .nav-item', '管理'));
+await sleep(900);
+const adminRows = (await text('.modal h3')).join('|');
+if (!adminRows.includes('模型平台') || !adminRows.includes('账户余额')) problems.push(`管理里缺少模型平台或账户余额：${adminRows}`);
+await audit('管理');
+await shot('11b-admin');
 await must('点更换', clickText('.modal .btn', '更换'));
 await sleep(200);
 await must('点显示', clickText('.modal .btn', '显示'));
