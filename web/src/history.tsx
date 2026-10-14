@@ -314,7 +314,10 @@ function CardGrid({ list, all = list, empty }: { list: HistoryItem[]; all?: Hist
   const latest = useRef(all);
   latest.current = all;
   const scope = useRef<Scope>(() => latest.current).current;
-  return <div className="card-grid">{list.length ? list.map((item, index) => <Card key={item.id} item={item} index={index} scope={scope} />) : empty}</div>;
+  // 全是音频的一组（语音、音效、配乐页，记录页筛到音频）：音频没有画面，16:9 的框下半截是空的，换成矮一点的卡片，一屏放得下更多。
+  // 和视频、图片混在一起时仍是 16:9，一行的卡片才一样高。
+  const audio = list.length > 0 && list.every((item) => item.kind === 'audio');
+  return <div className={`card-grid${audio ? ' is-audio' : ''}`}>{list.length ? list.map((item, index) => <Card key={item.id} item={item} index={index} scope={scope} />) : empty}</div>;
 }
 
 // ---------- 详情 ----------

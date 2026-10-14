@@ -72,9 +72,17 @@ export function Projects() {
     location.hash = canvasPath();
   }, []);
 
-  // 在新标签页里打开一张画布。标签页要在点击的当下就开出来，等请求回来再开会被浏览器当成弹窗拦掉；
-  // 真被拦了就在当前页打开。
-  async function open(id: string | Promise<string>) {
+  // 打开一张画布：默认就在这一页里打开，左上角的返回键回到列表。按住 ⌘（Windows 上是 Ctrl）点，才在新标签页里打开。
+  // 新标签页要在点击的当下就开出来，等请求回来再开会被浏览器当成弹窗拦掉；真被拦了就在当前页打开。
+  async function open(id: string | Promise<string>, e?: React.MouseEvent) {
+    if (!(e?.metaKey || e?.ctrlKey)) {
+      try {
+        location.hash = canvasPath(await id);
+      } catch (err) {
+        toast((err as Error).message, 'error', 6000);
+      }
+      return;
+    }
     const tab = window.open('', '_blank');
     try {
       const url = `${location.pathname}${location.search}${canvasPath(await id)}`;
@@ -85,8 +93,8 @@ export function Projects() {
       toast((err as Error).message, 'error', 6000);
     }
   }
-  const create = () => open(api<ProjectMeta>('POST', '/api/canvases', {}).then((project) => project.id));
-  const enter = (id: string) => open(id);
+  const create = (e: React.MouseEvent) => open(api<ProjectMeta>('POST', '/api/canvases', {}).then((project) => project.id), e);
+  const enter = (id: string, e: React.MouseEvent) => open(id, e);
 
   function more(button: HTMLElement, project: ProjectMeta) {
     openMenu(button, {
@@ -153,7 +161,7 @@ export function Projects() {
         {shown.map((project) => (
           <article key={project.id} className="project">
             <div className="project-media">
-              <button className="project-cover" type="button" aria-label={`打开「${project.name}」`} onClick={() => enter(project.id)}>
+              <button className="project-cover" type="button" aria-label={`打开「${project.name}」`} onClick={(e) => enter(project.id, e)}>
                 {project.cover?.kind === 'video' ? (
                   // 加上 #t=0.1 让浏览器停在开头那一帧，当封面用；不播放。
                   <video src={`${project.cover.url}#t=0.1`} preload="metadata" muted playsInline tabIndex={-1} />

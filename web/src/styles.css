@@ -559,6 +559,8 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: var(--sp-20); align-items: start; }
 .card { min-width: 0; }
 .card-media { position: relative; display: grid; overflow: hidden; cursor: pointer; aspect-ratio: 16 / 9; border-radius: var(--r-md); background: var(--surface-1); }
+/* 全是音频的一组：不用 16:9，定一个放得下三行文字、播放条，以及失败时图标、原因、提示词的高度。 */
+.card-grid.is-audio .card-media { aspect-ratio: auto; height: 176px; }
 /* 视频播放器：控制条固定用半透明黑底白字，不随主题变。鼠标移到画面上才显示；用键盘操作时也显示。 */
 .player { position: relative; display: grid; width: 100%; height: 100%; min-height: 0; overflow: hidden; background: var(--surface-2); }
 .player-video { display: block; width: 100%; height: 100%; min-height: 0; object-fit: contain; background: var(--surface-2); cursor: pointer; }
