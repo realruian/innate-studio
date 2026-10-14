@@ -5,7 +5,7 @@ import path from 'node:path';
 import { AIHUBMIX, ARK, DOUBAO_SPEECH, MINIMAX, MAX_IMAGES, MAX_UPLOAD_BYTES } from '../config.js';
 import { HttpError, readBody, readJsonBody, route } from '../http.js';
 import { aihubmixKey, speechKey } from '../keys.js';
-import { ERROR_HINTS, callAihubmix, callArk, callMinimax, listOf, requireKey } from '../ark.js';
+import { callAihubmix, upstreamError, callArk, callMinimax, listOf, requireKey } from '../ark.js';
 import { doubaoSpeech, doubaoAudio } from '../speech.js';
 import { UPLOAD_TYPES, localMediaFile, withLocalFiles } from '../media.js';
 import { MINIMAX_VIDEO_PATH, VIDEO_TASKS_PATH, applyTaskState, downloadResult, finishItem, historyView, isLegacy, isPending, isTimedOut, newId, newItem, pollTask, runDirect } from '../tasks.js';
@@ -134,7 +134,7 @@ route('POST', /^\/api\/images$/, async ({ req, space, user }) => {
   const provider = imageProvider(model);
   if (!provider) throw new HttpError(400, 'invalid_request', `不支持图片模型 ${model}`);
   const aihubmix = provider === 'aihubmix';
-  if (aihubmix && !aihubmixKey()) throw new HttpError(401, 'no_api_key', `请先在「设置」中配置 ${AIHUBMIX.label} 的 API Key。`);
+  if (aihubmix && !aihubmixKey()) throw new HttpError(401, 'no_api_key', `请先在「管理」中配置 ${AIHUBMIX.label} 的 API Key。`);
   if (!aihubmix) requireKey();
   const platform = aihubmix ? AIHUBMIX : ARK;
   const spec = IMAGE_MODELS[model];
@@ -231,7 +231,7 @@ async function aihubmixImage(request) {
   }
   if (task?.status !== 'completed') {
     const code = String(task?.error?.code || 'image_failed');
-    throw new HttpError(502, code, `${ERROR_HINTS[code] ? `${ERROR_HINTS[code]}。` : ''}${AIHUBMIX.label}：${task?.error?.message || `图片生成未完成（${task?.status || '无状态'}）`}`, task);
+    throw upstreamError(AIHUBMIX.label, 502, code, task?.error?.message || `图片生成未完成（${task?.status || '无状态'}）`, task);
   }
   const output = (task.output || []).find((entry) => entry?.b64_json || entry?.content_url);
   if (!output) throw new HttpError(502, 'bad_upstream_response', `${AIHUBMIX.label} 未返回图片`, task);

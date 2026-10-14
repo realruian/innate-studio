@@ -99,7 +99,7 @@ const server = http.createServer((req, res) => {
     // 多人模式下，平台返回的原始内容、缺哪个平台的 Key，只给管理员看。
     const hidden = isHosted() && userOf(req)?.role !== 'admin';
     const message = hidden && err.code === 'no_api_key' ? '该功能暂未开通，请联系管理员' : err instanceof HttpError ? err.message : `本地服务出错：${err.message}`;
-    sendJson(res, status, { error: { code: err.code || 'internal_error', message, upstream: hidden ? undefined : err.upstream } });
+    sendJson(res, status, { error: { code: err.code || 'internal_error', message, detail: err.detail, upstream: hidden ? undefined : err.upstream } });
   });
 });
 
@@ -117,6 +117,6 @@ server.listen(PORT, HOST, () => {
   console.log(`数据目录：${DATA_DIR}`);
   if (isHosted()) console.log(`多人模式：${allUsers().length} 个账号，需要登录。`);
   if (!fs.existsSync(path.join(PUBLIC_DIR, 'index.html'))) console.log('还没有构建页面，打开会是空的。先运行 npm run build（npm start 会自动构建）。');
-  if (!apiKey()) console.log(`还没有设置 ${ARK.label} 的 API Key，打开页面后在「设置」里填写。`);
+  if (!apiKey()) console.log(`还没有设置 ${ARK.label} 的 API Key，打开页面后在「管理」里填写。`);
   startPolling();
 });

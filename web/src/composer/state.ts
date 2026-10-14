@@ -1,7 +1,7 @@
 // 创作输入框的状态和动作：正在编辑的表单、润色、音色试听、提交。界面在 Composer.tsx，把表单拼成请求的逻辑在 request.ts。
 // 这里改完状态都要调 changed()，输入框才会重画。
 
-import { api, state, on, emit, KINDS, startHistoryLoop, loadVoices, polishModel, goTo } from '../store.ts';
+import { api, state, on, emit, KINDS, startHistoryLoop, loadVoices, polishModel, goTo, type ApiError } from '../store.ts';
 import { exclusive } from '../playback.ts';
 import { refFromRecord, kindOfFile, uploadLocalFile } from '../media.ts';
 import { toast } from '../ui/layers.tsx';
@@ -97,7 +97,9 @@ export const composer = {
   form: load(FORM_KEY, mergeForm),
   studio: load(STUDIO_KEY, mergeStudio),
   submitting: false,
+  // 提交时就被拒绝的原因（没开通模型、参数不对）。这时没有生成记录，所以写在输入框下面，改了输入或关掉才消失。
   submitError: '',
+  submitDetail: '',
   // 润色之前的原文。留着它，「润色」就变成「撤销润色」；用户再动一下文字就丢掉。
   beforePolish: null as string | null,
   polishing: false,
@@ -555,7 +557,7 @@ export async function submit() {
     startHistoryLoop();
   } catch (err) {
     composer.submitError = (err as Error).message;
-    toast((err as Error).message, 'error', 6000);
+    composer.submitDetail = (err as ApiError).detail || '';
   } finally {
     composer.submitting = false;
     emit('composer');
@@ -596,4 +598,9 @@ export function initComposer() {
     if (state.app.hasKey && info.source === 'default' && info.error) toast(`模型列表加载失败，已显示默认模型。${info.error}`, 'error', 6000);
     changed();
   });
+}
+
+export function dismissSubmitError() {
+  composer.submitError = '';
+  emit('composer');
 }

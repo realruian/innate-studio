@@ -69,13 +69,11 @@ export function applyTaskState(item, data) {
   }
   if (item.status === 'failed') {
     const e = data.error;
-    item.error = {
-      message: (typeof e === 'string' ? e : e?.message) || '视频生成失败',
-      code: (typeof e === 'object' && e?.code) || '',
-    };
-    // 平台给的失败原因是英文的，认得的错误码在前面加一句中文说明。
-    const hint = ERROR_HINTS[item.error.code];
-    if (hint) item.error.message = `${hint}（${item.error.message}）`;
+    const raw = (typeof e === 'string' ? e : e?.message) || '';
+    const code = (typeof e === 'object' && e?.code) || '';
+    // 平台给的失败原因是英文的：卡片上显示中文的原因，原话留在 detail 里。
+    const known = ERROR_HINTS[code] || (/audit|sensitive|moderation|censor/i.test(raw) ? '内容未通过审核，请修改提示词或参考素材后重试' : '');
+    item.error = { message: known || '视频生成失败，请稍后重试', code, ...(raw && { detail: `${PLATFORMS[item.provider]?.label || '平台'}${code ? `（${code}）` : ''}：${raw}` }) };
   }
 }
 
@@ -206,7 +204,7 @@ export function runDirect(space, items, work) {
       for (const item of items) {
         if (item.status === 'completed') continue;
         item.status = 'failed';
-        item.error = { message: err instanceof HttpError ? err.message : `本地服务出错：${err.message}`, code: err.code || '' };
+        item.error = { message: err instanceof HttpError ? err.message : `本地服务出错：${err.message}`, code: err.code || '', ...(err.detail && { detail: err.detail }) };
       }
     })
     .finally(() => {

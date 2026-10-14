@@ -11,6 +11,7 @@ import { IMAGE_QUALITY_LABELS, modelLabel, modelNote } from '../../../shared/mod
 import { recordName, uploadLocalFile } from '../media.ts';
 import { openAssetPicker } from '../assets.tsx';
 import { Icon, type IconName } from '../ui/Icon.tsx';
+import { FailureState } from '../ui/states.tsx';
 import { Dropdown, tip } from '../ui/controls.tsx';
 import { MediaTile, AddTile } from '../ui/tiles.tsx';
 import { openMenu, openModal, openPopover, toast } from '../ui/layers.tsx';
@@ -434,15 +435,8 @@ function Result({ kind, data, onShape }: { kind: NodeKind; data: MediaData; onSh
   if (data.upload) return <Clip src={data.upload.url} label={data.upload.name} onShape={onShape} />;
   if (!record) return blank(data.recordId && state.historyLoaded ? '生成记录已删除' : <Icon name={NODE_ICONS[kind]} size={28} stroke={1.2} />);
   if (isPendingTask(record)) return waiting(record.status === 'queued' ? '排队中' : record.progress ? `生成中 ${Math.round(record.progress)}%` : '生成中');
-  if (record.status === 'failed') {
-    return blank(
-      <>
-        <Icon name="alert" />
-        <span>{record.error?.message || '生成失败'}</span>
-      </>,
-      true,
-    );
-  }
+  // 和创作页的失败卡片同一个样子。节点标题已经写着是什么，这里不再带提示词；重新生成就点输入面板的发送键。
+  if (record.status === 'failed') return blank(<FailureState title="生成失败" reason={record.error?.message} note={record.kind === 'video' ? '预扣额度将自动退回' : null} />, true);
   if (!record.mediaUrl) return waiting('已生成，保存中…');
   if (kind === 'image') return <img className="cnode-pic" src={record.mediaUrl} alt={record.prompt || '生成的图片'} draggable={false} onLoad={measure} />;
   if (kind === 'video') return <Clip src={record.mediaUrl} label={record.prompt || '生成的视频'} onShape={onShape} />;

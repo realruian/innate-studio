@@ -460,6 +460,11 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 /* 两列：左边是素材，右边是提示词；工具栏在下面占满一行。没有素材这一块时左边那列不占地方。 */
 /* 第一行（素材和提示词）有个最低的高度，比最高的那种素材格子还高一点：这样换类型、换生成方式时，不管左边是一摞、两格还是没有素材，空着的输入框都一样高。 */
 .composer-card { display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-rows: minmax(88px, auto) auto; overflow: hidden; margin-bottom: var(--sp-8); background: var(--surface-1); border-radius: var(--r-lg); box-shadow: 0 8px 0 var(--lip); }
+/* 提交时被拒绝的原因：挂在输入框下面，不描边，只有图标是红的。下面一行是平台的原话，可以选中复制。 */
+.submit-notice { display: flex; align-items: flex-start; gap: var(--sp-8); margin-top: var(--sp-8); padding: var(--sp-8) var(--sp-8) var(--sp-8) var(--sp-16); border-radius: var(--r-md); background: var(--surface-1); color: var(--text); font-size: var(--text-ui); line-height: var(--lh-body); }
+.submit-notice > .icon { flex: none; margin-top: var(--sp-4); color: var(--danger); }
+.submit-notice-body { display: flex; flex: 1; flex-direction: column; gap: var(--sp-2); min-width: 0; padding-top: var(--sp-2); }
+.submit-notice-detail { color: var(--text-3); font-size: var(--text-caption); overflow-wrap: anywhere; user-select: text; }
 .prompt { grid-column: 2; grid-row: 1; display: block; width: 100%; min-height: 72px; max-height: 280px; padding: var(--sp-16) var(--sp-16) var(--sp-8); border: 0; outline: 0; background: transparent; color: var(--text); font-size: var(--text-body); line-height: var(--lh-body); resize: none; }
 .prompt::placeholder { color: var(--text-3); }
 .composer-bar { grid-column: 1 / -1; grid-row: 2; display: flex; align-items: center; gap: var(--sp-8); padding: var(--sp-4) var(--sp-8) var(--sp-8); }
@@ -606,6 +611,7 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 .card-state.is-failed .state-title { font-weight: var(--fw-medium); }
 .state-text { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; max-width: min(100%, 36em); color: var(--text-2); line-height: var(--lh-body); overflow-wrap: anywhere; }
 .state-note { margin-top: var(--sp-4); }
+.state-extra { max-width: min(100%, 36em); color: var(--text-3); }
 .bar { height: 3px; overflow: hidden; border-radius: 3px; background: var(--surface-3); }
 .bar.wide { width: 56%; }
 .bar-fill { width: 0; height: 100%; border-radius: 3px; background: var(--text); transition: width 480ms var(--ease); }
@@ -984,8 +990,8 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 .cnode-sound { height: 100%; min-height: 0; }
 /* 还没有内容、正在生成、失败：正中一个淡淡的图标或一句话 */
 .cnode-state { display: flex; align-items: center; justify-content: center; gap: var(--sp-8); height: 100%; min-height: 0; padding: var(--sp-16); color: var(--text-off); font-size: var(--text-caption); font-variant-numeric: tabular-nums; text-align: center; overflow: hidden; overflow-wrap: anywhere; }
-.cnode-state.is-failed { color: var(--text-2); }
-.cnode-state.is-failed .icon { color: var(--danger); }
+/* 失败时和创作页的卡片一样：图标、标题、原因、说明竖着排。 */
+.cnode-state.is-failed { flex-direction: column; gap: var(--sp-4); color: var(--text-3); }
 /* 文本节点：平时是一段文字，双击进去改。写多了在框里滚动 */
 .cnode-text-view, .cnode-text-edit { display: block; width: 100%; height: 100%; min-height: 0; padding: var(--sp-12); overflow-y: auto; color: var(--text); font-size: var(--text-ui); line-height: var(--lh-body); white-space: pre-wrap; overflow-wrap: anywhere; }
 .cnode-text-view { cursor: grab; }

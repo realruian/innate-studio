@@ -278,7 +278,9 @@ test('登记之外的型号不发出去；平台拒绝、模型没开通、任�
   const records = (await call('GET', '/api/history')).data.items.length;
   const rejected = await call('POST', '/api/videos', { payload: videoPayload('REJECT') });
   assert.equal(rejected.status, 400);
-  assert.match(rejected.data.error.message, /火山方舟 返回（400）/);
+  // 卡片上只说中文的原因，平台的原话放在 detail 里。
+  assert.match(rejected.data.error.message, /^火山方舟 拒绝了这次请求/);
+  assert.match(rejected.data.error.detail, /^火山方舟（InvalidParameter）：the parameter `content`/);
   // 没创建成功的不留记录。
   assert.equal((await call('GET', '/api/history')).data.items.length, records);
 
@@ -289,7 +291,8 @@ test('登记之外的型号不发出去；平台拒绝、模型没开通、任�
   const created = await call('POST', '/api/videos', { payload: videoPayload('FAIL') });
   const failed = await refreshUntil(created.data.id, (i) => i.status === 'failed', '任务失败');
   assert.equal(failed.error.code, 'OutputVideoSensitiveContentDetected');
-  assert.match(failed.error.message, /^生成的视频未通过内容审核（/);
+  assert.equal(failed.error.message, '生成的视频未通过内容审核');
+  assert.match(failed.error.detail, /^火山方舟（OutputVideoSensitiveContentDetected）：The request failed/);
   assert.equal(failed.videoUrl, null);
 });
 
@@ -338,7 +341,8 @@ test('MiniMax H3：另一个平台、另一个 Key；请求换成它的格式，
 
   const failed = await call('POST', '/api/videos', { payload: h3('FAIL') });
   const failedItem = await refreshUntil(failed.data.id, (i) => i.status === 'failed', 'H3 任务失败');
-  assert.match(failedItem.error.message, /content moderation failed/);
+  assert.match(failedItem.error.message, /^内容未通过审核/);
+  assert.match(failedItem.error.detail, /content moderation failed/);
 
   await call('DELETE', '/api/key?service=minimax');
   assert.equal((await call('GET', '/api/state')).data.minimax.hasKey, false);
@@ -512,7 +516,8 @@ test('生图：这个模型没有的档位、太多参考图、登记之外的�
 
   const failed = await call('POST', '/api/images', { payload: { model: IMAGE, prompt: 'FAIL', n: 1 } });
   const item = await waitItem(failed.data.items[0].id, (i) => i.status === 'failed', '生图失败');
-  assert.match(item.error.message, /火山方舟 返回（500）/);
+  assert.equal(item.error.message, '火山方舟 服务暂时异常，请稍后重试');
+  assert.match(item.error.detail, /^火山方舟（InternalServiceError）：/);
   assert.equal(item.mediaUrl, null);
 });
 
@@ -549,7 +554,9 @@ test('语音：用豆包语音，Key 另外存；音色是登记好的；音频�
 
   const failed = await call('POST', '/api/audio/speech', { text: 'FAIL', voiceId: 'zh_female_vv_uranus_bigtts' });
   const item = await waitItem(failed.data.id, (i) => i.status === 'failed', '语音失败');
-  assert.match(item.error.message, /豆包语音返回（200）：synthesis failed/);
+  // 出错的 code 夹在 200 的流里：不提状态码，按服务出错说。
+  assert.equal(item.error.message, '豆包语音 服务暂时异常，请稍后重试');
+  assert.equal(item.error.detail, '豆包语音（55000000）：synthesis failed {internal}');
 });
 
 test('音效和配乐：用豆包语音的音频生成，时长写在描述里；配乐可以带上要配的那条视频', async () => {
@@ -579,7 +586,8 @@ test('音效和配乐：用豆包语音的音频生成，时长写在描述里�
 
   const failed = await call('POST', '/api/audio/sfx', { text: 'FAIL' });
   const item = await waitItem(failed.data.id, (i) => i.status === 'failed', '音效失败');
-  assert.match(item.error.message, /豆包语音返回（400）：text audit failed/);
+  assert.match(item.error.message, /^内容未通过审核/);
+  assert.equal(item.error.detail, '豆包语音（45001125）：text audit failed');
 });
 
 test('缩略图：图片和视频存到本机后各做一张小图，删记录时一起删', { skip: !hasFfmpeg && '本机没有 ffmpeg' }, async () => {

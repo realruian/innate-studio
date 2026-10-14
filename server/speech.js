@@ -8,6 +8,7 @@
 import crypto from 'node:crypto';
 import { DOUBAO_SPEECH } from './config.js';
 import { HttpError } from './http.js';
+import { upstreamError } from './ark.js';
 import { speechKey } from './keys.js';
 
 const DOUBAO_OK = new Set([0, 20000000]);
@@ -28,8 +29,10 @@ export async function doubaoSpeech(text, speaker) {
   const failed = parts.find((part) => !DOUBAO_OK.has(Number(part?.code ?? 0)));
   if (!res.ok || failed) {
     const reason = failed?.message || parts[0]?.message || parts[0]?.error?.message || `HTTP ${res.status}`;
-    const hint = res.status === 401 || res.status === 403 ? '豆包语音的 API Key 无效，或账号未开通语音合成。' : '';
-    throw new HttpError(res.ok ? 502 : res.status, String(failed?.code || `http_${res.status}`), `${hint}豆包语音返回（${res.status}）：${reason}`);
+    // 出错的 code 可能夹在 200 的流里，这时状态码没有意义，按服务出错算。
+    const err = upstreamError('豆包语音', res.ok ? 502 : res.status, String(failed?.code || `http_${res.status}`), reason);
+    if (res.status === 401 || res.status === 403) err.message = '豆包语音的 API Key 无效，或账号未开通语音合成';
+    throw err;
   }
   const audio = Buffer.concat(parts.filter((part) => typeof part?.data === 'string' && part.data).map((part) => Buffer.from(part.data, 'base64')));
   if (!audio.length) throw new HttpError(502, 'bad_upstream_response', '豆包语音未返回音频');
@@ -84,8 +87,9 @@ export async function doubaoAudio(prompt) {
   }
   const data = await res.json().catch(() => null);
   if (!res.ok || !data?.audio) {
-    const hint = res.status === 401 || res.status === 403 ? '豆包语音的 API Key 无效，或账号未开通音频生成。' : '';
-    throw new HttpError(res.ok ? 502 : res.status, String(data?.code || `http_${res.status}`), `${hint}豆包语音返回（${res.status}）：${data?.message || '未返回音频'}`);
+    const err = upstreamError('豆包语音', res.ok ? 502 : res.status, String(data?.code || `http_${res.status}`), data?.message || '未返回音频');
+    if (res.status === 401 || res.status === 403) err.message = '豆包语音的 API Key 无效，或账号未开通音频生成';
+    throw err;
   }
   const seconds = Number(data.original_duration) || Number(data.duration) || 0;
   return { audio: Buffer.from(data.audio, 'base64'), usage: seconds > 0 ? { audio_seconds: seconds } : null };

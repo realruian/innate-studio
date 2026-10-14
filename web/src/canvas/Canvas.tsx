@@ -42,6 +42,8 @@ const CLIP_TYPE = 'application/x-innate-canvas';
 let copied: Clip | null = null;
 // 选中节点时下方输入面板大约占多高（屏幕上的像素）。把新节点挪进视野时给它留出位置。
 const PANEL_ROOM = 240;
+// 节点输入面板的宽度，和 styles.css 里的 .cnode-panel 一致。
+const PANEL_WIDTH = 680;
 // 拖动节点时，离别的节点的边线、中线多近就吸过去（屏幕上的像素）。
 const SNAP_REACH = 6;
 
@@ -245,9 +247,13 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
       const top = position.y * zoom + y;
       const height = (BOX_HEIGHT + TITLE_ROOM) * zoom;
       // 只挪刚好够的距离，原来在看的内容尽量留在视野里。左边要让开工具栏，上边要让开项目名和节点的操作条。
-      const right = left + width * zoom;
+      // 输入面板不跟着缩放，固定 680 宽、在节点下面居中，比窄的节点宽：左右要按两者里更宽的那个算，不然发送键会露在窗口外面。
+      const center = left + (width * zoom) / 2;
+      const half = Math.max((width * zoom) / 2, Math.min(PANEL_WIDTH, box.width - 48) / 2);
+      const nodeLeft = center - half;
+      const right = center + half;
       const bottom = top + height + PANEL_ROOM;
-      const dx = left < 96 ? 96 - left : right > box.width - 24 ? Math.max(box.width - 24 - right, 96 - left) : 0;
+      const dx = nodeLeft < 96 ? 96 - nodeLeft : right > box.width - 24 ? Math.max(box.width - 24 - right, 96 - nodeLeft) : 0;
       const dy = top < 96 ? 96 - top : bottom > box.height - 24 ? Math.max(box.height - 24 - bottom, 96 - top) : 0;
       if (dx || dy) flow.setViewport({ x: x + dx, y: y + dy, zoom }, { duration: reducedMotion() ? 0 : 280 });
     },
@@ -1388,6 +1394,8 @@ function Board({ id, onExit }: { id: string; onExit: () => void }) {
           nodes={shown}
           // 选中的节点不自动提到最上面：分组的框要一直垫在成员下面。
           elevateNodesOnSelect={false}
+          // 署名放到右上角：默认的右下角会压在靠右的节点输入面板的发送键上。
+          attributionPosition="top-right"
           edges={edges}
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}

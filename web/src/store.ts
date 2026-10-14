@@ -8,10 +8,13 @@ import type { AppInfo, Character, CreateType, HistoryItem, Kind, Skill, ViewId, 
 export class ApiError extends Error {
   status: number;
   code: string;
-  constructor(status: number, code: string, message: string) {
+  // 平台的原话（英文、带错误码）。message 是给人看的中文原因，detail 留给详情和排查。
+  detail: string;
+  constructor(status: number, code: string, message: string, detail = '') {
     super(message);
     this.status = status;
     this.code = code;
+    this.detail = detail;
   }
 }
 
@@ -38,7 +41,7 @@ export async function api<T = any>(method: string, url: string, body?: unknown, 
   }
   // 登录过期了（或者在别处改了密码）：回到登录页。
   if (res.status === 401 && data?.error?.code === 'login_required' && state.app.user) location.reload();
-  if (!res.ok) throw new ApiError(res.status, data?.error?.code || '', data?.error?.message || `请求失败（${res.status}）`);
+  if (!res.ok) throw new ApiError(res.status, data?.error?.code || '', data?.error?.message || `请求失败（${res.status}）`, data?.error?.detail || '');
   return data;
 }
 

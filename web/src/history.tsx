@@ -8,10 +8,11 @@ import { stopPlaying } from './playback.ts';
 import { VideoPlayer, AudioPlayer } from './player.tsx';
 import { Thumb } from './assets.tsx';
 import { Icon } from './ui/Icon.tsx';
-import { Segmented, SearchBox, tip, clipTip } from './ui/controls.tsx';
+import { Segmented, SearchBox, tip } from './ui/controls.tsx';
 import { toast, openModal, openMenu, confirmDialog, copyText } from './ui/layers.tsx';
 import { enter } from './ui/motion.ts';
-import { setForm, setStudio, useImageForVideo, useVideoForMusic } from './composer/state.ts';
+import { FailureState, explainFailure } from './ui/states.tsx';
+import { setForm, setStudio, submit, useImageForVideo, useVideoForMusic } from './composer/state.ts';
 import { openCharacterEditor } from './characters.tsx';
 import { IMAGE_QUALITY_LABELS, REFERENCE_MODE_LABEL, estimateCost } from '../../shared/models.ts';
 import type { CreateType, HistoryItem, Ref } from './types.ts';
@@ -69,7 +70,8 @@ async function removeItem(item: HistoryItem) {
   }
 }
 
-function reuse(item: HistoryItem) {
+// 把这条记录的参数填回创作页的输入框。
+function fill(item: HistoryItem) {
   // 画布的记号不跟着填回创作面板，不然下一次在创作页生成的也会被算成画布的。
   const { from: _from, ...rest } = item.form || {};
   const form = item.form && rest;
@@ -83,7 +85,20 @@ function reuse(item: HistoryItem) {
     setForm(Object.fromEntries(Object.entries(basics).filter(([, value]) => value != null)));
   }
   goTo('create');
+}
+
+function reuse(item: HistoryItem) {
+  fill(item);
   toast('已复用参数', 'success');
+}
+
+// 画布上生成的在画布里重跑，这里不给。
+const canRetry = (item: HistoryItem) => item.status === 'failed' && !isTimedOutTask(item) && !item.form?.from;
+
+// 失败的记录：用同样的参数再提交一次。结果是一条新记录，失败的那条留着，可以自己删。
+function retry(item: HistoryItem) {
+  fill(item);
+  submit();
 }
 
 async function refresh(item: HistoryItem) {
@@ -145,6 +160,7 @@ function openCardMenu(button: HTMLElement, id: string, scope: Scope) {
     refresh: () => refresh(item),
     recheck: () => recheck(item),
     reuse: () => reuse(item),
+    retry: () => retry(item),
     score: () => score(item),
     animate: () => animate(item),
     character: () => openCharacterEditor({ images: [item.mediaUrl!] }),
@@ -159,6 +175,7 @@ function openCardMenu(button: HTMLElement, id: string, scope: Scope) {
       // 图片、语音、音效没有任务可查，生成中只能等。
       isPendingTask(item) && !item.direct && { value: 'refresh', label: '刷新' },
       isTimedOutTask(item) && { value: 'recheck', label: '重新查询' },
+      canRetry(item) && { value: 'retry', label: '重新生成' },
       { value: 'reuse', label: '复用参数' },
       done(item) && item.kind === 'video' && { value: 'score', label: '配乐' },
       done(item) && item.kind === 'image' && { value: 'animate', label: '生成视频' },
@@ -200,14 +217,6 @@ function AudioView({ item, large }: { item: HistoryItem; large: boolean }) {
   return <AudioPlayer src={item.mediaUrl} kind={voice ? `${typeLabel(item)} · ${voice}` : typeLabel(item)} text={text} label={nameOf(item)} />;
 }
 
-// 平台返回的失败原因是英文的。认识的换成人话，并说一句可以怎么办；不认识的原样显示，只去掉末尾的请求编号。
-// 只登记实际遇到过的。
-const KNOWN_FAILURES: [RegExp, string][] = [[/output audio .*copyright/i, '音频涉及版权，未通过平台审核。请关闭「生成有声视频」后重试。']];
-function explainFailure(message?: string) {
-  if (!message) return '未知错误';
-  return KNOWN_FAILURES.find(([pattern]) => pattern.test(message))?.[1] || message.replace(/\s*Request id:.*$/i, '').trim();
-}
-
 function MediaBox({ item, large = false }: { item: HistoryItem; large?: boolean }) {
   if (done(item)) {
     if (item.kind === 'image') return <ImageView item={item} large={large} />;
@@ -215,18 +224,16 @@ function MediaBox({ item, large = false }: { item: HistoryItem; large?: boolean 
     return <VideoPlayer src={item.videoUrl} poster={large ? null : item.thumbUrl} size={large ? undefined : item.media} autoplay={large} hoverPlay={!large} fit={large} frameRatio={large ? null : 16 / 9} showLength={!large} label={item.prompt || '生成的视频'} />;
   }
   if (item.status === 'failed') {
-    const reason = explainFailure(item.error?.message);
+    // 标题带上类型，卡片上再写一行提示词：创作记录里各种失败排在一起时，才分得清是哪一条。详情里本来就有，不重复。
+    const timedOut = isTimedOutTask(item);
     return (
       <div className="card-state is-failed">
-        <span className="state-mark">
-          <Icon name="alert" size={18} />
-        </span>
-        <div className="state-title">{isTimedOutTask(item) ? '查询超时' : '生成失败'}</div>
-        {/* 原因最多两行，放不下的悬停看全文，点开详情也有。 */}
-        <div className="state-text" {...clipTip(reason)}>
-          {reason}
-        </div>
-        {item.kind === 'video' && !isTimedOutTask(item) && <div className="state-note">预扣额度将自动退回</div>}
+        <FailureState
+          title={timedOut ? '查询超时' : `${typeLabel(item)}生成失败`}
+          reason={item.error?.message}
+          extra={large ? null : item.prompt}
+          note={item.kind === 'video' && !timedOut ? '预扣额度将自动退回' : null}
+        />
       </div>
     );
   }
@@ -249,7 +256,7 @@ function MediaBox({ item, large = false }: { item: HistoryItem; large?: boolean 
 }
 
 // 画面要不要重画，看这几项有没有变。视频存到本机后地址会变，但画面不用重画：重画会打断正在播放的视频。
-const mediaSignature = (i: HistoryItem) => JSON.stringify([i.status, i.progress, Boolean(i.mediaUrl), i.error?.message, i.pollError]);
+const mediaSignature = (i: HistoryItem) => JSON.stringify([i.status, i.progress, Boolean(i.mediaUrl), i.error?.message, i.pollError, i.prompt]);
 const CardMedia = memo(
   ({ item }: { item: HistoryItem; signature: string }) => <MediaBox item={item} />,
   (before, after) => before.signature === after.signature,
@@ -403,7 +410,9 @@ function Detail({ item, close, nav }: { item: HistoryItem; close: () => void; na
   const facts = (
     [
       ['状态', STATUS_LABELS[item.status] || item.status],
-      ['失败原因', item.error ? `${item.error.message}${item.error.code ? `（${item.error.code}）` : ''}` : null],
+      ['失败原因', item.error && explainFailure(item.error.message)],
+      // 平台的原话：排查、找平台客服时用。老记录没有单独存，原因里拼着的就是。
+      ['平台返回', item.error && (item.error.detail || (explainFailure(item.error.message) !== item.error.message ? item.error.message : item.error.code))],
       [
         '任务 ID',
         <span className="mono copyable" {...tip('点击复制')} onClick={() => copyText(item.id, '已复制任务 ID')}>
@@ -444,6 +453,12 @@ function Detail({ item, close, nav }: { item: HistoryItem; close: () => void; na
         <a className="btn btn-primary" rel="noopener" {...downloadProps(item)}>
           下载{kindLabel}
         </a>
+      )}
+      {/* 失败的：「重新生成」是主按钮，占下载的位置。 */}
+      {canRetry(item) && (
+        <button className="btn btn-primary" type="button" onClick={() => (close(), retry(item))}>
+          重新生成
+        </button>
       )}
       {leaveTo('复用参数', reuse)}
       {done(item) && item.kind === 'video' && leaveTo('配乐', score)}

@@ -20,7 +20,7 @@ import {
   TYPES, typeOf, draftPrompt, specOf, hasLastFrame, imageRatios, imageSizes, imageQualities, imageRefLimit, currentRequest, currentCredits,
   update, setMode, swapFrames, updateStudio, setType, typePrompt, polish, undoPolish, submit, registerPrompt,
   voiceName, voiceNote, togglePreview, setVoiceFilter, pickVoice, stopPreview, useCharacter, activeSkill, setSkill,
-  addableKinds, mediaRoom, usedMediaUrls, addMedia, addFiles,
+  addableKinds, mediaRoom, usedMediaUrls, addMedia, addFiles, dismissSubmitError,
 } from './state.ts';
 
 type Mode = { value: VideoForm['mode']; label: string; icon: IconName; note: string };
@@ -665,6 +665,26 @@ function SendArea() {
   );
 }
 
+// 提交时被拒绝的原因：没有生成记录可以挂，就写在输入框下面。上面一行中文原因，下面一行平台的原话。
+function SubmitNotice() {
+  const ref = useRef<HTMLDivElement>(null);
+  const { submitError, submitDetail } = composer;
+  useOnChange(submitError, () => submitError && enter(ref.current, { y: -4, duration: 200 }));
+  if (!submitError) return null;
+  return (
+    <div ref={ref} className="submit-notice" role="alert">
+      <Icon name="alert" size={16} />
+      <div className="submit-notice-body">
+        <div>{submitError}</div>
+        {submitDetail && <div className="submit-notice-detail">{submitDetail}</div>}
+      </div>
+      <button className="icon-btn icon-btn-sm" type="button" aria-label="关闭" {...tip('关闭')} onClick={dismissSubmitError}>
+        <Icon name="x" size={14} />
+      </button>
+    </div>
+  );
+}
+
 export function Composer() {
   useStore('composer', 'app');
   const { studio } = composer;
@@ -821,6 +841,7 @@ export function Composer() {
           </div>
         </div>
       </div>
+      <SubmitNotice />
     </section>
   );
 }

@@ -109,7 +109,7 @@ export interface HistoryItem {
   downloadError?: string;
   pollError?: string;
   direct?: boolean;
-  error?: { message: string; code?: string };
+  error?: { message: string; code?: string; detail?: string };
   // 提交时发给接口的内容和当时的表单，字段随类型不同。
   payload?: Record<string, any>;
   form?: Record<string, any>;

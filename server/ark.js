@@ -33,12 +33,33 @@ export const ERROR_HINTS = {
   authorized_error: 'API Key 无效。请确认是 MiniMax 国内站（platform.minimax.cn）创建的 Key',
 };
 
+// 平台给的原因多半是英文，还带着状态码，直接摆在卡片上看不懂。
+// 所以拆成两半：message 是一句中文的原因，卡片和提示条只显示它；detail 是平台的原话，放进详情里，排查时再看。
+export function explainUpstream(name, status, code, raw) {
+  const known = ERROR_HINTS[code]
+    || (status === 402 ? `${name} 账户余额不足，请充值后重试` : '')
+    || (/audit|sensitive|moderation|censor/i.test(raw) ? '内容未通过审核，请修改提示词或参考素材后重试' : '');
+  const fallback = status === 401 || status === 403 ? `${name} 的 API Key 无效，或没有调用权限`
+    : status === 429 ? '请求过于频繁，请稍后重试'
+    : status >= 500 ? `${name} 服务暂时异常，请稍后重试`
+    : `${name} 拒绝了这次请求，请检查提示词和参数`;
+  const tag = !code || /^http_/.test(code) ? `HTTP ${status}` : code;
+  return { message: known || fallback, detail: `${name}（${tag}）：${raw}` };
+}
+
+export function upstreamError(name, status, code, raw, upstream) {
+  const { message, detail } = explainUpstream(name, status, code, raw);
+  const err = new HttpError(status, code, message, upstream);
+  err.detail = detail;
+  return err;
+}
+
 // 这几种错误都发生在连接建立之前，请求还没发出去，重试不会重复下单。
 const CONNECT_ERRORS = new Set(['UND_ERR_CONNECT_TIMEOUT', 'ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN']);
 const MAX_CONNECT_ATTEMPTS = 3;
 
 export function requireKey() {
-  if (!apiKey()) throw new HttpError(401, 'no_api_key', `请先在「设置」中配置 ${ARK.label} 的 API Key。`);
+  if (!apiKey()) throw new HttpError(401, 'no_api_key', `请先在「管理」中配置 ${ARK.label} 的 API Key。`);
 }
 
 export const callArk = (method, pathname, options) => callPlatform(ARK, apiKey(), method, pathname, options);
@@ -47,7 +68,7 @@ export const callMinimax = (method, pathname, options) => callPlatform(MINIMAX, 
 
 async function callPlatform(platform, key, method, pathname, { json, timeoutMs = 60000 } = {}) {
   const name = platform.label;
-  if (!key) throw new HttpError(401, 'no_api_key', `请先在「设置」中配置 ${name} 的 API Key。`);
+  if (!key) throw new HttpError(401, 'no_api_key', `请先在「管理」中配置 ${name} 的 API Key。`);
   if (!isUsableKey(key)) throw new HttpError(400, 'invalid_key', badKeyMessage(name));
 
   const headers = { Authorization: `Bearer ${key}` };
@@ -84,10 +105,8 @@ async function callPlatform(platform, key, method, pathname, { json, timeoutMs =
     const message = (typeof e === 'string' ? e : e?.message) || data?.message || `${name} 返回 ${res.status}`;
     // MiniMax 的错误没有 code，只有 type（authorized_error 这样）。
     const code = String((typeof e === 'object' && (e?.code || e?.type)) || data?.code || `http_${res.status}`);
-    // 402 各家都是余额不足（MiniMax 实际返回过：insufficient balance (1008)）。
-    const known = ERROR_HINTS[code] || (res.status === 402 ? `${name} 账户余额不足，请充值后重试` : '');
-    const hint = known ? `${known}。` : '';
-    throw new HttpError(res.status, code, `${hint}${name} 返回（${res.status}）：${message}`, data);
+    // 402 各家都是余额不足（MiniMax 实际返回过：insufficient balance (1008)），在 explainUpstream 里统一处理。
+    throw upstreamError(name, res.status, code, message, data);
   }
   return { status: res.status, data };
 }

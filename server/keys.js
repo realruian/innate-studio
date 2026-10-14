@@ -10,7 +10,7 @@ export const badKeyMessage = (name) => `API Key 格式不正确：包含中文�
 if (config[ARK.configKey] && !isUsableKey(config[ARK.configKey])) {
   delete config[ARK.configKey];
   saveConfig();
-  console.log(`之前保存的 ${ARK.label} API Key 含有非法字符，已清除，请在「设置」里重新填写。`);
+  console.log(`之前保存的 ${ARK.label} API Key 含有非法字符，已清除，请在「管理」里重新填写。`);
 }
 
 export const apiKey = () => process.env[ARK.envKey] || config[ARK.configKey] || '';
