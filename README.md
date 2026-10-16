@@ -8,8 +8,8 @@
   </picture>
 </p>
 
-### 本地优先、支持团队托管的 AIGC 多模态创作工作台
-*A local-first & team-ready multimodal generative AI workbench powered by Seedance 2.5/2.0, MiniMax H3, Seedream 5.0, GPT Image 2.5, Nano Banana 2.1, Doubao Speech & Infinite Node Canvas.*
+### A Local-First & Team-Ready Multimodal Generative AI Workbench
+*Powered by Seedance 2.5/2.0, MiniMax H3, Seedream 5.0, GPT Image 2.5, Nano Banana 2.1, Doubao Speech & Infinite Node Canvas.*
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22.18-339933?logo=node.js)](https://nodejs.org)
@@ -17,19 +17,21 @@
 [![Vite](https://img.shields.io/badge/Vite-8-646CFF?logo=vite)](https://vitejs.dev)
 [![Canvas](https://img.shields.io/badge/Canvas-React_Flow-FF0072)](https://reactflow.dev)
 
-[功能特性](#-功能特性) • [模型矩阵](#-多平台与模型矩阵) • [快速开始](#-快速开始) • [多人模式与部署](#-多人团队模式与部署) • [架构与存储](#-系统架构与数据存储) • [开发者指南](#-开发者指南)
+[English](README.md) | [简体中文](README.zh-CN.md)
+
+[Features](#-features) • [Model Matrix](#-multi-platform--model-matrix) • [Quick Start](#-quick-start) • [Team Mode & Deployment](#-team-mode--deployment) • [Architecture & Storage](#-system-architecture--data-storage) • [Developer Guide](#-developer-guide)
 
 </div>
 
 ---
 
-> **设计理念**：工作台美学（深度对标 Google Antigravity 2.0 与 OpenAI Codex）。**原生支持深浅双主题与跟随系统自适应切换**。侧栏纯粹导航，居中一体化创作输入框，全局采用低对比层次与系统无衬线排版。界面本身保持克制中性，将所有视觉焦点留给生成内容本身。
+> **Design Philosophy**: Workbench aesthetics inspired by Google Antigravity 2.0 and OpenAI Codex. **Native support for light and dark themes with automatic system-preference switching.** Clean sidebar navigation, a unified centered creation composer, low-contrast visual hierarchy, and system sans-serif typography keep the interface restrained and neutral so all visual focus stays on your generated content.
 
 ---
 
-## 📸 界面预览
+## 📸 Screenshots
 
-> 🌗 **自适应双色主题**：下方配图会根据您当前 GitHub 的浅色 / 深色模式自动切换。
+> 🌗 **Adaptive Dual Theme**: The screenshots below automatically switch between light and dark modes based on your GitHub appearance settings.
 
 <p align="center">
   <picture>
@@ -38,7 +40,7 @@
     <img src="docs/screenshots/workbench-light.png" alt="Innate Studio Workbench" width="100%">
   </picture>
 </p>
-<p align="center"><em>多模态创作工作台：视频、图片、语音、音效、配乐五合一输入框与最近生成流</em></p>
+<p align="center"><em>Multimodal Creation Workbench: 5-in-1 composer for Video, Image, Speech, SFX, and Music alongside the recent generation feed</em></p>
 
 <br />
 
@@ -49,219 +51,219 @@
     <img src="docs/screenshots/canvas-light.png" alt="Innate Studio Infinite Canvas" width="100%">
   </picture>
 </p>
-<p align="center"><em>无限节点画布（React Flow）：文本、图片、视频、音频多节点自由拓扑、@ 引用与工作流复用</em></p>
+<p align="center"><em>Infinite Node Canvas (React Flow): Freeform topology across Text, Image, Video, and Audio nodes with @-mentions and reusable workflows</em></p>
 
 ---
 
-## ✨ 功能特性
+## ✨ Features
 
-### 1. 🌌 无限节点画布 (Infinite Node Canvas)
-- **全要素自由拓扑**：基于 `@xyflow/react` 构建，提供**文本、图片、视频、音频**四种原生节点，支持拖拽连线驱动生成：
-  - **文本 ➔ 视频 / 图片 / 音频**：传递为生成提示词，或驱动下游文本节点继续扩写。
-  - **图片 ➔ 视频**：作为全能参考图、首帧或尾帧。
-  - **图片 ➔ 图片**：多参考图融合与图生图迭代。
-  - **视频 / 音频 ➔ 视频**：作为全能参考素材（动作、运镜、节奏或参考音）。
-- **提示词 `@` 引用与 `/` 斜杠预设**：
-  - 在画布输入面板中输入 `@` 即可将已连接的上游节点（如 `@图片 1`、`@文本 1`）插入提示词并原地高亮；悬停参考格即可双向定位上游节点与连线。
-  - 图片节点支持 `/` 斜杠预设（多机位九宫格、剧情推演四宫格、角色三视图、角色设定图、画面推演、电影级光影、故事板）。
-- **视频续拍与图像本地工具**：
-  - **视频节点**：支持一键截取当前帧 / 首帧 / 尾帧为图片节点，或一键「接着拍」（自动截取尾帧并串联新视频节点续拍）。
-  - **图片节点**：内置交互式自由/定比裁剪、2×2 / 3×3 / 4×4 宫格切图（配合九宫格预设快速拆镜）以及按比例 AI 扩图。
-- **分组执行、工作流与堆叠收纳**：
-  - 支持框选批量操作（批量生成、对齐分布、打组 `⌘G`、堆叠收纳、跨画布复制粘贴）；
-  - 分组支持一键「执行整组」（按连线拓扑从上游到下游依次生成）与「存为工作流」跨项目复用；
-  - 支持四色节点标记与顶栏汇总跳转、自动拓扑整理节点及参考线磁吸对齐。
+### 1. 🌌 Infinite Node Canvas
+- **Freeform Multimodal Topology**: Built on `@xyflow/react` with four native node types—**Text, Image, Video, and Audio**—allowing drag-and-connect pipelines to drive generation:
+  - **Text ➔ Video / Image / Audio**: Pass text as generation prompts, or chain into downstream text nodes for expansion and refinement.
+  - **Image ➔ Video**: Supply omni-reference images, start frames, or end frames.
+  - **Image ➔ Image**: Multi-reference fusion and iterative image-to-image generation.
+  - **Video / Audio ➔ Video**: Feed omni-reference assets (motion, camera work, pacing, or reference audio).
+- **Prompt `@` Mentions & `/` Slash Presets**:
+  - Type `@` in the canvas composer to insert connected upstream nodes (e.g., `@Image 1`, `@Text 1`) with inline highlighting; hover over reference chips to locate upstream nodes and edges bidirectionally.
+  - Image nodes support `/` slash presets (multi-angle 3×3 grid, story progression 2×2 grid, character turnaround sheet, character design sheet, visual progression, cinematic lighting, and storyboard).
+- **Video Continuation & Local Image Tools**:
+  - **Video Nodes**: Extract the current frame, first frame, or last frame into a new image node with one click, or click "Continue Shot" to automatically grab the last frame and chain a new video node.
+  - **Image Nodes**: Built-in interactive freeform/aspect-locked cropping, 2×2 / 3×3 / 4×4 grid slicing (ideal for splitting multi-shot grids), and aspect-ratio AI outpainting.
+- **Group Execution, Workflows & Stack Organization**:
+  - Box-select batch actions (batch generate, align/distribute, group `⌘G`, stack/collapse, and cross-canvas copy & paste);
+  - Execute an entire group in topological order from upstream to downstream, or save a group as a reusable workflow across projects;
+  - Four-color node tags with top-bar quick jump, automatic topological layout, and magnetic alignment guides.
 
-### 2. 🎥 全模态创作矩阵 (Multimodal Workbench)
-- **电影级视频生成 (Video)**：
-  - **Seedance 2.5 / 2.0 / 2.0 Fast / 2.0 Mini**（火山方舟）：支持文生视频、首尾帧控制、全能参考（最多 9 张图片 + 3 段视频 + 3 段本机音频混合输入），Seedance 2.5 最长支持 30 秒生成，2.0 支持最高 4K 分辨率。
-  - **MiniMax H3 / H3 Max**（MiniMax 开放平台）：支持 480P / 768P / 2K 视频生成、首尾帧与全能参考输入。
-- **专业图像生成 (Image)**：
-  - **Seedream 5.0 Pro / Flash / 标准版**（火山方舟）：支持 1K / 1.5K / 2K / 3K / 4K 多档分辨率与最高 14 张参考图输入。
-  - **GPT Image 2.5 (Sunburst / Flare)** & **Nano Banana 2.1**（AiHubMix）：支持最高 4K 分辨率、多档画质控制与最多 16 张参考图输入。
-- **全链路声音生成 (Speech, SFX & Music)**：
-  - **自然语音合成 (TTS)**：基于豆包语音合成 2.0（`Seed-TTS 2.0`），内置中英及多语种音色筛选与实时试听。
-  - **环境音效 (SFX)** & **智能配乐 (Music)**：基于豆包音频生成 1.0（`Seed-Audio 1.0`），支持按描述生成拟真音效，或上传视频自动生成配乐并在播放器中声画同轨预览。
+### 2. 🎥 Multimodal Workbench
+- **Cinematic Video Generation (Video)**:
+  - **Seedance 2.5 / 2.0 / 2.0 Fast / 2.0 Mini** (Volcengine Ark): Supports text-to-video, first/last frame control, and omni-reference inputs (mix up to 9 images + 3 videos + 3 local audio clips). Seedance 2.5 supports up to 30-second clips; 2.0 supports up to 4K resolution.
+  - **MiniMax H3 / H3 Max** (MiniMax Platform): Supports 480P / 768P / 2K video generation, first/last frame control, and omni-reference inputs.
+- **Professional Image Generation (Image)**:
+  - **Seedream 5.0 Pro / Flash / Standard** (Volcengine Ark): Supports 1K / 1.5K / 2K / 3K / 4K resolution tiers and up to 14 reference images.
+  - **GPT Image 2.5 (Sunburst / Flare)** & **Nano Banana 2.1** (AiHubMix): Supports up to 4K resolution, multiple quality tiers, and up to 16 reference images.
+- **End-to-End Audio Generation (Speech, SFX & Music)**:
+  - **Natural Text-to-Speech (TTS)**: Powered by Doubao Speech Synthesis 2.0 (`Seed-TTS 2.0`), with built-in Chinese, English, and multilingual voice filtering and instant preview.
+  - **Sound Effects (SFX)** & **AI Soundtrack (Music)**: Powered by Doubao Audio Generation 1.0 (`Seed-Audio 1.0`), supporting text-to-SFX or uploading a video to automatically score and preview synchronized audio-video playback.
 
-### 3. 🎭 角色库与提示词技能 (Characters & Skills)
-- **角色一致性档案**：持久化保存角色名称、外貌描述与最多 6 张参考图；创作时一键带入参考图与外貌描述，保持多镜头角色形象稳定。
-- **提示词技能库 (Skills)**：内置「多镜头成片」「角色设定图」「分镜首帧」等官方技能，支持创建自定义技能与标签筛选。
-- **模型自适应润色**：基于 `Doubao Seed 2.1` 文本模型，根据当前所选生成模型（Seedance 2.5 时间戳分镜规范、Seedance 2.0 运镜与音效标记、Seedream 图生图指令、语音朗读断句规范、音效/配乐描述规范）精准改写提示词，并支持一键撤销。
+### 3. 🎭 Character Library & Prompt Skills
+- **Character Consistency Profiles**: Persistently store character names, appearance descriptions, and up to 6 reference images; inject references and traits into any prompt with a single click for multi-shot consistency.
+- **Prompt Skills Library**: Ships with official skills ("Multi-Shot Sequence", "Character Concept Sheet", "Storyboard First Frame", etc.) plus custom skill creation and tag filtering.
+- **Model-Adaptive Prompt Polish**: Powered by `Doubao Seed 2.1`, tailoring prompt rewrites to the active model's conventions (Seedance 2.5 timestamped shot breakdown, Seedance 2.0 camera & audio cues, Seedream image-to-image directives, TTS phrasing rules, and SFX/music descriptors) with one-click undo.
 
-### 4. 👥 本机优先与多人团队双模式 (Local-First & Team Hosted)
-- **本机模式（默认）**：零外部运行时依赖，无需登录，所有配置、生成记录与媒体文件 100% 存储在本地 `data/` 目录。
-- **多人团队模式**：通过命令行创建账号后自动启用登录认证与多租户空间隔离：
-  - **数据隔离**：每位成员的创作记录、画布、角色、技能与媒体文件独立存储。
-  - **积分核算**：`1 积分 = 0.01 元`（按官方目录价 1:1 折算），提交时预扣积分、完成后按实际用量多退少补、失败全额自动退回。
-  - **权限分层**：「设置」与「管理」分离——API Key、三方平台余额（火山引擎 / MiniMax / AiHubMix）、平台原始报错及成员积分管理仅对管理员可见。
+### 4. 👥 Local-First & Team Hosted Modes
+- **Local Mode (Default)**: Zero external runtime dependencies and no login required. All configuration, generation history, and media assets are stored 100% locally in the `data/` directory.
+- **Team Mode**: Creating user accounts via the CLI automatically enables authentication and multi-tenant workspace isolation:
+  - **Data Isolation**: Each member's generation history, canvases, characters, skills, and media files are stored in isolated per-user spaces.
+  - **Credit Accounting**: `1 credit = ¥0.01 CNY` (mapped 1:1 to official list prices). Credits are pre-authorized on submission, reconciled against actual token/second usage upon completion, and automatically refunded in full on failure.
+  - **Role Separation**: "Settings" and "Admin" are strictly separated—API keys, third-party provider balances (Volcengine / MiniMax / AiHubMix), raw upstream errors, and member credit management are visible only to administrators.
 
 ---
 
-## ⚖️ 多平台与模型矩阵
+## ⚖️ Multi-Platform & Model Matrix
 
-Innate Studio 以**火山引擎**为主线，同时接入 **MiniMax** 与 **AiHubMix**。各平台 API Key 在侧栏底部的「管理」面板（或环境变量）中独立配置，配好哪个即可使用对应模型：
+Innate Studio centers on **Volcengine** while integrating **MiniMax** and **AiHubMix**. Provider API keys can be configured independently in the bottom-left **Admin** panel (or via environment variables)—enable whichever providers you need:
 
-| 平台 | 配置项 / 环境变量 | 涵盖能力 | 支持模型 |
+| Provider | Config Key / Env Variable | Capabilities | Supported Models |
 | :--- | :--- | :--- | :--- |
-| **火山方舟** | `ARK_API_KEY` | 视频生成、图片生成、提示词润色、画布文本节点 | `Seedance 2.5`、`Seedance 2.0 / Fast / Mini`<br>`Seedream 5.0 Pro / Flash / 5.0`<br>`Seed 2.1 Lite / Turbo / Pro` |
-| **豆包语音** | `DOUBAO_SPEECH_API_KEY` | 语音合成 (TTS)、环境音效 (SFX)、视频配乐 (Music) | `Seed-TTS 2.0`<br>`Seed-Audio 1.0` |
-| **MiniMax** | `MINIMAX_CN_API_KEY` | 视频生成（文生视频、首尾帧、全能参考） | `MiniMax H3`、`MiniMax H3 Max` |
-| **AiHubMix** | `AIHUBMIX_API_KEY`<br>`AIHUBMIX_MANAGE_KEY`*(查余额)* | 图片生成（文生图、多图参考）、账户余额查询 | `GPT Image 2.5 Sunburst`<br>`GPT Image 2.5 Flare`<br>`Nano Banana 2.1` |
-| **火山费用中心** | `VOLC_ACCESS_KEY_ID`<br>`VOLC_SECRET_ACCESS_KEY` | 火山引擎账户实时余额查询 | — |
+| **Volcengine Ark** | `ARK_API_KEY` | Video generation, image generation, prompt polishing, canvas text nodes | `Seedance 2.5`, `Seedance 2.0 / Fast / Mini`<br>`Seedream 5.0 Pro / Flash / 5.0`<br>`Seed 2.1 Lite / Turbo / Pro` |
+| **Doubao Speech** | `DOUBAO_SPEECH_API_KEY` | Text-to-Speech (TTS), Sound Effects (SFX), Video Music (Music) | `Seed-TTS 2.0`<br>`Seed-Audio 1.0` |
+| **MiniMax** | `MINIMAX_CN_API_KEY` | Video generation (T2V, first/last frame, omni-reference) | `MiniMax H3`, `MiniMax H3 Max` |
+| **AiHubMix** | `AIHUBMIX_API_KEY`<br>`AIHUBMIX_MANAGE_KEY` *(balance)* | Image generation (T2I, multi-image reference), account balance | `GPT Image 2.5 Sunburst`<br>`GPT Image 2.5 Flare`<br>`Nano Banana 2.1` |
+| **Volcengine Billing** | `VOLC_ACCESS_KEY_ID`<br>`VOLC_SECRET_ACCESS_KEY` | Real-time Volcengine account balance query | — |
 
 ---
 
-## 🚀 快速开始
+## 🚀 Quick Start
 
-### 运行环境
-- **Node.js**：`>= 22.18`（服务端直接使用 Node.js 原生支持运行共享的 TypeScript 模型定义文件 `shared/models.ts`）
+### Prerequisites
+- **Node.js**: `>= 22.18` (the server runs the shared TypeScript model definitions `shared/models.ts` directly via native Node.js TypeScript support)
 
-### 安装与启动（本机模式）
+### Installation & Launch (Local Mode)
 
 ```bash
-# 1. 克隆仓库
+# 1. Clone the repository
 git clone https://github.com/realruian/innate-studio.git
 cd innate-studio
 
-# 2. 安装依赖、构建前端并启动服务
+# 2. Install dependencies, build the frontend, and start the server
 npm install
 npm start
 ```
 
-启动后在浏览器打开：**`http://127.0.0.1:5178`**。点击左下角「管理」即可填写各平台 API Key。
+Once started, open **`http://127.0.0.1:5178`** in your browser. Click **Admin** in the bottom-left corner to configure your provider API keys.
 
-> 💡 **环境变量注入（无痕模式）**：若不想在 `data/config.json` 中落盘保存密钥，可通过环境变量直接启动：
+> 💡 **Environment Variable Injection (Stateless Keys)**: If you prefer not to persist API keys in `data/config.json`, pass them via environment variables at launch:
 > ```bash
 > ARK_API_KEY=... DOUBAO_SPEECH_API_KEY=... MINIMAX_CN_API_KEY=... AIHUBMIX_API_KEY=... npm start
 > ```
-> 如需修改监听端口或数据目录：
+> To customize the listening port or data directory:
 > ```bash
 > PORT=5180 INNATE_DATA_DIR=/path/to/data npm start
 > ```
 
 ---
 
-## 👥 多人团队模式与部署
+## 👥 Team Mode & Deployment
 
-当数据目录中存在至少一个账号时，服务会自动从「本机模式」切换为「多人模式」，要求登录后访问。
+When at least one user account exists in the data directory, the server automatically switches from **Local Mode** to **Team Mode**, requiring authentication to access the workbench.
 
-### 账号与积分管理 CLI (`npm run user`)
+### Account & Credit Management CLI (`npm run user`)
 
-> ⚠️ **注意**：在执行 `npm run user` 修改账号前请先停止正在运行的服务，或确保修改后账号状态同步。首个管理员账号只能通过命令行创建。
+> ⚠️ **Note**: Stop the running server before modifying accounts via `npm run user`, or ensure account state stays synchronized. The initial administrator account must be created via the CLI.
 
 ```bash
-# 创建首个管理员账号，并将原本机模式下的数据迁移至该账号名下
+# Create the first admin account and migrate existing local-mode data to this user
 npm run user -- add alice --admin --with-local-data
 
-# 创建普通成员账号（可指定密码，不指定则随机生成一次性初始密码）
-npm run user -- add bob --password <密码>
+# Create a regular member account (specify a password, or omit to generate a one-time initial password)
+npm run user -- add bob --password <password>
 
-# 为成员发放积分（100 积分 = 1 元，支持负数扣回）
+# Grant credits to a member (100 credits = 1 CNY; negative values deduct credits)
 npm run user -- grant bob 5000
 
-# 重置成员密码
+# Reset a member's password
 npm run user -- reset bob
 
-# 查看所有账号状态与积分余额
+# List all accounts, statuses, and credit balances
 npm run user -- list
 ```
 
-管理员登录后，也可直接在界面左下角「管理 ➔ 成员」中新建成员、发放积分、重置密码或停用账号，并查看团队总积分与当月总用量。
+Once logged in, administrators can also create members, grant credits, reset passwords, or deactivate accounts directly from **Admin ➔ Members** in the bottom-left corner, as well as inspect total team credits and monthly usage.
 
-### 服务器生产部署 (`deploy/`)
+### Production Server Deployment (`deploy/`)
 
-仓库 `deploy/` 目录内置了开箱即用的生产环境配置模板：
-- [`deploy/env.example`](deploy/env.example)：服务器环境变量密钥配置文件模板（建议置于 `/etc/innate-studio.env` 并设置 `chmod 600`）。
-- [`deploy/innate-studio.service`](deploy/innate-studio.service)：`systemd` 守护进程配置（含 `ProtectSystem=strict` 等最小权限沙箱隔离）。
-- [`deploy/Caddyfile`](deploy/Caddyfile)：Caddy 反向代理与自动 HTTPS 证书配置（转发至 `127.0.0.1:5178`，放开 70MB 请求体上限以支持 64MB 参考素材上传）。
+Ready-to-use production configuration templates are provided under `deploy/`:
+- [`deploy/env.example`](deploy/env.example): Environment variable template for server secrets (recommended at `/etc/innate-studio.env` with `chmod 600`).
+- [`deploy/innate-studio.service`](deploy/innate-studio.service): `systemd` service unit with least-privilege sandboxing (`ProtectSystem=strict`, etc.).
+- [`deploy/Caddyfile`](deploy/Caddyfile): Caddy reverse proxy and automatic HTTPS configuration (forwards to `127.0.0.1:5178` with a 70MB request body limit to support 64MB reference uploads).
 
 ---
 
-## 🧱 系统架构与数据存储
+## 🧱 System Architecture & Data Storage
 
-### 架构全景
+### Architecture Overview
 
 ```mermaid
 flowchart TD
-    subgraph Client["前端层 (React 19 + TypeScript + Vite 8)"]
-        UI["多模态创作工作台 & 详情播放器"]
-        Canvas["React Flow 无限节点画布"]
-        AdminUI["按需加载的管理面板 & 消费/积分明细"]
+    subgraph Client["Frontend Layer (React 19 + TypeScript + Vite 8)"]
+        UI["Multimodal Workbench & Detail Player"]
+        Canvas["React Flow Infinite Node Canvas"]
+        AdminUI["Lazy-Loaded Admin Panel & Usage/Credit Ledger"]
     end
 
-    subgraph Core["本地/托管服务层 (Node.js 零外部依赖网关)"]
-        Server["server.js + server/ 模块化路由"]
-        Auth["auth.js / spaces.js / credits.js (账号、多租户与积分账本)"]
-        Registry["shared/models.ts (统一模型规范、计费估算与润色规则)"]
+    subgraph Core["Local / Hosted Server Layer (Zero-Dependency Node.js Gateway)"]
+        Server["server.js + server/ Modular Routes"]
+        Auth["auth.js / spaces.js / credits.js (Auth, Multi-Tenancy & Credit Ledger)"]
+        Registry["shared/models.ts (Unified Model Specs, Pricing & Prompt Polish Rules)"]
     end
 
-    subgraph Cloud["云端模型生态"]
-        Ark["火山方舟 (Seedance / Seedream / Doubao Seed)"]
-        Speech["豆包语音 (Seed-TTS 2.0 / Seed-Audio 1.0)"]
-        MM["MiniMax 开放平台 (MiniMax H3)"]
+    subgraph Cloud["Cloud Model Ecosystem"]
+        Ark["Volcengine Ark (Seedance / Seedream / Doubao Seed)"]
+        Speech["Doubao Speech (Seed-TTS 2.0 / Seed-Audio 1.0)"]
+        MM["MiniMax Platform (MiniMax H3)"]
         AHM["AiHubMix (GPT Image 2.5 / Nano Banana 2.1)"]
     end
 
-    subgraph Storage["持久化存储 (data/)"]
+    subgraph Storage["Persistent Storage (data/)"]
         Global["config.json / users.json / credits.jsonl"]
-        Space["单人根目录 或 users/<id>/ 独立空间"]
+        Space["Single-User Root or Isolated users/<id>/ Space"]
         Media["videos/ images/ audio/ uploads/ thumbs/"]
     end
 
-    Client -->|同源 HTTP API & 媒体流| Core
+    Client -->|Same-Origin HTTP API & Media Streams| Core
     Core --> Auth
     Core --> Registry
     Core --> Ark & Speech & MM & AHM
     Core --> Storage
 ```
 
-### 数据目录规范 (`data/`)
+### Data Directory Layout (`data/`)
 
-所有应用数据均保存在 `data/` 目录（可通过 `INNATE_DATA_DIR` 自定义）：
+All application state is persisted inside `data/` (customizable via `INNATE_DATA_DIR`):
 
-| 文件 / 目录 | 内容说明 |
+| File / Directory | Description |
 | :--- | :--- |
-| `data/config.json` | 平台 API Key 与计费配置（环境变量优先） |
-| `data/users.json` / `sessions.json` | 多人模式下的账号信息（scrypt 加盐散列）与登录会话 |
-| `data/credits.jsonl` | 多人模式下的积分变动流水账本（发放、预扣、结算、退回） |
-| `data/users/<id>/` | 多人模式下每位成员的独立数据空间（结构与下方单人模式一致） |
-| `data/history.json` | 历史生成任务、参数、用量及状态记录 |
-| `data/canvases.json` | 无限画布工程数据（节点拓扑、连线、分组、堆叠与视口状态） |
-| `data/workflows.json` | 画布中保存的可复用节点工作流模板 |
-| `data/characters.json` | 角色库档案（名称、外貌设定及参考图关联） |
-| `data/skills.json` | 用户自定义的提示词工程技能 |
-| `data/videos/` `images/` `audio/` | 生成完成自动落盘保存的视频、图像与音频文件 |
-| `data/uploads/` `thumbs/` | 用户上传的参考素材与自动生成的列表缩略图 |
+| `data/config.json` | Provider API keys and billing configuration (environment variables take precedence) |
+| `data/users.json` / `sessions.json` | Team-mode user accounts (salted `scrypt` password hashes) and active login sessions |
+| `data/credits.jsonl` | Append-only credit transaction ledger (grants, pre-authorizations, settlements, refunds) |
+| `data/users/<id>/` | Per-member isolated workspace in Team Mode (mirrors the single-user layout below) |
+| `data/history.json` | Generation task history, parameters, token/credit usage, and status records |
+| `data/canvases.json` | Infinite canvas projects (node topology, edges, groups, stacks, and viewport state) |
+| `data/workflows.json` | Reusable node workflow templates saved from the canvas |
+| `data/characters.json` | Character library profiles (names, appearance traits, and linked reference images) |
+| `data/skills.json` | User-defined custom prompt engineering skills |
+| `data/videos/` `images/` `audio/` | Automatically persisted video, image, and audio outputs |
+| `data/uploads/` `thumbs/` | User-uploaded reference assets and automatically generated list thumbnails |
 
 ---
 
-## 🛠️ 开发者指南
+## 🛠️ Developer Guide
 
-### 常用命令
+### Common Commands
 
 ```bash
-# 启动 Vite 前端热更新开发服务器（API 代理至 127.0.0.1:5178）
+# Start Vite frontend HMR dev server (proxies API requests to 127.0.0.1:5178)
 npm run dev
 
-# 仅运行 TypeScript 类型检查
+# Run TypeScript type checking only
 npm run typecheck
 
-# 运行全套自动化测试（含类型检查、模型与计费单测、画布逻辑、接口与多人模式测试、CSS 规范检查）
+# Run the full automated test suite (typecheck, model & billing unit tests, canvas logic, API & team mode tests, CSS lint)
 npm test
 
-# 启动带本地 Mock 服务的独立测试环境（端口 5179，无需真实 API Key 与 Token 消耗）
+# Start a standalone mock environment on port 5179 (no real API keys or token spend required)
 npm run dev:mock
 
-# 运行深浅双主题全页面 UI 自动化走查脚本
+# Run the automated light/dark full-page UI walkthrough script
 npm run walkthrough
 ```
 
-### 视觉走查与设计规范
-本项目遵循严格的界面视觉与交互规范（色彩 Token、六档字号阶梯、间距阶梯、自绘无原生控件体系）。修改界面组件或样式前请务必阅读 **[DESIGN.md](DESIGN.md)**，提交前请确保 `npm test` 全部通过。
+### Visual Walkthrough & Design System
+This project follows strict UI and interaction guidelines (color tokens, 6-step type scale, spacing scale, and custom-drawn native-free controls). Please read **[DESIGN.md](DESIGN.md)** before modifying UI components or styles, and ensure `npm test` passes before committing.
 
 ---
 
-## 📄 开源许可与致谢
+## 📄 License & Acknowledgements
 
-- 核心代码基于 [MIT 许可证](LICENSE) 开源。
-- 图标采用 [Hugeicons](https://hugeicons.com/)（MIT 许可证）与 [Lucide](https://lucide.dev/)（ISC 许可证），画布基于 [React Flow](https://reactflow.dev/)（MIT 许可证），详见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
+- Core source code is licensed under the [MIT License](LICENSE).
+- Icons are provided by [Hugeicons](https://hugeicons.com/) (MIT License) and [Lucide](https://lucide.dev/) (ISC License), and the node canvas is built on [React Flow](https://reactflow.dev/) (MIT License). See [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) for details.
